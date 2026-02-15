@@ -37,6 +37,7 @@ contract BatchSettler {
         uint256 vaultId
     );
     event VaultSettleFailed(address indexed vaultOwner, uint256 vaultId, bytes reason);
+    event RedeemFailed(address indexed oToken, uint256 amount, bytes reason);
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
 
     error OnlyOwner();
@@ -44,6 +45,7 @@ contract BatchSettler {
     error InvalidAddress();
     error InvalidAmount();
     error LengthMismatch();
+    error PremiumTooSmall();
     error QuoteInvalid();
 
     modifier onlyOwner() {
@@ -97,24 +99,25 @@ contract BatchSettler {
         (uint256 bidPrice, , , , bool isValid) = ps.getQuote(oToken);
         if (!isValid) revert QuoteInvalid();
 
-        // 2. Fill capacity on PriceSheet in oToken units (reverts if expired or exceeded)
+        // 2. Calculate premium early to fail fast on truncation
+        uint256 premium = (amount * bidPrice) / 1e8;
+        if (premium == 0 && bidPrice > 0) revert PremiumTooSmall();
+
+        // 3. Fill capacity on PriceSheet in oToken units (reverts if expired or exceeded)
         ps.fillQuote(oToken, amount);
 
-        // 3. Open vault for user
+        // 4. Open vault for user
         vaultId = ctrl.openVault(msg.sender);
 
-        // 4. Deposit user's collateral
+        // 5. Deposit user's collateral
         address collateralAsset = OToken(oToken).collateralAsset();
         ctrl.depositCollateral(msg.sender, vaultId, collateralAsset, collateral);
 
-        // 5. Mint oTokens to user
+        // 6. Mint oTokens to user
         ctrl.mintOtoken(msg.sender, vaultId, oToken, amount);
 
-        // 6. Transfer oTokens from user to operator (MM)
+        // 7. Transfer oTokens from user to operator (MM)
         IERC20(oToken).safeTransferFrom(msg.sender, operator, amount);
-
-        // 7. Calculate premium: amount (8 dec) * bidPrice (per 1 oToken) / 1e8
-        uint256 premium = (amount * bidPrice) / 1e8;
 
         // 8. Transfer premium from operator (MM) to user
         address premiumAsset = OToken(oToken).strikeAsset();
@@ -148,6 +151,7 @@ contract BatchSettler {
      * @notice Redeem oTokens in batch after expiry. Caller must have approved this
      *         contract for each oToken. Pulls oTokens from caller, redeems via
      *         Controller, and forwards the payout to caller.
+     *         Individual failures return oTokens and emit RedeemFailed events.
      */
     function batchRedeem(address[] calldata oTokens, uint256[] calldata amounts) external {
         if (oTokens.length != amounts.length) revert LengthMismatch();
@@ -163,13 +167,16 @@ contract BatchSettler {
                 address collateralAsset = OToken(oTokens[i]).collateralAsset();
                 uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
 
-                // Redeem (burns from this contract, payout to this contract)
-                ctrl.redeem(oTokens[i], amounts[i]);
-
-                // Forward payout to caller
-                uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
-                if (payout > 0) {
-                    IERC20(collateralAsset).safeTransfer(msg.sender, payout);
+                try ctrl.redeem(oTokens[i], amounts[i]) {
+                    // Forward payout to caller
+                    uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+                    if (payout > 0) {
+                        IERC20(collateralAsset).safeTransfer(msg.sender, payout);
+                    }
+                } catch (bytes memory reason) {
+                    // Return oTokens to caller since redemption failed
+                    IERC20(oTokens[i]).safeTransfer(msg.sender, amounts[i]);
+                    emit RedeemFailed(oTokens[i], amounts[i], reason);
                 }
             }
         }
