@@ -22,11 +22,11 @@ contract PriceSheet {
     address public operator; // The MM
 
     struct Quote {
-        uint256 bidPrice;      // premium MM pays per 1 oToken (1e8) — in USDC (6 decimals)
-        uint256 askPrice;      // premium MM charges per 1 oToken (1e8) — in USDC (6 decimals)
+        uint256 bidPrice;      // premium MM pays per 1 oToken (1e8) — in strike asset units
+        uint256 askPrice;      // premium MM charges per 1 oToken (1e8) — in strike asset units
         uint256 deadline;      // unix timestamp when this quote expires
-        uint256 maxAmount;     // max capacity in collateral units
-        uint256 filledAmount;  // amount already filled in collateral units
+        uint256 maxAmount;     // max oToken capacity (8 decimals)
+        uint256 filledAmount;  // oToken amount already filled (8 decimals)
     }
 
     /// @notice oToken address → current quote
@@ -116,7 +116,7 @@ contract PriceSheet {
     /**
      * @notice Fill a quote's capacity. Only callable by the BatchSettler.
      * @param oToken  The oToken being filled
-     * @param amount  Amount to fill (in collateral units)
+     * @param amount  Amount to fill (in oToken units, 8 decimals)
      */
     function fillQuote(address oToken, uint256 amount) external {
         if (msg.sender != addressBook.batchSettler()) revert OnlyBatchSettler();
@@ -151,8 +151,8 @@ contract PriceSheet {
      * @notice Get a quote for an oToken and whether it's still valid.
      * @return bidPrice      Bid price (0 if no quote or expired)
      * @return askPrice      Ask price (0 if no quote or expired)
-     * @return maxAmount     Max capacity in collateral units
-     * @return filledAmount  Amount already filled
+     * @return maxAmount     Max oToken capacity (8 decimals, 0 if no quote or expired)
+     * @return filledAmount  oToken amount already filled (8 decimals, 0 if no quote or expired)
      * @return isValid       True if quote exists and hasn't expired
      */
     function getQuote(address oToken)

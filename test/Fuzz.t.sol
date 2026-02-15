@@ -348,7 +348,7 @@ contract BatchSettlerFuzzTest is Test {
         whitelist.whitelistOToken(oToken);
 
         vm.prank(mm);
-        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, count * 2000e6);
+        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, count * 1e8);
 
         for (uint256 i = 0; i < count; i++) {
             address userAddr = address(uint160(0xF000 + i));
@@ -376,7 +376,7 @@ contract BatchSettlerFuzzTest is Test {
         whitelist.whitelistOToken(oToken);
 
         vm.prank(mm);
-        priceSheet.publishQuote(oToken, bidPrice, bidPrice + 1, block.timestamp + 1 hours, 100_000e6);
+        priceSheet.publishQuote(oToken, bidPrice, bidPrice + 1, block.timestamp + 1 hours, 100e8);
 
         address userAddr = address(0xF100);
         usdc.mint(userAddr, 10_000e6);
@@ -404,7 +404,7 @@ contract BatchSettlerFuzzTest is Test {
         whitelist.whitelistOToken(oToken);
 
         vm.prank(mm);
-        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, 100_000e6);
+        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, 100e8);
 
         address userAddr = address(0xF200);
         usdc.mint(userAddr, 10_000e6);

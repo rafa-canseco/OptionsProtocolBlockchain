@@ -6,6 +6,7 @@ import "./Controller.sol";
 import "./OToken.sol";
 import "./PriceSheet.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title BatchSettler
@@ -13,17 +14,19 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *
  *         Primary flow (instant per-order):
  *         1. MM publishes quotes on PriceSheet (bid/ask + TTL + capacity)
- *         2. User calls executeOrder() → atomic: vault, collateral, mint, oToken→MM, premium→user
- *         3. PriceSheet tracks filled capacity; reverts when full
+ *         2. User (msg.sender) calls executeOrder() — atomic: vault, collateral, mint, oToken->MM, premium->user
+ *         3. PriceSheet tracks filled capacity in oToken units; reverts when full
  *
  *         Post-expiry flow:
- *         - batchSettleVaults() settles expired vaults in batch
- *         - batchRedeem() redeems oTokens for MM after expiry
+ *         - batchSettleVaults() settles expired vaults in batch (only operator)
+ *         - batchRedeem() redeems oTokens after expiry
  */
 contract BatchSettler {
+    using SafeERC20 for IERC20;
+
     AddressBook public addressBook;
     address public owner;
-    address public operator; // The MM / keeper bot
+    address public operator; // The Market Maker (MM)
 
     event OrderExecuted(
         address indexed user,
@@ -33,11 +36,14 @@ contract BatchSettler {
         uint256 collateral,
         uint256 vaultId
     );
+    event VaultSettleFailed(address indexed vaultOwner, uint256 vaultId, bytes reason);
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
 
     error OnlyOwner();
     error OnlyOperator();
     error InvalidAddress();
+    error InvalidAmount();
+    error LengthMismatch();
     error QuoteInvalid();
 
     modifier onlyOwner() {
@@ -51,6 +57,7 @@ contract BatchSettler {
     }
 
     constructor(address _addressBook, address _operator) {
+        if (_addressBook == address(0) || _operator == address(0)) revert InvalidAddress();
         addressBook = AddressBook(_addressBook);
         owner = msg.sender;
         operator = _operator;
@@ -68,7 +75,7 @@ contract BatchSettler {
      *         Prerequisites:
      *         - User has approved MarginPool for collateral asset
      *         - User has approved this contract for oToken transfers
-     *         - MM (operator) has approved this contract for premium asset (USDC)
+     *         - MM (operator) has approved this contract for premium asset
      *         - A valid, non-expired quote exists on PriceSheet with remaining capacity
      *
      * @param oToken      The oToken to mint
@@ -81,6 +88,8 @@ contract BatchSettler {
         uint256 amount,
         uint256 collateral
     ) external returns (uint256 vaultId) {
+        if (amount == 0) revert InvalidAmount();
+
         PriceSheet ps = PriceSheet(addressBook.priceSheet());
         Controller ctrl = Controller(addressBook.controller());
 
@@ -88,8 +97,8 @@ contract BatchSettler {
         (uint256 bidPrice, , , , bool isValid) = ps.getQuote(oToken);
         if (!isValid) revert QuoteInvalid();
 
-        // 2. Fill capacity on PriceSheet (reverts if exceeded)
-        ps.fillQuote(oToken, collateral);
+        // 2. Fill capacity on PriceSheet in oToken units (reverts if expired or exceeded)
+        ps.fillQuote(oToken, amount);
 
         // 3. Open vault for user
         vaultId = ctrl.openVault(msg.sender);
@@ -102,46 +111,66 @@ contract BatchSettler {
         ctrl.mintOtoken(msg.sender, vaultId, oToken, amount);
 
         // 6. Transfer oTokens from user to operator (MM)
-        IERC20(oToken).transferFrom(msg.sender, operator, amount);
+        IERC20(oToken).safeTransferFrom(msg.sender, operator, amount);
 
-        // 7. Calculate premium: (amount * bidPrice) / 1e8
+        // 7. Calculate premium: amount (8 dec) * bidPrice (per 1 oToken) / 1e8
         uint256 premium = (amount * bidPrice) / 1e8;
 
         // 8. Transfer premium from operator (MM) to user
         address premiumAsset = OToken(oToken).strikeAsset();
-        IERC20(premiumAsset).transferFrom(operator, msg.sender, premium);
+        IERC20(premiumAsset).safeTransferFrom(operator, msg.sender, premium);
 
         emit OrderExecuted(msg.sender, oToken, amount, premium, collateral, vaultId);
     }
 
     /**
-     * @notice Settle multiple expired vaults in a single tx.
+     * @notice Settle multiple expired vaults in a single tx. Only callable by operator.
      *         Called by keeper bot after expiry + oracle price is set.
+     *         Individual failures are logged via VaultSettleFailed events.
      */
     function batchSettleVaults(
         address[] calldata owners,
         uint256[] calldata vaultIds
     ) external onlyOperator {
-        require(owners.length == vaultIds.length, "length mismatch");
+        if (owners.length != vaultIds.length) revert LengthMismatch();
 
         Controller ctrl = Controller(addressBook.controller());
 
         for (uint256 i = 0; i < owners.length; i++) {
-            try ctrl.settleVault(owners[i], vaultIds[i]) {} catch {}
+            try ctrl.settleVault(owners[i], vaultIds[i]) {}
+            catch (bytes memory reason) {
+                emit VaultSettleFailed(owners[i], vaultIds[i], reason);
+            }
         }
     }
 
     /**
-     * @notice Redeem oTokens in batch (for the MM after expiry).
+     * @notice Redeem oTokens in batch after expiry. Caller must have approved this
+     *         contract for each oToken. Pulls oTokens from caller, redeems via
+     *         Controller, and forwards the payout to caller.
      */
     function batchRedeem(address[] calldata oTokens, uint256[] calldata amounts) external {
-        require(oTokens.length == amounts.length, "length mismatch");
+        if (oTokens.length != amounts.length) revert LengthMismatch();
 
         Controller ctrl = Controller(addressBook.controller());
 
         for (uint256 i = 0; i < oTokens.length; i++) {
             if (amounts[i] > 0) {
+                // Pull oTokens from caller
+                IERC20(oTokens[i]).safeTransferFrom(msg.sender, address(this), amounts[i]);
+
+                // Track collateral balance before redeem
+                address collateralAsset = OToken(oTokens[i]).collateralAsset();
+                uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+
+                // Redeem (burns from this contract, payout to this contract)
                 ctrl.redeem(oTokens[i], amounts[i]);
+
+                // Forward payout to caller
+                uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+                if (payout > 0) {
+                    IERC20(collateralAsset).safeTransfer(msg.sender, payout);
+                }
             }
         }
     }
