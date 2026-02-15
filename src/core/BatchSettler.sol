@@ -156,8 +156,8 @@ contract BatchSettler {
      * @notice Redeem oTokens in batch after expiry. Caller must have approved this
      *         contract for each oToken. For each item: pulls oTokens from caller,
      *         redeems via Controller, and forwards the payout to caller.
-     *         Individual failures (bad approval, paused token, redeem revert) emit
-     *         RedeemFailed and continue — the batch never reverts due to one item.
+     *         Individual failures (bad approval, insufficient balance, redeem revert)
+     *         emit RedeemFailed and continue — the batch never reverts due to one item.
      */
     function batchRedeem(address[] calldata oTokens, uint256[] calldata amounts) external {
         if (oTokens.length != amounts.length) revert LengthMismatch();
@@ -168,32 +168,37 @@ contract BatchSettler {
         for (uint256 i = 0; i < oTokens.length; i++) {
             if (amounts[i] == 0) continue;
 
-            // Pull oTokens from caller (try/catch so one bad token doesn't kill the batch)
-            try IERC20(oTokens[i]).transferFrom(msg.sender, address(this), amounts[i]) returns (bool success) {
-                if (!success) {
-                    emit RedeemFailed(oTokens[i], amounts[i], "");
-                    continue;
-                }
+            try this._redeemSingle(oTokens[i], amounts[i], msg.sender, ctrl) {
             } catch (bytes memory reason) {
                 emit RedeemFailed(oTokens[i], amounts[i], reason);
-                continue;
             }
+        }
+    }
 
-            // Track collateral balance before redeem
-            address collateralAsset = OToken(oTokens[i]).collateralAsset();
-            uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+    /**
+     * @notice Self-call target for batchRedeem — redeems a single oToken position.
+     *         External so batchRedeem can wrap it in try/catch for full fault isolation.
+     *         Any revert (pull, redeem, payout) is caught by the caller and rolled back
+     *         atomically — no tokens can get stuck in this contract.
+     */
+    function _redeemSingle(
+        address oToken,
+        uint256 amount,
+        address caller,
+        Controller ctrl
+    ) external {
+        if (msg.sender != address(this)) revert InvalidAddress();
 
-            try ctrl.redeem(oTokens[i], amounts[i]) {
-                // Forward payout to caller
-                uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
-                if (payout > 0) {
-                    IERC20(collateralAsset).safeTransfer(msg.sender, payout);
-                }
-            } catch (bytes memory reason) {
-                // Try to return oTokens; if this also fails, they stay in settler
-                try IERC20(oTokens[i]).transfer(msg.sender, amounts[i]) {} catch {}
-                emit RedeemFailed(oTokens[i], amounts[i], reason);
-            }
+        IERC20(oToken).safeTransferFrom(caller, address(this), amount);
+
+        address collateralAsset = OToken(oToken).collateralAsset();
+        uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+
+        ctrl.redeem(oToken, amount);
+
+        uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+        if (payout > 0) {
+            IERC20(collateralAsset).safeTransfer(caller, payout);
         }
     }
 }
