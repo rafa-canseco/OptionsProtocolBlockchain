@@ -27,6 +27,7 @@ contract BatchSettler {
     AddressBook public addressBook;
     address public owner;
     address public operator; // The Market Maker (MM)
+    uint256 public batchNonce; // Incremented on each batch operation
 
     event OrderExecuted(
         address indexed user,
@@ -137,6 +138,7 @@ contract BatchSettler {
     ) external onlyOperator {
         if (owners.length != vaultIds.length) revert LengthMismatch();
 
+        batchNonce++;
         Controller ctrl = Controller(addressBook.controller());
 
         for (uint256 i = 0; i < owners.length; i++) {
