@@ -648,7 +648,7 @@ contract BatchSettlerTest is Test {
         assertEq(OToken(oToken).balanceOf(mm), 0);
     }
 
-    function test_batchRedeem_continuesOnFailure() public {
+    function test_batchRedeem_continuesOnPullFailure() public {
         address oToken1 = _createPut(2000e8);
         address oToken2 = _createPut(2500e8);
         _approveOToken(alice, oToken1);
@@ -661,33 +661,25 @@ contract BatchSettlerTest is Test {
         vm.prank(bob);
         settler.executeOrder(oToken2, 1e8, 2500e6);
 
-        // Expire ITM, set oracle price, settle only oToken1's vault
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
-        address[] memory settleOwners = new address[](1);
-        uint256[] memory settleVaults = new uint256[](1);
+        // Settle both vaults
+        address[] memory settleOwners = new address[](2);
+        uint256[] memory settleVaults = new uint256[](2);
         settleOwners[0] = alice;
+        settleOwners[1] = bob;
         settleVaults[0] = 1;
+        settleVaults[1] = 1;
         vm.prank(mm);
         settler.batchSettleVaults(settleOwners, settleVaults);
 
-        // MM approves both
+        // Redeem oToken1 first so MM has 0 balance of it
         vm.startPrank(mm);
         OToken(oToken1).approve(address(settler), 1e8);
         OToken(oToken2).approve(address(settler), 1e8);
         vm.stopPrank();
 
-        // Batch redeem: oToken1 (settled, will succeed), oToken2 (not settled, redeem will fail)
-        // Note: oToken2 vault not settled means pool still holds collateral,
-        // but redeem should still work (Controller.redeem doesn't require vault settlement)
-        // Actually Controller.redeem just needs expiry + oracle price, which we have.
-        // Both should succeed. Let me make oToken2 fail by NOT setting oracle price for it.
-        // But both oTokens share the same underlying (weth) and expiry, so they use the same oracle price.
-        // To make one fail: use a different expiry. But our factory uses the same expiry.
-        // Instead, test the event emission path by trying to redeem an already-burned set.
-
-        // First redeem oToken1 successfully
         address[] memory oTokens1 = new address[](1);
         uint256[] memory amounts1 = new uint256[](1);
         oTokens1[0] = oToken1;
@@ -695,30 +687,97 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchRedeem(oTokens1, amounts1);
 
-        // Now batch both — oToken1 will fail (MM has no more oTokens to pull), oToken2 should succeed
-        // But MM has 0 oToken1 balance, so safeTransferFrom will revert before try/catch.
-        // Actually the safeTransferFrom is BEFORE the try/catch, so it will revert the whole tx.
-        // The try/catch only wraps ctrl.redeem, not the pull.
-        // So let me test differently: have MM try to redeem oToken2 which hasn't had its vault settled
-        // Settle oToken2 vault too so we can test the actual try/catch path
-
-        // Settle oToken2 vault
-        settleOwners[0] = bob;
-        settleVaults[0] = 1;
-        vm.prank(mm);
-        settler.batchSettleVaults(settleOwners, settleVaults);
-
-        // Now MM redeems oToken2
-        address[] memory oTokens2 = new address[](1);
-        uint256[] memory amounts2 = new uint256[](1);
-        oTokens2[0] = oToken2;
-        amounts2[0] = 1e8;
+        // Now batch both: oToken1 pull fails (0 balance, no approval), oToken2 succeeds
+        address[] memory oTokens = new address[](2);
+        uint256[] memory amounts = new uint256[](2);
+        oTokens[0] = oToken1;
+        oTokens[1] = oToken2;
+        amounts[0] = 1e8;
+        amounts[1] = 1e8;
 
         uint256 mmBefore = usdc.balanceOf(mm);
         vm.prank(mm);
-        settler.batchRedeem(oTokens2, amounts2);
+        vm.expectEmit(true, false, false, false);
+        emit RedeemFailed(oToken1, 1e8, "");
+        settler.batchRedeem(oTokens, amounts);
 
-        // oToken2 payout: $700
+        // oToken2 payout: $700, oToken1 failed but didn't kill the batch
         assertEq(usdc.balanceOf(mm), mmBefore + 700e6);
+    }
+
+    function test_batchRedeem_continuesOnRevokedApproval() public {
+        address oToken1 = _createPut(2000e8);
+        address oToken2 = _createPut(2500e8);
+        _approveOToken(alice, oToken1);
+        _approveOToken(bob, oToken2);
+        _publishPutQuote(oToken1, 70e6, 100e8);
+        _publishPutQuote(oToken2, 90e6, 100e8);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken1, 1e8, 2000e6);
+        vm.prank(bob);
+        settler.executeOrder(oToken2, 1e8, 2500e6);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        // Settle both
+        address[] memory settleOwners = new address[](2);
+        uint256[] memory settleVaults = new uint256[](2);
+        settleOwners[0] = alice;
+        settleOwners[1] = bob;
+        settleVaults[0] = 1;
+        settleVaults[1] = 1;
+        vm.prank(mm);
+        settler.batchSettleVaults(settleOwners, settleVaults);
+
+        // MM approves oToken2 but revokes oToken1 approval
+        vm.startPrank(mm);
+        OToken(oToken1).approve(address(settler), 0);
+        OToken(oToken2).approve(address(settler), 1e8);
+        vm.stopPrank();
+
+        address[] memory oTokens = new address[](2);
+        uint256[] memory amounts = new uint256[](2);
+        oTokens[0] = oToken1;
+        oTokens[1] = oToken2;
+        amounts[0] = 1e8;
+        amounts[1] = 1e8;
+
+        uint256 mmBefore = usdc.balanceOf(mm);
+        vm.prank(mm);
+        settler.batchRedeem(oTokens, amounts);
+
+        // oToken1 failed (revoked approval), oToken2 succeeded ($700 payout)
+        assertEq(usdc.balanceOf(mm), mmBefore + 700e6);
+        // MM still has oToken1 (pull failed, not burned)
+        assertEq(OToken(oToken1).balanceOf(mm), 1e8);
+    }
+
+    // ===== New validation tests =====
+
+    function test_executeOrder_revertsOnZeroAddress() public {
+        _publishPutQuote(address(0x1), 70e6, 100e8); // dummy, won't reach PriceSheet
+
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        settler.executeOrder(address(0), 1e8, 2000e6);
+    }
+
+    function test_batchSettleVaults_revertsOnEmptyArrays() public {
+        address[] memory owners = new address[](0);
+        uint256[] memory vaultIds = new uint256[](0);
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.EmptyArray.selector);
+        settler.batchSettleVaults(owners, vaultIds);
+    }
+
+    function test_batchRedeem_revertsOnEmptyArrays() public {
+        address[] memory oTokens = new address[](0);
+        uint256[] memory amounts = new uint256[](0);
+
+        vm.expectRevert(BatchSettler.EmptyArray.selector);
+        settler.batchRedeem(oTokens, amounts);
     }
 }

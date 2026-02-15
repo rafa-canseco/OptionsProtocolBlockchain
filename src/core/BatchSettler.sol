@@ -27,7 +27,7 @@ contract BatchSettler {
     AddressBook public addressBook;
     address public owner;
     address public operator; // The Market Maker (MM)
-    uint256 public batchNonce; // Incremented on each batch operation
+    uint256 public batchNonce; // Incremented on each batchSettleVaults() call
 
     event OrderExecuted(
         address indexed user,
@@ -48,6 +48,7 @@ contract BatchSettler {
     error LengthMismatch();
     error PremiumTooSmall();
     error QuoteInvalid();
+    error EmptyArray();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -91,6 +92,7 @@ contract BatchSettler {
         uint256 amount,
         uint256 collateral
     ) external returns (uint256 vaultId) {
+        if (oToken == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
 
         PriceSheet ps = PriceSheet(addressBook.priceSheet());
@@ -137,6 +139,7 @@ contract BatchSettler {
         uint256[] calldata vaultIds
     ) external onlyOperator {
         if (owners.length != vaultIds.length) revert LengthMismatch();
+        if (owners.length == 0) revert EmptyArray();
 
         batchNonce++;
         Controller ctrl = Controller(addressBook.controller());
@@ -151,35 +154,45 @@ contract BatchSettler {
 
     /**
      * @notice Redeem oTokens in batch after expiry. Caller must have approved this
-     *         contract for each oToken. Pulls oTokens from caller, redeems via
-     *         Controller, and forwards the payout to caller.
-     *         Individual failures return oTokens and emit RedeemFailed events.
+     *         contract for each oToken. For each item: pulls oTokens from caller,
+     *         redeems via Controller, and forwards the payout to caller.
+     *         Individual failures (bad approval, paused token, redeem revert) emit
+     *         RedeemFailed and continue — the batch never reverts due to one item.
      */
     function batchRedeem(address[] calldata oTokens, uint256[] calldata amounts) external {
         if (oTokens.length != amounts.length) revert LengthMismatch();
+        if (oTokens.length == 0) revert EmptyArray();
 
         Controller ctrl = Controller(addressBook.controller());
 
         for (uint256 i = 0; i < oTokens.length; i++) {
-            if (amounts[i] > 0) {
-                // Pull oTokens from caller
-                IERC20(oTokens[i]).safeTransferFrom(msg.sender, address(this), amounts[i]);
+            if (amounts[i] == 0) continue;
 
-                // Track collateral balance before redeem
-                address collateralAsset = OToken(oTokens[i]).collateralAsset();
-                uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
-
-                try ctrl.redeem(oTokens[i], amounts[i]) {
-                    // Forward payout to caller
-                    uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
-                    if (payout > 0) {
-                        IERC20(collateralAsset).safeTransfer(msg.sender, payout);
-                    }
-                } catch (bytes memory reason) {
-                    // Return oTokens to caller since redemption failed
-                    IERC20(oTokens[i]).safeTransfer(msg.sender, amounts[i]);
-                    emit RedeemFailed(oTokens[i], amounts[i], reason);
+            // Pull oTokens from caller (try/catch so one bad token doesn't kill the batch)
+            try IERC20(oTokens[i]).transferFrom(msg.sender, address(this), amounts[i]) returns (bool success) {
+                if (!success) {
+                    emit RedeemFailed(oTokens[i], amounts[i], "");
+                    continue;
                 }
+            } catch (bytes memory reason) {
+                emit RedeemFailed(oTokens[i], amounts[i], reason);
+                continue;
+            }
+
+            // Track collateral balance before redeem
+            address collateralAsset = OToken(oTokens[i]).collateralAsset();
+            uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+
+            try ctrl.redeem(oTokens[i], amounts[i]) {
+                // Forward payout to caller
+                uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+                if (payout > 0) {
+                    IERC20(collateralAsset).safeTransfer(msg.sender, payout);
+                }
+            } catch (bytes memory reason) {
+                // Try to return oTokens; if this also fails, they stay in settler
+                try IERC20(oTokens[i]).transfer(msg.sender, amounts[i]) {} catch {}
+                emit RedeemFailed(oTokens[i], amounts[i], reason);
             }
         }
     }
