@@ -4,56 +4,51 @@ pragma solidity 0.8.20;
 import "./AddressBook.sol";
 import "./Controller.sol";
 import "./OToken.sol";
-import "./OTokenFactory.sol";
-import "./Whitelist.sol";
+import "./PriceSheet.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title BatchSettler
- * @notice Our key differentiator from Rysk. Executes batch settlement of multiple
- *         accepted orders in a single transaction.
+ * @notice Handles option order execution and post-expiry settlement.
  *
- *         Flow:
- *         1. MM publishes prices off-chain (price sheet with TTL)
- *         2. Users accept prices → backend stores accepted orders
- *         3. Every 30-60 min, the keeper bot calls settleBatch() with all pending orders
- *         4. This contract: for each order, opens vault, deposits collateral, mints oTokens,
- *            transfers oTokens to MM, transfers premium from MM to user
+ *         Primary flow (instant per-order):
+ *         1. MM publishes quotes on PriceSheet (bid/ask + TTL + capacity)
+ *         2. User (msg.sender) calls executeOrder() — atomic: vault, collateral, mint, oToken->MM, premium->user
+ *         3. PriceSheet tracks filled capacity in oToken units; reverts when full
  *
- *         Only the operator (MM / keeper bot) can call settleBatch.
+ *         Post-expiry flow:
+ *         - batchSettleVaults() settles expired vaults in batch (only operator)
+ *         - batchRedeem() redeems oTokens after expiry
  */
 contract BatchSettler {
+    using SafeERC20 for IERC20;
+
     AddressBook public addressBook;
     address public owner;
-    address public operator; // The MM / keeper bot
+    address public operator; // The Market Maker (MM)
+    uint256 public batchNonce; // Incremented on each batchSettleVaults() call
 
-    struct Order {
-        address user;           // The option seller (deposits collateral, receives premium)
-        address oToken;         // Which oToken to mint (must exist already)
-        uint256 amount;         // Amount of oTokens to mint (8 decimals)
-        uint256 premium;        // Premium in USDC to pay the user (6 decimals)
-        uint256 collateral;     // Collateral amount (in collateral asset's decimals)
-    }
-
-    /// @notice Batch nonce to prevent replay
-    uint256 public batchNonce;
-
-    event BatchSettled(uint256 indexed batchId, uint256 ordersCount, uint256 totalPremiums);
-    event OrderFilled(
-        uint256 indexed batchId,
+    event OrderExecuted(
         address indexed user,
-        address oToken,
+        address indexed oToken,
         uint256 amount,
         uint256 premium,
+        uint256 collateral,
         uint256 vaultId
     );
-    event OrderFailed(uint256 indexed batchId, address indexed user, address oToken, bytes reason);
+    event VaultSettleFailed(address indexed vaultOwner, uint256 vaultId, bytes reason);
+    event RedeemFailed(address indexed oToken, uint256 amount, bytes reason);
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
 
     error OnlyOwner();
     error OnlyOperator();
-    error EmptyBatch();
     error InvalidAddress();
+    error InvalidAmount();
+    error LengthMismatch();
+    error PremiumTooSmall();
+    error QuoteInvalid();
+    error EmptyArray();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -66,6 +61,7 @@ contract BatchSettler {
     }
 
     constructor(address _addressBook, address _operator) {
+        if (_addressBook == address(0) || _operator == address(0)) revert InvalidAddress();
         addressBook = AddressBook(_addressBook);
         owner = msg.sender;
         operator = _operator;
@@ -78,106 +74,131 @@ contract BatchSettler {
     }
 
     /**
-     * @notice Settle a batch of orders.
-     *         The operator (MM) must have approved this contract to spend USDC for premiums.
-     *         Each user must have approved the MarginPool to spend their collateral.
+     * @notice Execute a single order instantly. Permissionless — msg.sender is the user.
      *
-     *         If an individual order fails, it emits OrderFailed and continues.
-     *         The batch does NOT revert if one order fails.
+     *         Prerequisites:
+     *         - User has approved MarginPool for collateral asset
+     *         - User has approved this contract for oToken transfers
+     *         - MM (operator) has approved this contract for premium asset
+     *         - A valid, non-expired quote exists on PriceSheet with remaining capacity
      *
-     * @param orders Array of orders to settle
-     * @param premiumAsset The asset used for premiums (USDC)
+     * @param oToken      The oToken to mint
+     * @param amount      Amount of oTokens to mint (8 decimals)
+     * @param collateral  Collateral to deposit (in collateral asset's decimals)
+     * @return vaultId    The vault ID created for this order
      */
-    function settleBatch(Order[] calldata orders, address premiumAsset) external onlyOperator {
-        if (orders.length == 0) revert EmptyBatch();
-
-        uint256 batchId = batchNonce++;
-        Controller ctrl = Controller(addressBook.controller());
-        uint256 totalPremiums = 0;
-        uint256 filledCount = 0;
-
-        for (uint256 i = 0; i < orders.length; i++) {
-            Order calldata order = orders[i];
-
-            try this._executeOrder(ctrl, order, premiumAsset, batchId) returns (uint256 vaultId) {
-                totalPremiums += order.premium;
-                filledCount++;
-                emit OrderFilled(
-                    batchId, order.user, order.oToken, order.amount, order.premium, vaultId
-                );
-            } catch (bytes memory reason) {
-                emit OrderFailed(batchId, order.user, order.oToken, reason);
-            }
-        }
-
-        emit BatchSettled(batchId, filledCount, totalPremiums);
-    }
-
-    /**
-     * @notice Execute a single order. External so we can use try/catch.
-     *         Only callable by this contract itself.
-     */
-    function _executeOrder(
-        Controller ctrl,
-        Order calldata order,
-        address premiumAsset,
-        uint256 /* batchId */
+    function executeOrder(
+        address oToken,
+        uint256 amount,
+        uint256 collateral
     ) external returns (uint256 vaultId) {
-        require(msg.sender == address(this), "only self");
+        if (oToken == address(0)) revert InvalidAddress();
+        if (amount == 0) revert InvalidAmount();
 
-        // 1. Open vault for user
-        vaultId = ctrl.openVault(order.user);
+        PriceSheet ps = PriceSheet(addressBook.priceSheet());
+        Controller ctrl = Controller(addressBook.controller());
 
-        // 2. Deposit user's collateral into vault
-        ctrl.depositCollateral(
-            order.user,
-            vaultId,
-            OToken(order.oToken).collateralAsset(),
-            order.collateral
-        );
+        // 1. Read and validate quote
+        (uint256 bidPrice, , , , bool isValid) = ps.getQuote(oToken);
+        if (!isValid) revert QuoteInvalid();
 
-        // 3. Mint oTokens to user
-        ctrl.mintOtoken(order.user, vaultId, order.oToken, order.amount);
+        // 2. Calculate premium early to fail fast on truncation
+        uint256 premium = (amount * bidPrice) / 1e8;
+        if (premium == 0 && bidPrice > 0) revert PremiumTooSmall();
 
-        // 4. Transfer oTokens from user to operator (MM)
-        //    User must have approved this contract
-        IERC20(order.oToken).transferFrom(order.user, operator, order.amount);
+        // 3. Fill capacity on PriceSheet in oToken units (reverts if expired or exceeded)
+        ps.fillQuote(oToken, amount);
 
-        // 5. Transfer premium from operator (MM) to user
-        IERC20(premiumAsset).transferFrom(operator, order.user, order.premium);
+        // 4. Open vault for user
+        vaultId = ctrl.openVault(msg.sender);
 
-        return vaultId;
+        // 5. Deposit user's collateral
+        address collateralAsset = OToken(oToken).collateralAsset();
+        ctrl.depositCollateral(msg.sender, vaultId, collateralAsset, collateral);
+
+        // 6. Mint oTokens to user
+        ctrl.mintOtoken(msg.sender, vaultId, oToken, amount);
+
+        // 7. Transfer oTokens from user to operator (MM)
+        IERC20(oToken).safeTransferFrom(msg.sender, operator, amount);
+
+        // 8. Transfer premium from operator (MM) to user
+        address premiumAsset = OToken(oToken).strikeAsset();
+        IERC20(premiumAsset).safeTransferFrom(operator, msg.sender, premium);
+
+        emit OrderExecuted(msg.sender, oToken, amount, premium, collateral, vaultId);
     }
 
     /**
-     * @notice Settle multiple expired vaults in a single tx.
+     * @notice Settle multiple expired vaults in a single tx. Only callable by operator.
      *         Called by keeper bot after expiry + oracle price is set.
+     *         Individual failures are logged via VaultSettleFailed events.
      */
     function batchSettleVaults(
         address[] calldata owners,
         uint256[] calldata vaultIds
     ) external onlyOperator {
-        require(owners.length == vaultIds.length, "length mismatch");
+        if (owners.length != vaultIds.length) revert LengthMismatch();
+        if (owners.length == 0) revert EmptyArray();
 
+        batchNonce++;
         Controller ctrl = Controller(addressBook.controller());
 
         for (uint256 i = 0; i < owners.length; i++) {
-            try ctrl.settleVault(owners[i], vaultIds[i]) {} catch {}
+            try ctrl.settleVault(owners[i], vaultIds[i]) {}
+            catch (bytes memory reason) {
+                emit VaultSettleFailed(owners[i], vaultIds[i], reason);
+            }
         }
     }
 
     /**
-     * @notice Redeem oTokens in batch (for the MM after expiry).
+     * @notice Redeem oTokens in batch after expiry. Caller must have approved this
+     *         contract for each oToken. For each item: pulls oTokens from caller,
+     *         redeems via Controller, and forwards the payout to caller.
+     *         Individual failures (bad approval, insufficient balance, redeem revert)
+     *         emit RedeemFailed and continue — the batch never reverts due to one item.
      */
     function batchRedeem(address[] calldata oTokens, uint256[] calldata amounts) external {
-        require(oTokens.length == amounts.length, "length mismatch");
+        if (oTokens.length != amounts.length) revert LengthMismatch();
+        if (oTokens.length == 0) revert EmptyArray();
 
         Controller ctrl = Controller(addressBook.controller());
 
         for (uint256 i = 0; i < oTokens.length; i++) {
-            if (amounts[i] > 0) {
-                ctrl.redeem(oTokens[i], amounts[i]);
+            if (amounts[i] == 0) continue;
+
+            try this._redeemSingle(oTokens[i], amounts[i], msg.sender, ctrl) {
+            } catch (bytes memory reason) {
+                emit RedeemFailed(oTokens[i], amounts[i], reason);
             }
+        }
+    }
+
+    /**
+     * @notice Self-call target for batchRedeem — redeems a single oToken position.
+     *         External so batchRedeem can wrap it in try/catch for full fault isolation.
+     *         Any revert (pull, redeem, payout) is caught by the caller and rolled back
+     *         atomically — no tokens can get stuck in this contract.
+     */
+    function _redeemSingle(
+        address oToken,
+        uint256 amount,
+        address caller,
+        Controller ctrl
+    ) external {
+        if (msg.sender != address(this)) revert InvalidAddress();
+
+        IERC20(oToken).safeTransferFrom(caller, address(this), amount);
+
+        address collateralAsset = OToken(oToken).collateralAsset();
+        uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+
+        ctrl.redeem(oToken, amount);
+
+        uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+        if (payout > 0) {
+            IERC20(collateralAsset).safeTransfer(caller, payout);
         }
     }
 }

@@ -10,6 +10,7 @@ import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
 import "../src/core/Whitelist.sol";
 import "../src/core/BatchSettler.sol";
+import "../src/core/PriceSheet.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract MockERC20 is ERC20 {
@@ -282,7 +283,7 @@ contract OracleFuzzTest is Test {
 }
 
 // =============================================================================
-// Fuzz Tests — BatchSettler
+// Fuzz Tests — BatchSettler (executeOrder)
 // =============================================================================
 
 contract BatchSettlerFuzzTest is Test {
@@ -293,6 +294,7 @@ contract BatchSettlerFuzzTest is Test {
     Oracle public oracle;
     Whitelist public whitelist;
     BatchSettler public settler;
+    PriceSheet public priceSheet;
 
     MockERC20 public weth;
     MockERC20 public usdc;
@@ -314,6 +316,7 @@ contract BatchSettlerFuzzTest is Test {
         oracle = new Oracle(address(addressBook));
         whitelist = new Whitelist(address(addressBook));
         settler = new BatchSettler(address(addressBook), mm);
+        priceSheet = new PriceSheet(address(addressBook), mm);
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -321,6 +324,7 @@ contract BatchSettlerFuzzTest is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
+        addressBook.setPriceSheet(address(priceSheet));
 
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
@@ -334,8 +338,8 @@ contract BatchSettlerFuzzTest is Test {
         usdc.approve(address(settler), type(uint256).max);
     }
 
-    /// @notice Batch with N orders, all valid. N bounded to avoid gas issues.
-    function testFuzz_batchSettleMultipleOrders(uint8 rawCount) public {
+    /// @notice N users execute orders, all valid. N bounded to avoid gas issues.
+    function testFuzz_multipleUsersExecuteOrders(uint8 rawCount) public {
         uint256 count = bound(uint256(rawCount), 1, 10);
 
         address oToken = factory.createOToken(
@@ -343,7 +347,8 @@ contract BatchSettlerFuzzTest is Test {
         );
         whitelist.whitelistOToken(oToken);
 
-        BatchSettler.Order[] memory orders = new BatchSettler.Order[](count);
+        vm.prank(mm);
+        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, count * 1e8);
 
         for (uint256 i = 0; i < count; i++) {
             address userAddr = address(uint160(0xF000 + i));
@@ -353,43 +358,25 @@ contract BatchSettlerFuzzTest is Test {
             IERC20(oToken).approve(address(settler), type(uint256).max);
             vm.stopPrank();
 
-            orders[i] = BatchSettler.Order({
-                user: userAddr,
-                oToken: oToken,
-                amount: 1e8,
-                premium: 50e6,
-                collateral: 2000e6
-            });
+            vm.prank(userAddr);
+            settler.executeOrder(oToken, 1e8, 2000e6);
         }
-
-        vm.prank(mm);
-        settler.settleBatch(orders, address(usdc));
 
         // MM should have received all oTokens
         assertEq(OToken(oToken).balanceOf(mm), count * 1e8);
-        assertEq(settler.batchNonce(), 1);
     }
 
-    /// @notice Non-operator can never call settleBatch
-    function testFuzz_nonOperatorCannotSettle(address caller) public {
-        vm.assume(caller != mm);
-
-        BatchSettler.Order[] memory orders = new BatchSettler.Order[](1);
-        orders[0] = BatchSettler.Order(address(0x1), address(0x2), 1, 1, 1);
-
-        vm.prank(caller);
-        vm.expectRevert(BatchSettler.OnlyOperator.selector);
-        settler.settleBatch(orders, address(usdc));
-    }
-
-    /// @notice Fuzz premium amounts — user always receives exact premium
-    function testFuzz_premiumTransfer(uint256 premium) public {
-        premium = bound(premium, 1, 100_000e6);
+    /// @notice Fuzz premium via bidPrice — user always receives (amount * bidPrice) / 1e8
+    function testFuzz_premiumCalculation(uint256 bidPrice) public {
+        bidPrice = bound(bidPrice, 1, 1_000e6); // $0.000001 to $1000 per oToken
 
         address oToken = factory.createOToken(
             address(weth), address(usdc), address(usdc), strikePrice, expiry, true
         );
         whitelist.whitelistOToken(oToken);
+
+        vm.prank(mm);
+        priceSheet.publishQuote(oToken, bidPrice, bidPrice + 1, block.timestamp + 1 hours, 100e8);
 
         address userAddr = address(0xF100);
         usdc.mint(userAddr, 10_000e6);
@@ -399,21 +386,38 @@ contract BatchSettlerFuzzTest is Test {
         vm.stopPrank();
 
         uint256 userBalBefore = usdc.balanceOf(userAddr);
+        uint256 expectedPremium = (1e8 * bidPrice) / 1e8;
 
-        BatchSettler.Order[] memory orders = new BatchSettler.Order[](1);
-        orders[0] = BatchSettler.Order({
-            user: userAddr,
-            oToken: oToken,
-            amount: 1e8,
-            premium: premium,
-            collateral: 2000e6
-        });
+        vm.prank(userAddr);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        assertEq(usdc.balanceOf(userAddr), userBalBefore - 2000e6 + expectedPremium);
+    }
+
+    /// @notice executeOrder reverts on expired quote regardless of parameters
+    function testFuzz_expiredQuoteAlwaysReverts(uint256 warpTime) public {
+        warpTime = bound(warpTime, 1 hours + 1, 365 days);
+
+        address oToken = factory.createOToken(
+            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
+        );
+        whitelist.whitelistOToken(oToken);
 
         vm.prank(mm);
-        settler.settleBatch(orders, address(usdc));
+        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, 100e8);
 
-        // User balance: initial - collateral + premium
-        assertEq(usdc.balanceOf(userAddr), userBalBefore - 2000e6 + premium);
+        address userAddr = address(0xF200);
+        usdc.mint(userAddr, 10_000e6);
+        vm.startPrank(userAddr);
+        usdc.approve(address(pool), type(uint256).max);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + warpTime);
+
+        vm.prank(userAddr);
+        vm.expectRevert(BatchSettler.QuoteInvalid.selector);
+        settler.executeOrder(oToken, 1e8, 2000e6);
     }
 }
 

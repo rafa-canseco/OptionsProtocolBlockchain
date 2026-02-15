@@ -9,6 +9,7 @@ import "../src/core/MarginPool.sol";
 import "../src/core/OToken.sol";
 import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
+import "../src/core/PriceSheet.sol";
 import "../src/core/Whitelist.sol";
 
 contract MockERC20 is ERC20 {
@@ -28,6 +29,17 @@ contract MockERC20 is ERC20 {
 }
 
 contract BatchSettlerTest is Test {
+    event OrderExecuted(
+        address indexed user,
+        address indexed oToken,
+        uint256 amount,
+        uint256 premium,
+        uint256 collateral,
+        uint256 vaultId
+    );
+    event VaultSettleFailed(address indexed vaultOwner, uint256 vaultId, bytes reason);
+    event RedeemFailed(address indexed oToken, uint256 amount, bytes reason);
+
     AddressBook public addressBook;
     Controller public controller;
     MarginPool public pool;
@@ -35,6 +47,7 @@ contract BatchSettlerTest is Test {
     Oracle public oracle;
     Whitelist public whitelist;
     BatchSettler public settler;
+    PriceSheet public priceSheet;
 
     MockERC20 public weth;
     MockERC20 public usdc;
@@ -62,6 +75,7 @@ contract BatchSettlerTest is Test {
         oracle = new Oracle(address(addressBook));
         whitelist = new Whitelist(address(addressBook));
         settler = new BatchSettler(address(addressBook), mm);
+        priceSheet = new PriceSheet(address(addressBook), mm);
 
         // Wire AddressBook
         addressBook.setController(address(controller));
@@ -70,6 +84,7 @@ contract BatchSettlerTest is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
+        addressBook.setPriceSheet(address(priceSheet));
 
         // Whitelist
         whitelist.whitelistUnderlying(address(weth));
@@ -99,7 +114,6 @@ contract BatchSettlerTest is Test {
         vm.startPrank(user);
         usdc.approve(address(pool), type(uint256).max);
         weth.approve(address(pool), type(uint256).max);
-        // Approve settler to move oTokens from user to MM
         vm.stopPrank();
     }
 
@@ -124,191 +138,185 @@ contract BatchSettlerTest is Test {
         IERC20(oToken).approve(address(settler), type(uint256).max);
     }
 
-    // --- Core Batch Settlement ---
+    function _publishPutQuote(address oToken, uint256 bidPrice, uint256 maxAmount) internal {
+        vm.prank(mm);
+        priceSheet.publishQuote(oToken, bidPrice, bidPrice + 2e6, block.timestamp + 1 hours, maxAmount);
+    }
 
-    function test_batchSettleSingleOrder() public {
+    // ===== executeOrder (instant settlement) =====
+
+    function test_executeOrder_singlePut() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8); // max 100 oTokens
 
-        BatchSettler.Order[] memory orders = new BatchSettler.Order[](1);
-        orders[0] = BatchSettler.Order({
-            user: alice,
-            oToken: oToken,
-            amount: 1e8,           // 1 PUT
-            premium: 70e6,         // $70 USDC premium
-            collateral: 2000e6     // $2000 USDC collateral
-        });
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        uint256 mmBefore = usdc.balanceOf(mm);
 
-        vm.prank(mm);
-        settler.settleBatch(orders, address(usdc));
+        vm.prank(alice);
+        uint256 vaultId = settler.executeOrder(oToken, 1e8, 2000e6);
 
-        // Alice: deposited 2000 USDC collateral, received 70 USDC premium
-        assertEq(usdc.balanceOf(alice), 10_000e6 - 2000e6 + 70e6);
-        // MM: received 1 oToken, paid 70 USDC
+        assertEq(vaultId, 1);
+        // Alice: -2000 collateral, +70 premium
+        assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6 + 70e6);
+        // MM: -70 premium, +1 oToken
+        assertEq(usdc.balanceOf(mm), mmBefore - 70e6);
         assertEq(OToken(oToken).balanceOf(mm), 1e8);
-        assertEq(usdc.balanceOf(mm), 1_000_000e6 - 70e6);
-        // Pool: holds 2000 USDC collateral
+        // Pool: holds 2000 collateral
         assertEq(usdc.balanceOf(address(pool)), 2000e6);
     }
 
-    function test_batchSettleMultipleOrders() public {
-        address oToken = _createPut(strikePrice);
-        _approveOToken(alice, oToken);
-        _approveOToken(bob, oToken);
-        _approveOToken(carol, oToken);
-
-        BatchSettler.Order[] memory orders = new BatchSettler.Order[](3);
-
-        // Alice: $5000 CSP
-        orders[0] = BatchSettler.Order({
-            user: alice,
-            oToken: oToken,
-            amount: 2.5e8,
-            premium: 175e6,
-            collateral: 5000e6
-        });
-
-        // Bob: $20000 CSP
-        orders[1] = BatchSettler.Order({
-            user: bob,
-            oToken: oToken,
-            amount: 10e8,
-            premium: 700e6,
-            collateral: 20_000e6
-        });
-
-        // Carol: $100 micro-option CSP
-        orders[2] = BatchSettler.Order({
-            user: carol,
-            oToken: oToken,
-            amount: 50000,        // 0.0005 oTokens = $1 exposure... let's do $100
-            premium: 3.5e6,       // $3.50 premium
-            collateral: 100e6     // $100 USDC
-        });
-        // Recalc Carol: $100 / $2000 = 0.05 ETH = 0.05e8 = 5000000 oToken units
-        orders[2].amount = 5000000;
-
-        vm.prank(mm);
-        settler.settleBatch(orders, address(usdc));
-
-        // All users got their premiums
-        assertEq(usdc.balanceOf(alice), 10_000e6 - 5000e6 + 175e6);
-        assertEq(usdc.balanceOf(bob), 50_000e6 - 20_000e6 + 700e6);
-        assertEq(usdc.balanceOf(carol), 1_000e6 - 100e6 + 3.5e6);
-
-        // MM got all oTokens
-        uint256 totalOTokens = 2.5e8 + 10e8 + 5000000;
-        assertEq(OToken(oToken).balanceOf(mm), totalOTokens);
-
-        // Pool holds all collateral
-        assertEq(usdc.balanceOf(address(pool)), 5000e6 + 20_000e6 + 100e6);
-
-        // Batch nonce incremented
-        assertEq(settler.batchNonce(), 1);
-    }
-
-    function test_batchWithMixedPutsAndCalls() public {
-        address putToken = _createPut(2000e8);
-        address callToken = _createCall(2300e8);
-        _approveOToken(alice, putToken);
-        _approveOToken(bob, callToken);
-
-        BatchSettler.Order[] memory orders = new BatchSettler.Order[](2);
-
-        // Alice sells a PUT
-        orders[0] = BatchSettler.Order({
-            user: alice,
-            oToken: putToken,
-            amount: 1e8,
-            premium: 70e6,
-            collateral: 2000e6
-        });
-
-        // Bob sells a CALL (collateral is WETH)
-        orders[1] = BatchSettler.Order({
-            user: bob,
-            oToken: callToken,
-            amount: 1e8,
-            premium: 50e6,        // $50 premium in USDC
-            collateral: 1e18      // 1 WETH
-        });
-
-        vm.prank(mm);
-        settler.settleBatch(orders, address(usdc));
-
-        // Alice got premium
-        assertEq(usdc.balanceOf(alice), 10_000e6 - 2000e6 + 70e6);
-        // Bob got premium in USDC, deposited WETH
-        assertEq(usdc.balanceOf(bob), 50_000e6 + 50e6);
-        assertEq(weth.balanceOf(bob), 50e18 - 1e18);
-
-        // MM has both oTokens
-        assertEq(OToken(putToken).balanceOf(mm), 1e8);
-        assertEq(OToken(callToken).balanceOf(mm), 1e8);
-    }
-
-    // --- Failed Order in Batch ---
-
-    function test_failedOrderDoesNotRevertBatch() public {
-        address oToken = _createPut(strikePrice);
-        _approveOToken(alice, oToken);
+    function test_executeOrder_singleCall() public {
+        address oToken = _createCall(2300e8);
         _approveOToken(bob, oToken);
 
-        BatchSettler.Order[] memory orders = new BatchSettler.Order[](2);
-
-        // Alice: valid order
-        orders[0] = BatchSettler.Order({
-            user: alice,
-            oToken: oToken,
-            amount: 1e8,
-            premium: 70e6,
-            collateral: 2000e6
-        });
-
-        // Bob: insufficient collateral (will fail)
-        orders[1] = BatchSettler.Order({
-            user: bob,
-            oToken: oToken,
-            amount: 1e8,
-            premium: 70e6,
-            collateral: 500e6     // Not enough! Need 2000
-        });
-
         vm.prank(mm);
-        settler.settleBatch(orders, address(usdc));
+        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, 100e8);
 
-        // Alice's order went through
-        assertEq(usdc.balanceOf(alice), 10_000e6 - 2000e6 + 70e6);
+        uint256 bobUsdcBefore = usdc.balanceOf(bob);
+        uint256 bobWethBefore = weth.balanceOf(bob);
+
+        vm.prank(bob);
+        settler.executeOrder(oToken, 1e8, 1e18);
+
+        // Bob: -1 WETH collateral, +50 USDC premium
+        assertEq(weth.balanceOf(bob), bobWethBefore - 1e18);
+        assertEq(usdc.balanceOf(bob), bobUsdcBefore + 50e6);
+        // MM got oToken
         assertEq(OToken(oToken).balanceOf(mm), 1e8);
-
-        // Bob's order failed — his balance is unchanged
-        assertEq(usdc.balanceOf(bob), 50_000e6);
     }
 
-    // --- Batch Vault Settlement (post-expiry) ---
+    function test_executeOrder_premiumCalculation() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
 
-    function test_batchSettleVaults() public {
+        uint256 aliceBefore = usdc.balanceOf(alice);
+
+        // 2.5 oTokens -> premium = (2.5e8 * 70e6) / 1e8 = 175e6
+        vm.prank(alice);
+        settler.executeOrder(oToken, 2.5e8, 5000e6);
+
+        assertEq(usdc.balanceOf(alice), aliceBefore - 5000e6 + 175e6);
+    }
+
+    function test_executeOrder_multipleUsersProgressiveFill() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
         _approveOToken(bob, oToken);
+        _publishPutQuote(oToken, 70e6, 3e8); // max 3 oTokens
 
-        // Settle batch first
-        BatchSettler.Order[] memory orders = new BatchSettler.Order[](2);
-        orders[0] = BatchSettler.Order({
-            user: alice, oToken: oToken, amount: 1e8, premium: 70e6, collateral: 2000e6
-        });
-        orders[1] = BatchSettler.Order({
-            user: bob, oToken: oToken, amount: 1e8, premium: 70e6, collateral: 2000e6
-        });
+        // Alice fills 1 oToken
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        (, , , uint256 filled1, ) = priceSheet.getQuote(oToken);
+        assertEq(filled1, 1e8);
+
+        // Bob fills 2 oTokens
+        vm.prank(bob);
+        settler.executeOrder(oToken, 2e8, 4000e6);
+
+        (, , , uint256 filled2, ) = priceSheet.getQuote(oToken);
+        assertEq(filled2, 3e8);
+    }
+
+    function test_executeOrder_revertsOnCapacityExceeded() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _approveOToken(bob, oToken);
+        _publishPutQuote(oToken, 70e6, 1.5e8); // max 1.5 oTokens
+
+        // Alice fills 1 oToken
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        // Bob tries 1 more -> exceeds capacity (1e8 + 1e8 > 1.5e8)
+        vm.prank(bob);
+        vm.expectRevert(PriceSheet.CapacityExceeded.selector);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+    }
+
+    function test_executeOrder_revertsOnExpiredQuote() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        vm.warp(block.timestamp + 2 hours);
+
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.QuoteInvalid.selector);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+    }
+
+    function test_executeOrder_revertsOnNoQuote() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        // No quote published
+
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.QuoteInvalid.selector);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+    }
+
+    function test_executeOrder_revertsOnInvalidatedQuote() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
 
         vm.prank(mm);
-        settler.settleBatch(orders, address(usdc));
+        priceSheet.invalidateQuote(oToken);
 
-        // Expire OTM
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.QuoteInvalid.selector);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+    }
+
+    function test_executeOrder_revertsOnZeroAmount() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.InvalidAmount.selector);
+        settler.executeOrder(oToken, 0, 2000e6);
+    }
+
+    function test_executeOrder_emitsEvent() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        vm.prank(alice);
+        // premium = (1e8 * 70e6) / 1e8 = 70e6
+        vm.expectEmit(true, true, false, true);
+        emit OrderExecuted(alice, oToken, 1e8, 70e6, 2000e6, 1);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+    }
+
+    // ===== Full E2E: executeOrder -> Expiry -> Settle -> Redeem =====
+
+    function test_fullE2E_executeOrderToRedeem() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _approveOToken(bob, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        // Alice and Bob sell puts via executeOrder
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        vm.prank(bob);
+        settler.executeOrder(oToken, 2e8, 4000e6);
+
+        // MM has 3 oTokens total
+        assertEq(OToken(oToken).balanceOf(mm), 3e8);
+
+        // Expire ITM: price = $1800
         vm.warp(expiry + 1);
-        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
-        // Batch settle vaults
+        // Settle vaults
         address[] memory owners = new address[](2);
         uint256[] memory vaultIds = new uint256[](2);
         owners[0] = alice;
@@ -319,28 +327,170 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchSettleVaults(owners, vaultIds);
 
-        // Both users got collateral back
-        assertEq(usdc.balanceOf(alice), 10_000e6 + 70e6); // original + premium (collateral returned)
+        // Alice: -2000 collateral + 70 premium + 1800 returned
+        assertEq(usdc.balanceOf(alice), 10_000e6 - 2000e6 + 70e6 + 1800e6);
+        // Bob: -4000 collateral + 140 premium + 3600 returned
+        assertEq(usdc.balanceOf(bob), 50_000e6 - 4000e6 + 140e6 + 3600e6);
+
+        // MM redeems via batchRedeem
+        vm.prank(mm);
+        OToken(oToken).approve(address(settler), 3e8);
+
+        address[] memory oTokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        oTokens[0] = oToken;
+        amounts[0] = 3e8;
+
+        uint256 mmBefore = usdc.balanceOf(mm);
+        vm.prank(mm);
+        settler.batchRedeem(oTokens, amounts);
+
+        // Payout: $200 per oToken * 3 = $600
+        assertEq(usdc.balanceOf(mm), mmBefore + 600e6);
+
+        // Pool empty
+        assertEq(usdc.balanceOf(address(pool)), 0);
+    }
+
+    // ===== Post-expiry batch settlement =====
+
+    function test_batchSettleVaults() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _approveOToken(bob, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+        vm.prank(bob);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        // Expire OTM
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+
+        address[] memory owners = new address[](2);
+        uint256[] memory vaultIds = new uint256[](2);
+        owners[0] = alice;
+        owners[1] = bob;
+        vaultIds[0] = 1;
+        vaultIds[1] = 1;
+
+        vm.prank(mm);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        // Both users got collateral back (OTM -> full refund)
+        assertEq(usdc.balanceOf(alice), 10_000e6 + 70e6);
         assertEq(usdc.balanceOf(bob), 50_000e6 + 70e6);
     }
 
-    // --- Access Control ---
-
-    function test_onlyOperatorCanSettleBatch() public {
-        BatchSettler.Order[] memory orders = new BatchSettler.Order[](0);
+    function test_batchSettleVaults_continuesOnFailure() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _approveOToken(bob, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
 
         vm.prank(alice);
-        vm.expectRevert(BatchSettler.OnlyOperator.selector);
-        settler.settleBatch(orders, address(usdc));
-    }
+        settler.executeOrder(oToken, 1e8, 2000e6);
+        vm.prank(bob);
+        settler.executeOrder(oToken, 1e8, 2000e6);
 
-    function test_emptyBatchReverts() public {
-        BatchSettler.Order[] memory orders = new BatchSettler.Order[](0);
+        // Warp past expiry, set oracle price, and pre-settle Alice's vault
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+
+        // Settle Alice first (so re-settling her later will fail with VaultAlreadySettled)
+        address[] memory owners1 = new address[](1);
+        uint256[] memory vaults1 = new uint256[](1);
+        owners1[0] = alice;
+        vaults1[0] = 1;
 
         vm.prank(mm);
-        vm.expectRevert(BatchSettler.EmptyBatch.selector);
-        settler.settleBatch(orders, address(usdc));
+        settler.batchSettleVaults(owners1, vaults1);
+
+        // Now batch with Alice (already settled) + Bob (valid) — Alice should emit failure event
+        address[] memory owners2 = new address[](2);
+        uint256[] memory vaults2 = new uint256[](2);
+        owners2[0] = alice;
+        owners2[1] = bob;
+        vaults2[0] = 1; // already settled
+        vaults2[1] = 1; // valid
+
+        vm.prank(mm);
+        vm.expectEmit(true, false, false, false);
+        emit VaultSettleFailed(alice, 1, "");
+        settler.batchSettleVaults(owners2, vaults2);
+
+        // Bob still got settled despite Alice's failure
+        assertEq(usdc.balanceOf(bob), 50_000e6 + 70e6);
     }
+
+    // ===== batchRedeem =====
+
+    function test_batchRedeem_singleOtoken() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        // Alice sells put
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        // Expire ITM
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        // Settle vault
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(mm);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        // MM redeems via batchRedeem
+        vm.prank(mm);
+        OToken(oToken).approve(address(settler), 1e8);
+
+        address[] memory oTokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        oTokens[0] = oToken;
+        amounts[0] = 1e8;
+
+        uint256 mmBefore = usdc.balanceOf(mm);
+        vm.prank(mm);
+        settler.batchRedeem(oTokens, amounts);
+
+        // Payout: $200 per oToken = $200
+        assertEq(usdc.balanceOf(mm), mmBefore + 200e6);
+        // oTokens burned
+        assertEq(OToken(oToken).balanceOf(mm), 0);
+    }
+
+    function test_batchRedeem_revertsOnLengthMismatch() public {
+        address[] memory oTokens = new address[](2);
+        uint256[] memory amounts = new uint256[](1);
+        oTokens[0] = address(0x1);
+        oTokens[1] = address(0x2);
+        amounts[0] = 1e8;
+
+        vm.expectRevert(BatchSettler.LengthMismatch.selector);
+        settler.batchRedeem(oTokens, amounts);
+    }
+
+    function test_batchSettleVaults_revertsOnLengthMismatch() public {
+        address[] memory owners = new address[](2);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        owners[1] = bob;
+        vaultIds[0] = 1;
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.LengthMismatch.selector);
+        settler.batchSettleVaults(owners, vaultIds);
+    }
+
+    // ---- Access Control ----
 
     function test_ownerCanChangeOperator() public {
         address newOperator = address(0xEEEE);
@@ -354,56 +504,280 @@ contract BatchSettlerTest is Test {
         settler.setOperator(address(0xEEEE));
     }
 
-    // --- Full E2E: Batch → Expiry → Settle → Redeem ---
+    function test_batchSettleVaults_revertsForNonOperator() public {
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
 
-    function test_fullE2E_batchToRedeem() public {
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.OnlyOperator.selector);
+        settler.batchSettleVaults(owners, vaultIds);
+    }
+
+    function test_constructorRevertsOnZeroAddress() public {
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        new BatchSettler(address(0), mm);
+
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        new BatchSettler(address(addressBook), address(0));
+    }
+
+    // ===== Premium edge cases =====
+
+    function test_executeOrder_zeroBidPrice() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _approveOToken(bob, oToken);
-
-        // 1. Batch settlement: Alice and Bob sell PUTs
-        BatchSettler.Order[] memory orders = new BatchSettler.Order[](2);
-        orders[0] = BatchSettler.Order({
-            user: alice, oToken: oToken, amount: 1e8, premium: 70e6, collateral: 2000e6
-        });
-        orders[1] = BatchSettler.Order({
-            user: bob, oToken: oToken, amount: 2e8, premium: 140e6, collateral: 4000e6
-        });
 
         vm.prank(mm);
-        settler.settleBatch(orders, address(usdc));
+        priceSheet.publishQuote(oToken, 0, 2e6, block.timestamp + 1 hours, 100e8);
 
-        // MM has 3 oTokens total
-        assertEq(OToken(oToken).balanceOf(mm), 3e8);
+        uint256 aliceBefore = usdc.balanceOf(alice);
 
-        // 2. Expire ITM: price = $1800
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        // Alice gets zero premium (intentional), only loses collateral
+        assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6);
+        assertEq(OToken(oToken).balanceOf(mm), 1e8);
+    }
+
+    function test_executeOrder_revertsOnPremiumTruncation() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+
+        // bidPrice = 50e6, amount = 1 (smallest unit) -> premium = (1 * 50e6) / 1e8 = 0
+        vm.prank(mm);
+        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, 100e8);
+
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.PremiumTooSmall.selector);
+        settler.executeOrder(oToken, 1, 1);
+    }
+
+    // ===== batchRedeem edge cases =====
+
+    function test_batchRedeem_multipleOtokensSameCollateral() public {
+        // Two different PUT strikes, both USDC-collateralized
+        address oToken1 = _createPut(2000e8);
+        address oToken2 = _createPut(2500e8);
+        _approveOToken(alice, oToken1);
+        _approveOToken(bob, oToken2);
+        _publishPutQuote(oToken1, 70e6, 100e8);
+        _publishPutQuote(oToken2, 90e6, 100e8);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken1, 1e8, 2000e6);
+        vm.prank(bob);
+        settler.executeOrder(oToken2, 1e8, 2500e6);
+
+        // Expire ITM for both (price = $1800)
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
-        // 3. Settle vaults
+        // Settle both vaults
         address[] memory owners = new address[](2);
         uint256[] memory vaultIds = new uint256[](2);
         owners[0] = alice;
         owners[1] = bob;
         vaultIds[0] = 1;
         vaultIds[1] = 1;
-
         vm.prank(mm);
         settler.batchSettleVaults(owners, vaultIds);
 
-        // Alice: deposited 2000, payout = 200 (10% ITM), gets back 1800
-        assertEq(usdc.balanceOf(alice), 10_000e6 - 2000e6 + 70e6 + 1800e6);
-        // Bob: deposited 4000, payout = 400, gets back 3600
-        assertEq(usdc.balanceOf(bob), 50_000e6 - 4000e6 + 140e6 + 3600e6);
+        // MM redeems both oTokens in a single batchRedeem
+        vm.startPrank(mm);
+        OToken(oToken1).approve(address(settler), 1e8);
+        OToken(oToken2).approve(address(settler), 1e8);
+        vm.stopPrank();
 
-        // 4. MM redeems oTokens for payout
-        // Payout per oToken: (2000-1800)/2000 * $2000 = $200 per oToken
-        // 3 oTokens = $600 total
+        address[] memory oTokens = new address[](2);
+        uint256[] memory amounts = new uint256[](2);
+        oTokens[0] = oToken1;
+        oTokens[1] = oToken2;
+        amounts[0] = 1e8;
+        amounts[1] = 1e8;
+
+        uint256 mmBefore = usdc.balanceOf(mm);
         vm.prank(mm);
-        controller.redeem(oToken, 3e8);
-        assertEq(usdc.balanceOf(mm), 1_000_000e6 - 70e6 - 140e6 + 600e6);
+        settler.batchRedeem(oTokens, amounts);
 
-        // Verify pool is empty (all collateral distributed)
-        assertEq(usdc.balanceOf(address(pool)), 0);
+        // oToken1 payout: (2000 - 1800) * 1e8 / 1e10 = 200e6
+        // oToken2 payout: (2500 - 1800) * 1e8 / 1e10 = 700e6
+        assertEq(usdc.balanceOf(mm), mmBefore + 200e6 + 700e6);
+        // No residual left in settler
+        assertEq(usdc.balanceOf(address(settler)), 0);
+    }
+
+    function test_batchRedeem_otmZeroPayout() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        // Expire OTM
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+
+        // Settle vault (alice gets full collateral back)
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(mm);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        // MM redeems OTM oToken — zero payout but should not revert
+        vm.prank(mm);
+        OToken(oToken).approve(address(settler), 1e8);
+
+        address[] memory oTokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        oTokens[0] = oToken;
+        amounts[0] = 1e8;
+
+        uint256 mmBefore = usdc.balanceOf(mm);
+        vm.prank(mm);
+        settler.batchRedeem(oTokens, amounts);
+
+        // Zero payout, balance unchanged
+        assertEq(usdc.balanceOf(mm), mmBefore);
+        // oTokens burned
+        assertEq(OToken(oToken).balanceOf(mm), 0);
+    }
+
+    function test_batchRedeem_continuesOnPullFailure() public {
+        address oToken1 = _createPut(2000e8);
+        address oToken2 = _createPut(2500e8);
+        _approveOToken(alice, oToken1);
+        _approveOToken(bob, oToken2);
+        _publishPutQuote(oToken1, 70e6, 100e8);
+        _publishPutQuote(oToken2, 90e6, 100e8);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken1, 1e8, 2000e6);
+        vm.prank(bob);
+        settler.executeOrder(oToken2, 1e8, 2500e6);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        // Settle both vaults
+        address[] memory settleOwners = new address[](2);
+        uint256[] memory settleVaults = new uint256[](2);
+        settleOwners[0] = alice;
+        settleOwners[1] = bob;
+        settleVaults[0] = 1;
+        settleVaults[1] = 1;
+        vm.prank(mm);
+        settler.batchSettleVaults(settleOwners, settleVaults);
+
+        // Redeem oToken1 first so MM has 0 balance of it
+        vm.startPrank(mm);
+        OToken(oToken1).approve(address(settler), 1e8);
+        OToken(oToken2).approve(address(settler), 1e8);
+        vm.stopPrank();
+
+        address[] memory oTokens1 = new address[](1);
+        uint256[] memory amounts1 = new uint256[](1);
+        oTokens1[0] = oToken1;
+        amounts1[0] = 1e8;
+        vm.prank(mm);
+        settler.batchRedeem(oTokens1, amounts1);
+
+        // Now batch both: oToken1 pull fails (0 balance, no approval), oToken2 succeeds
+        address[] memory oTokens = new address[](2);
+        uint256[] memory amounts = new uint256[](2);
+        oTokens[0] = oToken1;
+        oTokens[1] = oToken2;
+        amounts[0] = 1e8;
+        amounts[1] = 1e8;
+
+        uint256 mmBefore = usdc.balanceOf(mm);
+        vm.prank(mm);
+        vm.expectEmit(true, false, false, false);
+        emit RedeemFailed(oToken1, 1e8, "");
+        settler.batchRedeem(oTokens, amounts);
+
+        // oToken2 payout: $700, oToken1 failed but didn't kill the batch
+        assertEq(usdc.balanceOf(mm), mmBefore + 700e6);
+    }
+
+    function test_batchRedeem_continuesOnRevokedApproval() public {
+        address oToken1 = _createPut(2000e8);
+        address oToken2 = _createPut(2500e8);
+        _approveOToken(alice, oToken1);
+        _approveOToken(bob, oToken2);
+        _publishPutQuote(oToken1, 70e6, 100e8);
+        _publishPutQuote(oToken2, 90e6, 100e8);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken1, 1e8, 2000e6);
+        vm.prank(bob);
+        settler.executeOrder(oToken2, 1e8, 2500e6);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        // Settle both
+        address[] memory settleOwners = new address[](2);
+        uint256[] memory settleVaults = new uint256[](2);
+        settleOwners[0] = alice;
+        settleOwners[1] = bob;
+        settleVaults[0] = 1;
+        settleVaults[1] = 1;
+        vm.prank(mm);
+        settler.batchSettleVaults(settleOwners, settleVaults);
+
+        // MM approves oToken2 but revokes oToken1 approval
+        vm.startPrank(mm);
+        OToken(oToken1).approve(address(settler), 0);
+        OToken(oToken2).approve(address(settler), 1e8);
+        vm.stopPrank();
+
+        address[] memory oTokens = new address[](2);
+        uint256[] memory amounts = new uint256[](2);
+        oTokens[0] = oToken1;
+        oTokens[1] = oToken2;
+        amounts[0] = 1e8;
+        amounts[1] = 1e8;
+
+        uint256 mmBefore = usdc.balanceOf(mm);
+        vm.prank(mm);
+        settler.batchRedeem(oTokens, amounts);
+
+        // oToken1 failed (revoked approval), oToken2 succeeded ($700 payout)
+        assertEq(usdc.balanceOf(mm), mmBefore + 700e6);
+        // MM still has oToken1 (pull failed, not burned)
+        assertEq(OToken(oToken1).balanceOf(mm), 1e8);
+    }
+
+    // ===== New validation tests =====
+
+    function test_executeOrder_revertsOnZeroAddress() public {
+        _publishPutQuote(address(0x1), 70e6, 100e8); // dummy, won't reach PriceSheet
+
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        settler.executeOrder(address(0), 1e8, 2000e6);
+    }
+
+    function test_batchSettleVaults_revertsOnEmptyArrays() public {
+        address[] memory owners = new address[](0);
+        uint256[] memory vaultIds = new uint256[](0);
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.EmptyArray.selector);
+        settler.batchSettleVaults(owners, vaultIds);
+    }
+
+    function test_batchRedeem_revertsOnEmptyArrays() public {
+        address[] memory oTokens = new address[](0);
+        uint256[] memory amounts = new uint256[](0);
+
+        vm.expectRevert(BatchSettler.EmptyArray.selector);
+        settler.batchRedeem(oTokens, amounts);
     }
 }
