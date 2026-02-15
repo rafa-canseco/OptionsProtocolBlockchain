@@ -54,6 +54,14 @@ contract Controller {
     error InsufficientCollateral();
     error NoOtokensToRedeem();
     error OTokenNotWhitelisted();
+    error Unauthorized();
+
+    modifier onlyAuthorized(address _owner) {
+        if (msg.sender != _owner && msg.sender != addressBook.batchSettler()) {
+            revert Unauthorized();
+        }
+        _;
+    }
 
     constructor(address _addressBook) {
         addressBook = AddressBook(_addressBook);
@@ -65,7 +73,7 @@ contract Controller {
     /**
      * @notice Open a new empty vault. Returns the vault ID.
      */
-    function openVault(address _owner) external returns (uint256) {
+    function openVault(address _owner) external onlyAuthorized(_owner) returns (uint256) {
         uint256 vaultId = vaultCount[_owner] + 1;
         vaultCount[_owner] = vaultId;
 
@@ -82,7 +90,7 @@ contract Controller {
         uint256 _vaultId,
         address _asset,
         uint256 _amount
-    ) external {
+    ) external onlyAuthorized(_owner) {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
 
         // If vault already has collateral, must be same asset
@@ -112,7 +120,7 @@ contract Controller {
         uint256 _vaultId,
         address _oToken,
         uint256 _amount
-    ) external {
+    ) external onlyAuthorized(_owner) {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
 
         if (vault.shortOtoken != address(0) && vault.shortOtoken != _oToken) {
@@ -151,7 +159,7 @@ contract Controller {
      *
      *         For OTM: full collateral returned to vault owner
      */
-    function settleVault(address _owner, uint256 _vaultId) external {
+    function settleVault(address _owner, uint256 _vaultId) external onlyAuthorized(_owner) {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
         if (vaultSettled[_owner][_vaultId]) revert VaultAlreadySettledError();
 

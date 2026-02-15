@@ -94,4 +94,30 @@ contract OTokenTest is Test {
         assertFalse(callToken.isPut());
         assertEq(callToken.collateralAsset(), weth);
     }
+
+    function test_nameAndSymbolSetAfterInit() public view {
+        assertEq(oToken.name(), "oToken 2000 Put");
+        assertEq(oToken.symbol(), "o2000P");
+    }
+
+    function test_callNameAndSymbol() public {
+        OToken callToken = new OToken();
+        callToken.init(weth, usdc, weth, strikePrice, expiry, false, controller);
+        assertEq(callToken.name(), "oToken 2000 Call");
+        assertEq(callToken.symbol(), "o2000C");
+    }
+
+    function test_nameEmptyBeforeInit() public {
+        OToken freshToken = new OToken();
+        assertEq(freshToken.name(), "");
+        assertEq(freshToken.symbol(), "");
+    }
+
+    function test_nonCreatorCannotInit() public {
+        OToken freshToken = new OToken();
+
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(OToken.OnlyCreator.selector);
+        freshToken.init(weth, usdc, usdc, strikePrice, expiry, true, controller);
+    }
 }

@@ -53,6 +53,7 @@ contract BatchSettler {
     error OnlyOwner();
     error OnlyOperator();
     error EmptyBatch();
+    error InvalidAddress();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -71,6 +72,7 @@ contract BatchSettler {
     }
 
     function setOperator(address _operator) external onlyOwner {
+        if (_operator == address(0)) revert InvalidAddress();
         emit OperatorUpdated(operator, _operator);
         operator = _operator;
     }

@@ -31,6 +31,7 @@ contract Oracle {
     error PriceNotSet();
     error FeedNotSet();
     error InvalidPrice();
+    error InvalidAddress();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -46,6 +47,7 @@ contract Oracle {
      * @notice Set the Chainlink price feed for an asset.
      */
     function setPriceFeed(address _asset, address _feed) external onlyOwner {
+        if (_asset == address(0) || _feed == address(0)) revert InvalidAddress();
         priceFeed[_asset] = _feed;
         emit PriceFeedSet(_asset, _feed);
     }
@@ -56,6 +58,7 @@ contract Oracle {
      *         Price is in 8 decimals (e.g., $2000 = 200000000000).
      */
     function setExpiryPrice(address _asset, uint256 _expiry, uint256 _price) external onlyOwner {
+        if (_asset == address(0)) revert InvalidAddress();
         if (_price == 0) revert InvalidPrice();
         if (expiryPriceSet[_asset][_expiry]) revert PriceAlreadySet();
 

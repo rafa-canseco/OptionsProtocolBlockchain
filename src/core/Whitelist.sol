@@ -31,7 +31,7 @@ contract Whitelist {
     event OTokenWhitelisted(address indexed oToken);
 
     error OnlyOwner();
-    error OnlyFactoryOrOwner();
+    error InvalidAddress();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -44,11 +44,13 @@ contract Whitelist {
     }
 
     function whitelistCollateral(address _asset) external onlyOwner {
+        if (_asset == address(0)) revert InvalidAddress();
         isWhitelistedCollateral[_asset] = true;
         emit CollateralWhitelisted(_asset);
     }
 
     function whitelistUnderlying(address _asset) external onlyOwner {
+        if (_asset == address(0)) revert InvalidAddress();
         isWhitelistedUnderlying[_asset] = true;
         emit UnderlyingWhitelisted(_asset);
     }
@@ -64,6 +66,9 @@ contract Whitelist {
         address _collateralAsset,
         bool _isPut
     ) external onlyOwner {
+        if (_underlying == address(0) || _strikeAsset == address(0) || _collateralAsset == address(0)) {
+            revert InvalidAddress();
+        }
         bytes32 productHash = keccak256(
             abi.encodePacked(_underlying, _strikeAsset, _collateralAsset, _isPut)
         );
@@ -87,12 +92,10 @@ contract Whitelist {
     }
 
     /**
-     * @notice Whitelist an oToken. Called by factory or owner after creation.
+     * @notice Whitelist an oToken. Only the owner can whitelist.
      */
-    function whitelistOToken(address _oToken) external {
-        if (msg.sender != owner && msg.sender != addressBook.oTokenFactory()) {
-            revert OnlyFactoryOrOwner();
-        }
+    function whitelistOToken(address _oToken) external onlyOwner {
+        if (_oToken == address(0)) revert InvalidAddress();
         isWhitelistedOToken[_oToken] = true;
         emit OTokenWhitelisted(_oToken);
     }

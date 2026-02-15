@@ -35,6 +35,8 @@ contract OTokenFactory {
     error OTokenAlreadyExists();
     error InvalidExpiry();
     error AssetNotWhitelisted();
+    error InvalidAddress();
+    error InvalidStrikePrice();
 
     constructor(address _addressBook) {
         addressBook = AddressBook(_addressBook);
@@ -52,6 +54,11 @@ contract OTokenFactory {
         uint256 _expiry,
         bool _isPut
     ) external returns (address) {
+        if (_underlying == address(0) || _strikeAsset == address(0) || _collateralAsset == address(0)) {
+            revert InvalidAddress();
+        }
+        if (_strikePrice == 0) revert InvalidStrikePrice();
+
         // Expiry must be in the future and at 08:00 UTC
         if (_expiry <= block.timestamp) revert InvalidExpiry();
         if (_expiry % (24 hours) != 8 hours) revert InvalidExpiry();

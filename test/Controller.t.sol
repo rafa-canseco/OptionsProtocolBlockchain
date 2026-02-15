@@ -39,6 +39,7 @@ contract ControllerTest is Test {
 
     address public user = address(0xBEEF);
     address public buyer = address(0xCAFE);
+    address public attacker = address(0xDEAD);
 
     uint256 public strikePrice = 2000e8; // $2000
     uint256 public expiry;
@@ -106,15 +107,63 @@ contract ControllerTest is Test {
     // --- Open Vault ---
 
     function test_openVault() public {
+        vm.prank(user);
         uint256 vaultId = controller.openVault(user);
         assertEq(vaultId, 1);
         assertEq(controller.vaultCount(user), 1);
     }
 
     function test_openMultipleVaults() public {
+        vm.prank(user);
         controller.openVault(user);
+        vm.prank(user);
         controller.openVault(user);
         assertEq(controller.vaultCount(user), 2);
+    }
+
+    // --- Access Control ---
+
+    function test_unauthorizedCannotOpenVault() public {
+        vm.prank(attacker);
+        vm.expectRevert(Controller.Unauthorized.selector);
+        controller.openVault(user);
+    }
+
+    function test_unauthorizedCannotDepositCollateral() public {
+        vm.prank(user);
+        controller.openVault(user);
+
+        vm.prank(attacker);
+        vm.expectRevert(Controller.Unauthorized.selector);
+        controller.depositCollateral(user, 1, address(usdc), 2000e6);
+    }
+
+    function test_unauthorizedCannotMintOtoken() public {
+        address oToken = _createPut();
+        vm.startPrank(user);
+        controller.openVault(user);
+        controller.depositCollateral(user, 1, address(usdc), 2000e6);
+        vm.stopPrank();
+
+        vm.prank(attacker);
+        vm.expectRevert(Controller.Unauthorized.selector);
+        controller.mintOtoken(user, 1, oToken, 1e8);
+    }
+
+    function test_unauthorizedCannotSettleVault() public {
+        address oToken = _createPut();
+        vm.startPrank(user);
+        controller.openVault(user);
+        controller.depositCollateral(user, 1, address(usdc), 2000e6);
+        controller.mintOtoken(user, 1, oToken, 1e8);
+        vm.stopPrank();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+
+        vm.prank(attacker);
+        vm.expectRevert(Controller.Unauthorized.selector);
+        controller.settleVault(user, 1);
     }
 
     // --- PUT: Full Lifecycle ---
@@ -122,57 +171,46 @@ contract ControllerTest is Test {
     function test_putLifecycle_expireOTM() public {
         address oToken = _createPut();
 
-        // Open vault and deposit collateral
+        vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
-
-        // Mint 1 oToken (1 PUT at $2000 = needs 2000 USDC)
         controller.mintOtoken(user, vaultId, oToken, 1e8);
 
-        // Verify oTokens minted
         assertEq(OToken(oToken).balanceOf(user), 1e8);
         assertEq(usdc.balanceOf(address(pool)), 2000e6);
 
-        // User sells oToken to buyer (simulating the trade)
-        vm.prank(user);
         OToken(oToken).transfer(buyer, 1e8);
+        vm.stopPrank();
 
-        // Time passes, option expires OTM (price > strike)
         vm.warp(expiry + 1);
-        oracle.setExpiryPrice(address(weth), expiry, 2100e8); // $2100 > $2000 = OTM
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
 
-        // Settle vault — user gets all collateral back
+        vm.prank(user);
         controller.settleVault(user, vaultId);
-        assertEq(usdc.balanceOf(user), 100_000e6); // got 2000 back (100000 - 2000 + 2000)
+        assertEq(usdc.balanceOf(user), 100_000e6);
 
-        // Buyer redeems — gets nothing (OTM)
         vm.prank(buyer);
         controller.redeem(oToken, 1e8);
-        assertEq(usdc.balanceOf(buyer), 0); // no payout
+        assertEq(usdc.balanceOf(buyer), 0);
     }
 
     function test_putLifecycle_expireITM() public {
         address oToken = _createPut();
 
+        vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
         controller.mintOtoken(user, vaultId, oToken, 1e8);
-
-        // Transfer to buyer
-        vm.prank(user);
         OToken(oToken).transfer(buyer, 1e8);
+        vm.stopPrank();
 
-        // Expires ITM: price $1800 < strike $2000
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
-        // Settle vault: writer gets collateral minus payout
-        // Payout = 1e8 * (2000e8 - 1800e8) / 1e10 = 1e8 * 200e8 / 1e10 = 200e6 (200 USDC)
+        vm.prank(user);
         controller.settleVault(user, vaultId);
-        // User started with 100000, deposited 2000, gets back 2000-200=1800
         assertEq(usdc.balanceOf(user), 99_800e6);
 
-        // Buyer redeems: gets 200 USDC
         vm.prank(buyer);
         controller.redeem(oToken, 1e8);
         assertEq(usdc.balanceOf(buyer), 200e6);
@@ -183,23 +221,20 @@ contract ControllerTest is Test {
     function test_callLifecycle_expireOTM() public {
         address oToken = _createCall();
 
+        vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
-        // CALL: collateral is WETH. 1 CALL = 1e18 WETH
         controller.depositCollateral(user, vaultId, address(weth), 1e18);
         controller.mintOtoken(user, vaultId, oToken, 1e8);
-
-        vm.prank(user);
         OToken(oToken).transfer(buyer, 1e8);
+        vm.stopPrank();
 
-        // Expires OTM: price $1900 < strike $2000
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1900e8);
 
-        // Writer gets all WETH back
+        vm.prank(user);
         controller.settleVault(user, vaultId);
         assertEq(weth.balanceOf(user), 100e18);
 
-        // Buyer gets nothing
         vm.prank(buyer);
         controller.redeem(oToken, 1e8);
         assertEq(weth.balanceOf(buyer), 0);
@@ -208,24 +243,20 @@ contract ControllerTest is Test {
     function test_callLifecycle_expireITM() public {
         address oToken = _createCall();
 
+        vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(weth), 1e18);
         controller.mintOtoken(user, vaultId, oToken, 1e8);
-
-        vm.prank(user);
         OToken(oToken).transfer(buyer, 1e8);
+        vm.stopPrank();
 
-        // Expires ITM: price $2500 > strike $2000
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2500e8);
 
-        // Payout in WETH = 1e8 * (2500e8 - 2000e8) * 1e10 / 2500e8
-        // = 1e8 * 500e8 * 1e10 / 2500e8 = 0.2e18 (0.2 WETH)
+        vm.prank(user);
         controller.settleVault(user, vaultId);
-        // User gets back 1 - 0.2 = 0.8 WETH
         assertEq(weth.balanceOf(user), 99e18 + 0.8e18);
 
-        // Buyer gets 0.2 WETH
         vm.prank(buyer);
         controller.redeem(oToken, 1e8);
         assertEq(weth.balanceOf(buyer), 0.2e18);
@@ -235,69 +266,83 @@ contract ControllerTest is Test {
 
     function test_cannotMintWithoutCollateral() public {
         address oToken = _createPut();
+        vm.prank(user);
         controller.openVault(user);
 
+        vm.prank(user);
         vm.expectRevert(Controller.InsufficientCollateral.selector);
         controller.mintOtoken(user, 1, oToken, 1e8);
     }
 
     function test_cannotMintInsufficientCollateral() public {
         address oToken = _createPut();
+        vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
-        controller.depositCollateral(user, vaultId, address(usdc), 1000e6); // only 1000, need 2000
+        controller.depositCollateral(user, vaultId, address(usdc), 1000e6);
 
         vm.expectRevert(Controller.InsufficientCollateral.selector);
         controller.mintOtoken(user, vaultId, oToken, 1e8);
+        vm.stopPrank();
     }
 
     function test_cannotSettleBeforeExpiry() public {
         address oToken = _createPut();
+        vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
         controller.mintOtoken(user, vaultId, oToken, 1e8);
 
         vm.expectRevert(Controller.OptionNotExpired.selector);
         controller.settleVault(user, vaultId);
+        vm.stopPrank();
     }
 
     function test_cannotSettleWithoutExpiryPrice() public {
         address oToken = _createPut();
+        vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
         controller.mintOtoken(user, vaultId, oToken, 1e8);
+        vm.stopPrank();
 
         vm.warp(expiry + 1);
-        // Don't set expiry price
 
+        vm.prank(user);
         vm.expectRevert(Controller.ExpiryPriceNotSet.selector);
         controller.settleVault(user, vaultId);
     }
 
     function test_cannotSettleTwice() public {
         address oToken = _createPut();
+        vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
         controller.mintOtoken(user, vaultId, oToken, 1e8);
+        vm.stopPrank();
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+
+        vm.prank(user);
         controller.settleVault(user, vaultId);
 
+        vm.prank(user);
         vm.expectRevert(Controller.VaultAlreadySettledError.selector);
         controller.settleVault(user, vaultId);
     }
 
     function test_cannotMintUnwhitelistedOToken() public {
-        // Create oToken but DON'T whitelist it
         address oToken = factory.createOToken(
             address(weth), address(usdc), address(usdc), strikePrice, expiry, true
         );
 
+        vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
 
         vm.expectRevert(Controller.OTokenNotWhitelisted.selector);
         controller.mintOtoken(user, vaultId, oToken, 1e8);
+        vm.stopPrank();
     }
 
     // --- Micro-options ---
@@ -305,29 +350,23 @@ contract ControllerTest is Test {
     function test_microOption_1USDC() public {
         address oToken = _createPut();
 
+        vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
-        // $1 CSP at $2000 strike: collateral = 1e8 * 2000e8 / 1e10 = ... wait
-        // Actually, for $1 worth: amount = $1 / $2000 = 0.0005 ETH = 50000 (in 8 decimals)
-        // Collateral = 50000 * 2000e8 / 1e10 = 50000 * 200000000000 / 10000000000 = 1000000 = 1e6 = $1 USDC
-        uint256 microAmount = 50000; // 0.0005 oTokens in 8 decimals
-        uint256 microCollateral = 1e6; // $1 USDC
+        uint256 microAmount = 50000;
+        uint256 microCollateral = 1e6;
 
         controller.depositCollateral(user, vaultId, address(usdc), microCollateral);
         controller.mintOtoken(user, vaultId, oToken, microAmount);
+        vm.stopPrank();
 
         assertEq(OToken(oToken).balanceOf(user), microAmount);
 
-        // Expire ITM at $1900
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1900e8);
 
-        // Payout = 50000 * (2000e8 - 1900e8) / 1e10 = 50000 * 100e8 / 1e10 = 50000
-        // That's 0.05 USDC ($0.05) — correct: $1 * ($200/$2000) = $0.10... let me recalc
-        // Actually: 50000 * 10000000000 / 10000000000 = 50000 = $0.05
-        // Hmm, the proportion: (2000-1900)/2000 = 5%, $1 * 5% = $0.05. Yes, correct.
+        vm.prank(user);
         controller.settleVault(user, vaultId);
 
-        // User deposited 1e6, gets back 1e6 - 50000 = 950000
         assertEq(usdc.balanceOf(user), 100_000e6 - 1e6 + 950000);
     }
 }

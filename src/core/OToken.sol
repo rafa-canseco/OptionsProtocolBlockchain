@@ -18,17 +18,24 @@ contract OToken is ERC20 {
     bool public isPut;
 
     address public controller;
+    address private _creator;
     bool private _initialized;
+
+    string private _tokenName;
+    string private _tokenSymbol;
 
     error AlreadyInitialized();
     error OnlyController();
+    error OnlyCreator();
 
     modifier onlyController() {
         if (msg.sender != controller) revert OnlyController();
         _;
     }
 
-    constructor() ERC20("", "") {}
+    constructor() ERC20("", "") {
+        _creator = msg.sender;
+    }
 
     /**
      * @notice Initialize the oToken. Called once by the factory after deployment.
@@ -42,6 +49,7 @@ contract OToken is ERC20 {
         bool _isPut,
         address _controller
     ) external {
+        if (msg.sender != _creator) revert OnlyCreator();
         if (_initialized) revert AlreadyInitialized();
         _initialized = true;
 
@@ -52,6 +60,19 @@ contract OToken is ERC20 {
         expiry = _expiry;
         isPut = _isPut;
         controller = _controller;
+
+        string memory optType = _isPut ? "P" : "C";
+        string memory strikeStr = _uint2str(_strikePrice / 1e8);
+        _tokenName = string.concat("oToken ", strikeStr, " ", _isPut ? "Put" : "Call");
+        _tokenSymbol = string.concat("o", strikeStr, optType);
+    }
+
+    function name() public view override returns (string memory) {
+        return _tokenName;
+    }
+
+    function symbol() public view override returns (string memory) {
+        return _tokenSymbol;
     }
 
     function decimals() public pure override returns (uint8) {
@@ -64,5 +85,22 @@ contract OToken is ERC20 {
 
     function burnOtoken(address _from, uint256 _amount) external onlyController {
         _burn(_from, _amount);
+    }
+
+    function _uint2str(uint256 value) internal pure returns (string memory) {
+        if (value == 0) return "0";
+        uint256 temp = value;
+        uint256 digits;
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits--;
+            buffer[digits] = bytes1(uint8(48 + (value % 10)));
+            value /= 10;
+        }
+        return string(buffer);
     }
 }
