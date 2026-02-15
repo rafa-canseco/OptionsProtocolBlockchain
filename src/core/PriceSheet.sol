@@ -5,14 +5,13 @@ import "./AddressBook.sol";
 
 /**
  * @title PriceSheet
- * @notice On-chain price feed from the Market Maker. The MM publishes
- *         bid/ask quotes for each oToken with a deadline (TTL).
+ * @notice On-chain price feed from the Market Maker with capacity tracking.
  *
  *         Flow:
- *         1. MM calls publishQuotes() with bid/ask prices for active oTokens
- *         2. Frontend reads getQuote() to display prices to users
- *         3. User accepts a price → backend validates against this contract
- *         4. Keeper calls BatchSettler.settleBatch() with accepted orders
+ *         1. MM calls publishQuotes() with bid/ask prices + maxAmount for active oTokens
+ *         2. Frontend reads getQuote() to display prices and remaining capacity
+ *         3. User calls BatchSettler.executeOrder() which atomically fills the quote
+ *         4. filledAmount increments on each fill; orders revert when capacity is reached
  *
  *         Quotes auto-expire at their deadline. The MM can also
  *         invalidate quotes early via invalidateQuotes().
@@ -23,9 +22,11 @@ contract PriceSheet {
     address public operator; // The MM
 
     struct Quote {
-        uint256 bidPrice;  // premium MM pays per 1 oToken (1e8) — in USDC (6 decimals)
-        uint256 askPrice;  // premium MM charges per 1 oToken (1e8) — in USDC (6 decimals)
-        uint256 deadline;  // unix timestamp when this quote expires
+        uint256 bidPrice;      // premium MM pays per 1 oToken (1e8) — in USDC (6 decimals)
+        uint256 askPrice;      // premium MM charges per 1 oToken (1e8) — in USDC (6 decimals)
+        uint256 deadline;      // unix timestamp when this quote expires
+        uint256 maxAmount;     // max capacity in collateral units
+        uint256 filledAmount;  // amount already filled in collateral units
     }
 
     /// @notice oToken address → current quote
@@ -35,17 +36,22 @@ contract PriceSheet {
         address indexed oToken,
         uint256 bidPrice,
         uint256 askPrice,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAmount
     );
     event QuoteInvalidated(address indexed oToken);
+    event QuoteFilled(address indexed oToken, uint256 amount, uint256 newFilledAmount);
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
 
     error OnlyOwner();
     error OnlyOperator();
+    error OnlyBatchSettler();
     error InvalidAddress();
     error InvalidQuote();
     error LengthMismatch();
     error EmptyArray();
+    error QuoteExpired();
+    error CapacityExceeded();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -72,39 +78,55 @@ contract PriceSheet {
 
     /**
      * @notice Publish quotes for multiple oTokens in a single tx.
-     * @param oTokens   Array of oToken addresses
-     * @param bidPrices  Bid price per oToken (USDC, 6 decimals)
-     * @param askPrices  Ask price per oToken (USDC, 6 decimals)
-     * @param deadlines  Unix timestamp when each quote expires
+     *         Publishing overwrites any existing quote (resets filledAmount to 0).
      */
     function publishQuotes(
         address[] calldata oTokens,
         uint256[] calldata bidPrices,
         uint256[] calldata askPrices,
-        uint256[] calldata deadlines
+        uint256[] calldata deadlines,
+        uint256[] calldata maxAmounts
     ) external onlyOperator {
         if (oTokens.length == 0) revert EmptyArray();
         if (
             oTokens.length != bidPrices.length ||
             oTokens.length != askPrices.length ||
-            oTokens.length != deadlines.length
+            oTokens.length != deadlines.length ||
+            oTokens.length != maxAmounts.length
         ) revert LengthMismatch();
 
         for (uint256 i = 0; i < oTokens.length; i++) {
-            _publishQuote(oTokens[i], bidPrices[i], askPrices[i], deadlines[i]);
+            _publishQuote(oTokens[i], bidPrices[i], askPrices[i], deadlines[i], maxAmounts[i]);
         }
     }
 
     /**
-     * @notice Publish a single quote.
+     * @notice Publish a single quote. Resets filledAmount to 0.
      */
     function publishQuote(
         address oToken,
         uint256 bidPrice,
         uint256 askPrice,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAmount
     ) external onlyOperator {
-        _publishQuote(oToken, bidPrice, askPrice, deadline);
+        _publishQuote(oToken, bidPrice, askPrice, deadline, maxAmount);
+    }
+
+    /**
+     * @notice Fill a quote's capacity. Only callable by the BatchSettler.
+     * @param oToken  The oToken being filled
+     * @param amount  Amount to fill (in collateral units)
+     */
+    function fillQuote(address oToken, uint256 amount) external {
+        if (msg.sender != addressBook.batchSettler()) revert OnlyBatchSettler();
+
+        Quote storage q = quotes[oToken];
+        if (q.deadline <= block.timestamp || q.askPrice == 0) revert QuoteExpired();
+        if (q.filledAmount + amount > q.maxAmount) revert CapacityExceeded();
+
+        q.filledAmount += amount;
+        emit QuoteFilled(oToken, amount, q.filledAmount);
     }
 
     /**
@@ -127,33 +149,37 @@ contract PriceSheet {
 
     /**
      * @notice Get a quote for an oToken and whether it's still valid.
-     * @return bidPrice  Bid price (0 if no quote or expired)
-     * @return askPrice  Ask price (0 if no quote or expired)
-     * @return isValid   True if quote exists and hasn't expired
+     * @return bidPrice      Bid price (0 if no quote or expired)
+     * @return askPrice      Ask price (0 if no quote or expired)
+     * @return maxAmount     Max capacity in collateral units
+     * @return filledAmount  Amount already filled
+     * @return isValid       True if quote exists and hasn't expired
      */
     function getQuote(address oToken)
         external
         view
-        returns (uint256 bidPrice, uint256 askPrice, bool isValid)
+        returns (uint256 bidPrice, uint256 askPrice, uint256 maxAmount, uint256 filledAmount, bool isValid)
     {
         Quote storage q = quotes[oToken];
         if (q.deadline > block.timestamp && q.askPrice > 0) {
-            return (q.bidPrice, q.askPrice, true);
+            return (q.bidPrice, q.askPrice, q.maxAmount, q.filledAmount, true);
         }
-        return (0, 0, false);
+        return (0, 0, 0, 0, false);
     }
 
     function _publishQuote(
         address oToken,
         uint256 bidPrice,
         uint256 askPrice,
-        uint256 deadline
+        uint256 deadline,
+        uint256 maxAmount
     ) internal {
         if (oToken == address(0)) revert InvalidAddress();
         if (askPrice == 0 || bidPrice > askPrice) revert InvalidQuote();
         if (deadline <= block.timestamp) revert InvalidQuote();
+        if (maxAmount == 0) revert InvalidQuote();
 
-        quotes[oToken] = Quote(bidPrice, askPrice, deadline);
-        emit QuotePublished(oToken, bidPrice, askPrice, deadline);
+        quotes[oToken] = Quote(bidPrice, askPrice, deadline, maxAmount, 0);
+        emit QuotePublished(oToken, bidPrice, askPrice, deadline, maxAmount);
     }
 }
