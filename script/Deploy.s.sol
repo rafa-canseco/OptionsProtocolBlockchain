@@ -9,6 +9,7 @@ import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
 import "../src/core/Whitelist.sol";
 import "../src/core/BatchSettler.sol";
+import "../src/core/PriceSheet.sol";
 
 /**
  * @title Deploy
@@ -55,6 +56,9 @@ contract Deploy is Script {
         BatchSettler settler = new BatchSettler(address(addressBook), operator);
         console.log("BatchSettler:", address(settler));
 
+        PriceSheet priceSheet = new PriceSheet(address(addressBook), operator);
+        console.log("PriceSheet:", address(priceSheet));
+
         // 3. Wire AddressBook
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -62,6 +66,7 @@ contract Deploy is Script {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
+        addressBook.setPriceSheet(address(priceSheet));
 
         // 4. Whitelist assets and products (ETH only for MVP)
         whitelist.whitelistUnderlying(weth);
