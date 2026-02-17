@@ -41,7 +41,7 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     // Physical delivery infrastructure
     address public aavePool;
     address public swapRouter;
-    uint24 public swapFeeTier; // Uniswap V3 fee tier (default 500 = 0.05%)
+    uint24 public swapFeeTier; // Uniswap V3 fee tier in hundredths of a bps (e.g. 500 = 0.05%)
 
     event OrderExecuted(
         address indexed user,
@@ -79,6 +79,8 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     error SwapRouterNotSet();
     error FlashLoanUnauthorized();
     error FeeTooHigh();
+    error InvalidFeeTier();
+    error RedeemReturnedZero();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -124,6 +126,9 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     }
 
     function setSwapFeeTier(uint24 _feeTier) external onlyOwner {
+        if (_feeTier != 100 && _feeTier != 500 && _feeTier != 3000 && _feeTier != 10000) {
+            revert InvalidFeeTier();
+        }
         swapFeeTier = _feeTier;
     }
 
@@ -294,7 +299,8 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
      *         - aavePool and swapRouter must be configured
      *
      * @param oToken             The expired oToken
-     * @param user               The vault owner who should receive the contra-asset
+     * @param user               The address to receive the contra-asset (typically the vault owner
+     *                           whose collateral was retained at settlement)
      * @param amount             Amount of oTokens to redeem (8 decimals)
      * @param maxCollateralSpent Maximum collateral to spend in the DEX swap (slippage protection)
      */
@@ -304,50 +310,14 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         uint256 amount,
         uint256 maxCollateralSpent
     ) public onlyOperator nonReentrant {
-        if (aavePool == address(0)) revert AavePoolNotSet();
-        if (swapRouter == address(0)) revert SwapRouterNotSet();
-        if (amount == 0) revert InvalidAmount();
-
-        OToken ot = OToken(oToken);
-
-        // Validate expiry
-        if (block.timestamp < ot.expiry()) revert OptionNotExpired();
-
-        // Validate oracle price is set and option is strictly ITM
-        Oracle oracle = Oracle(addressBook.oracle());
-        (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(ot.underlying(), ot.expiry());
-        if (!isSet) revert ExpiryPriceNotSet();
-
-        uint256 strike = ot.strikePrice();
-        if (ot.isPut()) {
-            if (expiryPrice >= strike) revert OptionNotITM(); // OTM or ATM
-        } else {
-            if (expiryPrice <= strike) revert OptionNotITM(); // OTM or ATM
-        }
-
-        // Calculate contra-asset and amount
-        address contraAsset;
-        uint256 contraAmount;
-        if (ot.isPut()) {
-            // PUT ITM: user receives underlying (WETH)
-            contraAsset = ot.underlying();
-            contraAmount = amount * 1e10; // oToken 8 decimals → underlying 18 decimals
-        } else {
-            // CALL ITM: user receives strike asset (USDC)
-            contraAsset = ot.strikeAsset();
-            contraAmount = (amount * strike) / 1e10; // oToken 8 decimals → USDC 6 decimals
-        }
-
-        // Encode callback params
-        bytes memory params = abi.encode(oToken, user, amount, maxCollateralSpent);
-
-        // Initiate flash loan — Aave sends contraAsset to this contract, then calls executeOperation
-        IPool(aavePool).flashLoanSimple(address(this), contraAsset, contraAmount, params, 0);
+        _executePhysicalRedeem(oToken, user, amount, maxCollateralSpent);
     }
 
     /**
      * @notice Aave V3 flash loan callback. Called by the Aave Pool after sending the flash-loaned asset.
      *         Handles: deliver contra-asset to user → redeem oTokens → swap collateral → repay flash loan.
+     * @dev MUST NOT be called externally — only by the Aave Pool as part of flashLoanSimple.
+     *      The `premium` parameter here is the Aave flash loan fee (NOT the option premium used elsewhere).
      */
     function executeOperation(
         address asset,
@@ -369,7 +339,7 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         uint256 collateralUsed = _redeemAndSwap(oToken, oTokenAmount, asset, amount + premium, maxCollateralSpent);
 
         // 3. Approve Aave Pool to pull repayment
-        IERC20(asset).approve(aavePool, amount + premium);
+        IERC20(asset).forceApprove(aavePool, amount + premium);
 
         emit PhysicalDelivery(oToken, user, amount, collateralUsed);
 
@@ -396,9 +366,10 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         ctrl.redeem(oToken, oTokenAmount);
 
         uint256 collateralReceived = IERC20(collateralAsset).balanceOf(address(this)) - collateralBefore;
+        if (collateralReceived == 0) revert RedeemReturnedZero();
 
         // Swap collateral → contra-asset to repay flash loan
-        IERC20(collateralAsset).approve(swapRouter, collateralReceived);
+        IERC20(collateralAsset).forceApprove(swapRouter, collateralReceived);
 
         collateralUsed = ISwapRouter(swapRouter).exactOutputSingle(
             ISwapRouter.ExactOutputSingleParams({
@@ -419,8 +390,8 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
             IERC20(collateralAsset).safeTransfer(operator, surplus);
         }
 
-        // Reset approval for safety
-        IERC20(collateralAsset).approve(swapRouter, 0);
+        // Clear leftover approval to prevent residual allowance from being exploited
+        IERC20(collateralAsset).forceApprove(swapRouter, 0);
     }
 
     /**
@@ -450,21 +421,33 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     }
 
     /**
-     * @notice Self-call target for batchPhysicalRedeem — wraps physicalRedeem in try/catch.
+     * @notice Self-call target for batchPhysicalRedeem — delegates to shared _executePhysicalRedeem.
      *         External so the batch can catch individual failures without reverting the entire batch.
+     *         Cannot call physicalRedeem directly because onlyOperator would fail (msg.sender is address(this)).
      */
     function _physicalRedeemSingle(
         address oToken,
         address user,
         uint256 amount,
         uint256 maxCollateralSpent
-    ) external {
+    ) external nonReentrant {
         if (msg.sender != address(this)) revert InvalidAddress();
+        _executePhysicalRedeem(oToken, user, amount, maxCollateralSpent);
+    }
 
-        // Call physicalRedeem directly (bypasses onlyOperator since msg.sender is this)
-        // We need to duplicate the logic here since physicalRedeem requires onlyOperator
+    /**
+     * @dev Shared implementation for physicalRedeem and _physicalRedeemSingle.
+     *      Validates the option is expired + ITM, calculates contra-asset, and initiates flash loan.
+     */
+    function _executePhysicalRedeem(
+        address oToken,
+        address user,
+        uint256 amount,
+        uint256 maxCollateralSpent
+    ) private {
         if (aavePool == address(0)) revert AavePoolNotSet();
         if (swapRouter == address(0)) revert SwapRouterNotSet();
+        if (amount == 0) revert InvalidAmount();
 
         OToken ot = OToken(oToken);
         if (block.timestamp < ot.expiry()) revert OptionNotExpired();
@@ -484,10 +467,10 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         uint256 contraAmount;
         if (ot.isPut()) {
             contraAsset = ot.underlying();
-            contraAmount = amount * 1e10;
+            contraAmount = amount * 1e10; // oToken 8 dec → underlying 18 dec (assumes 18 dec underlying)
         } else {
             contraAsset = ot.strikeAsset();
-            contraAmount = (amount * strike) / 1e10;
+            contraAmount = (amount * strike) / 1e10; // oToken 8 dec → USDC 6 dec (assumes 6 dec strike asset)
         }
 
         bytes memory params = abi.encode(oToken, user, amount, maxCollateralSpent);

@@ -1471,4 +1471,115 @@ contract PhysicalRedeemTest is Test {
         // Restore original settler
         addressBook.setBatchSettler(address(settler));
     }
+
+    function test_physicalRedeem_revertsOnSwapRouterNotSet() public {
+        BatchSettler freshSettler = new BatchSettler(address(addressBook), mm);
+        addressBook.setBatchSettler(address(freshSettler));
+        freshSettler.setAavePool(address(mockAave));
+        // swapRouter left as address(0)
+
+        address oToken = _createPut(strikePrice);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.SwapRouterNotSet.selector);
+        freshSettler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+
+        addressBook.setBatchSettler(address(settler));
+    }
+
+    function test_physicalRedeem_revertsOnZeroAmount() public {
+        address oToken = _createPut(strikePrice);
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.InvalidAmount.selector);
+        settler.physicalRedeem(oToken, alice, 0, 2000e6);
+    }
+
+    function test_physicalRedeem_revertsOnExpiryPriceNotSet() public {
+        address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
+        vm.warp(expiry + 1);
+        // oracle price NOT set
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.ExpiryPriceNotSet.selector);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+    }
+
+    // ===== Flash loan callback security =====
+
+    function test_executeOperation_revertsOnUnauthorizedCaller() public {
+        vm.prank(address(0xBAD));
+        vm.expectRevert(BatchSettler.FlashLoanUnauthorized.selector);
+        settler.executeOperation(address(weth), 1e18, 0, address(settler), "");
+    }
+
+    function test_executeOperation_revertsOnWrongInitiator() public {
+        vm.prank(address(mockAave)); // correct sender
+        vm.expectRevert(BatchSettler.FlashLoanUnauthorized.selector);
+        settler.executeOperation(address(weth), 1e18, 0, address(0xBAD), ""); // wrong initiator
+    }
+
+    // ===== Self-call guard =====
+
+    function test_physicalRedeemSingle_revertsOnDirectCall() public {
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        settler._physicalRedeemSingle(address(0x1), alice, 1e8, 2000e6);
+    }
+
+    // ===== Slippage protection =====
+
+    function test_physicalRedeem_revertsOnSlippageExceeded() public {
+        address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        // Settle vault
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(mm);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        // maxCollateralSpent = 1 USDC (way too low to buy 1 ETH)
+        vm.prank(mm);
+        vm.expectRevert(); // "Too much slippage" from MockSwapRouter
+        settler.physicalRedeem(oToken, alice, 1e8, 1e6);
+    }
+
+    // ===== Fee tier validation =====
+
+    function test_setSwapFeeTier_revertsOnInvalidTier() public {
+        vm.expectRevert(BatchSettler.InvalidFeeTier.selector);
+        settler.setSwapFeeTier(0);
+
+        vm.expectRevert(BatchSettler.InvalidFeeTier.selector);
+        settler.setSwapFeeTier(300); // not a valid Uniswap tier
+
+        vm.expectRevert(BatchSettler.InvalidFeeTier.selector);
+        settler.setSwapFeeTier(1000);
+    }
+
+    function test_setSwapFeeTier_acceptsValidTiers() public {
+        settler.setSwapFeeTier(100);
+        assertEq(settler.swapFeeTier(), 100);
+
+        settler.setSwapFeeTier(500);
+        assertEq(settler.swapFeeTier(), 500);
+
+        settler.setSwapFeeTier(3000);
+        assertEq(settler.swapFeeTier(), 3000);
+
+        settler.setSwapFeeTier(10000);
+        assertEq(settler.swapFeeTier(), 10000);
+    }
 }

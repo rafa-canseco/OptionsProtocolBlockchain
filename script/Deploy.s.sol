@@ -114,11 +114,15 @@ contract Deploy is Script {
         address router = vm.envOr("UNISWAP_SWAP_ROUTER", address(0));
         uint24 feeTier = uint24(vm.envOr("SWAP_FEE_TIER", uint256(500)));
 
-        if (aavePool != address(0)) {
+        if (aavePool == address(0)) {
+            console.log("WARNING: AAVE_POOL_ADDRESS not set. Physical delivery will be non-functional.");
+        } else {
             settler.setAavePool(aavePool);
             console.log("Aave Pool:", aavePool);
         }
-        if (router != address(0)) {
+        if (router == address(0)) {
+            console.log("WARNING: UNISWAP_SWAP_ROUTER not set. Physical delivery will be non-functional.");
+        } else {
             settler.setSwapRouter(router);
             console.log("Uniswap Router:", router);
         }
