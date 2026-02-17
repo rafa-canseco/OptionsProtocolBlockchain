@@ -34,6 +34,10 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     address public operator; // The Market Maker (MM)
     uint256 public batchNonce; // Incremented on each batchSettleVaults() call
 
+    // Protocol fee
+    address public treasury;
+    uint256 public protocolFeeBps; // basis points (400 = 4%, max 2000 = 20%)
+
     // Physical delivery infrastructure
     address public aavePool;
     address public swapRouter;
@@ -43,7 +47,9 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         address indexed user,
         address indexed oToken,
         uint256 amount,
-        uint256 premium,
+        uint256 grossPremium,
+        uint256 netPremium,
+        uint256 fee,
         uint256 collateral,
         uint256 vaultId
     );
@@ -72,6 +78,7 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     error AavePoolNotSet();
     error SwapRouterNotSet();
     error FlashLoanUnauthorized();
+    error FeeTooHigh();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -94,6 +101,16 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         if (_operator == address(0)) revert InvalidAddress();
         emit OperatorUpdated(operator, _operator);
         operator = _operator;
+    }
+
+    function setTreasury(address _treasury) external onlyOwner {
+        if (_treasury == address(0)) revert InvalidAddress();
+        treasury = _treasury;
+    }
+
+    function setProtocolFeeBps(uint256 _feeBps) external onlyOwner {
+        if (_feeBps > 2000) revert FeeTooHigh();
+        protocolFeeBps = _feeBps;
     }
 
     function setAavePool(address _aavePool) external onlyOwner {
@@ -159,11 +176,34 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         // 7. Transfer oTokens from user to operator (MM)
         IERC20(oToken).safeTransferFrom(msg.sender, operator, amount);
 
-        // 8. Transfer premium from operator (MM) to user
-        address premiumAsset = OToken(oToken).strikeAsset();
-        IERC20(premiumAsset).safeTransferFrom(operator, msg.sender, premium);
+        // 8. Transfer premium from operator (MM) to user (minus protocol fee)
+        _transferPremium(oToken, amount, premium, collateral, vaultId);
+    }
 
-        emit OrderExecuted(msg.sender, oToken, amount, premium, collateral, vaultId);
+    /**
+     * @dev Transfer premium from operator to user, deducting protocol fee if configured.
+     *      Extracted from executeOrder to avoid stack-too-deep.
+     */
+    function _transferPremium(
+        address oToken,
+        uint256 amount,
+        uint256 premium,
+        uint256 collateral,
+        uint256 vaultId
+    ) private {
+        address premiumAsset = OToken(oToken).strikeAsset();
+        uint256 fee = 0;
+        if (protocolFeeBps > 0 && treasury != address(0)) {
+            fee = (premium * protocolFeeBps) / 10000;
+        }
+        uint256 netPremium = premium - fee;
+
+        IERC20(premiumAsset).safeTransferFrom(operator, msg.sender, netPremium);
+        if (fee > 0) {
+            IERC20(premiumAsset).safeTransferFrom(operator, treasury, fee);
+        }
+
+        emit OrderExecuted(msg.sender, oToken, amount, premium, netPremium, fee, collateral, vaultId);
     }
 
     /**

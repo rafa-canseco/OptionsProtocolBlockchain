@@ -35,7 +35,9 @@ contract BatchSettlerTest is Test {
         address indexed user,
         address indexed oToken,
         uint256 amount,
-        uint256 premium,
+        uint256 grossPremium,
+        uint256 netPremium,
+        uint256 fee,
         uint256 collateral,
         uint256 vaultId
     );
@@ -290,9 +292,9 @@ contract BatchSettlerTest is Test {
         _publishPutQuote(oToken, 70e6, 100e8);
 
         vm.prank(alice);
-        // premium = (1e8 * 70e6) / 1e8 = 70e6
+        // premium = (1e8 * 70e6) / 1e8 = 70e6, fee = 0 (no treasury/feeBps set)
         vm.expectEmit(true, true, false, true);
-        emit OrderExecuted(alice, oToken, 1e8, 70e6, 2000e6, 1);
+        emit OrderExecuted(alice, oToken, 1e8, 70e6, 70e6, 0, 2000e6, 1);
         settler.executeOrder(oToken, 1e8, 2000e6);
     }
 
@@ -783,6 +785,142 @@ contract BatchSettlerTest is Test {
 
         vm.expectRevert(BatchSettler.EmptyArray.selector);
         settler.batchRedeem(oTokens, amounts);
+    }
+
+    // ===== Protocol Fee =====
+
+    function test_executeOrder_protocolFee() public {
+        address treasury = address(0x7EA5);
+        settler.setTreasury(treasury);
+        settler.setProtocolFeeBps(400); // 4%
+
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        uint256 mmBefore = usdc.balanceOf(mm);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        // grossPremium = 70e6, fee = 70e6 * 400 / 10000 = 2.8e6, netPremium = 67.2e6
+        uint256 expectedFee = (70e6 * 400) / 10000; // 2_800_000
+        uint256 expectedNet = 70e6 - expectedFee;     // 67_200_000
+
+        // Alice gets net premium
+        assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6 + expectedNet);
+        // MM pays gross premium (net + fee)
+        assertEq(usdc.balanceOf(mm), mmBefore - 70e6);
+        // Treasury gets fee
+        assertEq(usdc.balanceOf(treasury), expectedFee);
+    }
+
+    function test_executeOrder_zeroFee_noBps() public {
+        // feeBps = 0, treasury set → no fee
+        address treasury = address(0x7EA5);
+        settler.setTreasury(treasury);
+        // protocolFeeBps defaults to 0
+
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        // Full premium to alice, 0 to treasury
+        assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6 + 70e6);
+        assertEq(usdc.balanceOf(treasury), 0);
+    }
+
+    function test_executeOrder_zeroFee_noTreasury() public {
+        // feeBps set, treasury = address(0) → no fee
+        settler.setProtocolFeeBps(400);
+        // treasury defaults to address(0)
+
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        // Full premium to alice
+        assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6 + 70e6);
+    }
+
+    function test_executeOrder_feeEdgeCases() public {
+        address treasury = address(0x7EA5);
+        settler.setTreasury(treasury);
+        settler.setProtocolFeeBps(400); // 4%
+
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+
+        // Tiny bid: 1 (1e-6 USDC per 1e8 oTokens)
+        // premium = (1e8 * 1) / 1e8 = 1 (1 wei USDC)
+        // fee = (1 * 400) / 10000 = 0 (truncates to 0)
+        vm.prank(mm);
+        priceSheet.publishQuote(oToken, 1, 2, block.timestamp + 1 hours, 100e8);
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        // Fee truncates to 0, alice gets full 1 wei premium
+        assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6 + 1);
+        assertEq(usdc.balanceOf(treasury), 0);
+    }
+
+    function test_executeOrder_protocolFee_emitsEvent() public {
+        address treasury = address(0x7EA5);
+        settler.setTreasury(treasury);
+        settler.setProtocolFeeBps(400);
+
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        uint256 expectedFee = (70e6 * 400) / 10000;
+        uint256 expectedNet = 70e6 - expectedFee;
+
+        vm.prank(alice);
+        vm.expectEmit(true, true, false, true);
+        emit OrderExecuted(alice, oToken, 1e8, 70e6, expectedNet, expectedFee, 2000e6, 1);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+    }
+
+    function test_setProtocolFeeBps_onlyOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.OnlyOwner.selector);
+        settler.setProtocolFeeBps(400);
+    }
+
+    function test_setProtocolFeeBps_revertsTooHigh() public {
+        vm.expectRevert(BatchSettler.FeeTooHigh.selector);
+        settler.setProtocolFeeBps(2001);
+    }
+
+    function test_setProtocolFeeBps_maxAllowed() public {
+        settler.setProtocolFeeBps(2000); // exactly 20%, should succeed
+        assertEq(settler.protocolFeeBps(), 2000);
+    }
+
+    function test_setTreasury_onlyOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.OnlyOwner.selector);
+        settler.setTreasury(address(0x7EA5));
+    }
+
+    function test_setTreasury_revertsOnZero() public {
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        settler.setTreasury(address(0));
     }
 }
 
