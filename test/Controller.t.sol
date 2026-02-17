@@ -207,13 +207,15 @@ contract ControllerTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
+        // Physical settlement: ITM put → user gets 0 collateral back
         vm.prank(user);
         controller.settleVault(user, vaultId);
-        assertEq(usdc.balanceOf(user), 99_800e6);
+        assertEq(usdc.balanceOf(user), 98_000e6); // 100_000 - 2000 deposited, 0 returned
 
+        // Buyer redeems full collateral (physical settlement payout)
         vm.prank(buyer);
         controller.redeem(oToken, 1e8);
-        assertEq(usdc.balanceOf(buyer), 200e6);
+        assertEq(usdc.balanceOf(buyer), 2000e6);
     }
 
     // --- CALL: Full Lifecycle ---
@@ -253,13 +255,15 @@ contract ControllerTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2500e8);
 
+        // Physical settlement: ITM call → user gets 0 collateral back
         vm.prank(user);
         controller.settleVault(user, vaultId);
-        assertEq(weth.balanceOf(user), 99e18 + 0.8e18);
+        assertEq(weth.balanceOf(user), 99e18); // 100 - 1 deposited, 0 returned
 
+        // Buyer redeems full collateral (physical settlement payout)
         vm.prank(buyer);
         controller.redeem(oToken, 1e8);
-        assertEq(weth.balanceOf(buyer), 0.2e18);
+        assertEq(weth.balanceOf(buyer), 1e18);
     }
 
     // --- Edge Cases ---
@@ -364,9 +368,13 @@ contract ControllerTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1900e8);
 
+        // Physical settlement: ITM put → user gets 0 back
+        // microAmount = 50000, strike = 2000e8
+        // payout = 50000 * 2000e8 / 1e10 = 1e6 (full collateral)
+        // collateralToReturn = 1e6 - 1e6 = 0
         vm.prank(user);
         controller.settleVault(user, vaultId);
 
-        assertEq(usdc.balanceOf(user), 100_000e6 - 1e6 + 950000);
+        assertEq(usdc.balanceOf(user), 100_000e6 - 1e6); // deposited 1 USDC, got 0 back
     }
 }

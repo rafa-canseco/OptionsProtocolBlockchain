@@ -78,6 +78,9 @@ contract Deploy is Script {
         // 5. Set Chainlink price feed for WETH
         oracle.setPriceFeed(weth, chainlinkEthUsd);
 
+        // 6. Configure physical delivery infrastructure (Aave V3 + Uniswap V3)
+        _configurePhysicalDelivery(settler);
+
         vm.stopBroadcast();
 
         // Summary
@@ -87,5 +90,22 @@ contract Deploy is Script {
         console.log("WETH:", weth);
         console.log("USDC:", usdc);
         console.log("Chainlink ETH/USD:", chainlinkEthUsd);
+    }
+
+    function _configurePhysicalDelivery(BatchSettler settler) internal {
+        address aavePool = vm.envOr("AAVE_POOL_ADDRESS", address(0));
+        address router = vm.envOr("UNISWAP_SWAP_ROUTER", address(0));
+        uint24 feeTier = uint24(vm.envOr("SWAP_FEE_TIER", uint256(500)));
+
+        if (aavePool != address(0)) {
+            settler.setAavePool(aavePool);
+            console.log("Aave Pool:", aavePool);
+        }
+        if (router != address(0)) {
+            settler.setSwapRouter(router);
+            console.log("Uniswap Router:", router);
+        }
+        settler.setSwapFeeTier(feeTier);
+        console.log("Swap Fee Tier:", feeTier);
     }
 }

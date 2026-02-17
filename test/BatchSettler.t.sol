@@ -11,6 +11,8 @@ import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
 import "../src/core/PriceSheet.sol";
 import "../src/core/Whitelist.sol";
+import "../src/interfaces/IFlashLoanSimple.sol";
+import "../src/interfaces/ISwapRouter.sol";
 
 contract MockERC20 is ERC20 {
     uint8 private _dec;
@@ -327,10 +329,11 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchSettleVaults(owners, vaultIds);
 
-        // Alice: -2000 collateral + 70 premium + 1800 returned
-        assertEq(usdc.balanceOf(alice), 10_000e6 - 2000e6 + 70e6 + 1800e6);
-        // Bob: -4000 collateral + 140 premium + 3600 returned
-        assertEq(usdc.balanceOf(bob), 50_000e6 - 4000e6 + 140e6 + 3600e6);
+        // Physical settlement: ITM put → users get 0 collateral back
+        // Alice: -2000 collateral + 70 premium + 0 returned
+        assertEq(usdc.balanceOf(alice), 10_000e6 - 2000e6 + 70e6);
+        // Bob: -4000 collateral + 140 premium + 0 returned
+        assertEq(usdc.balanceOf(bob), 50_000e6 - 4000e6 + 140e6);
 
         // MM redeems via batchRedeem
         vm.prank(mm);
@@ -345,8 +348,8 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchRedeem(oTokens, amounts);
 
-        // Payout: $200 per oToken * 3 = $600
-        assertEq(usdc.balanceOf(mm), mmBefore + 600e6);
+        // Physical settlement: full collateral payout = $2000 * 3 = $6000
+        assertEq(usdc.balanceOf(mm), mmBefore + 6000e6);
 
         // Pool empty
         assertEq(usdc.balanceOf(address(pool)), 0);
@@ -461,8 +464,8 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchRedeem(oTokens, amounts);
 
-        // Payout: $200 per oToken = $200
-        assertEq(usdc.balanceOf(mm), mmBefore + 200e6);
+        // Physical settlement: full collateral payout = $2000
+        assertEq(usdc.balanceOf(mm), mmBefore + 2000e6);
         // oTokens burned
         assertEq(OToken(oToken).balanceOf(mm), 0);
     }
@@ -602,9 +605,10 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchRedeem(oTokens, amounts);
 
-        // oToken1 payout: (2000 - 1800) * 1e8 / 1e10 = 200e6
-        // oToken2 payout: (2500 - 1800) * 1e8 / 1e10 = 700e6
-        assertEq(usdc.balanceOf(mm), mmBefore + 200e6 + 700e6);
+        // Physical settlement: full collateral payouts
+        // oToken1 payout: 2000e6 (full collateral)
+        // oToken2 payout: 2500e6 (full collateral)
+        assertEq(usdc.balanceOf(mm), mmBefore + 2000e6 + 2500e6);
         // No residual left in settler
         assertEq(usdc.balanceOf(address(settler)), 0);
     }
@@ -701,8 +705,8 @@ contract BatchSettlerTest is Test {
         emit RedeemFailed(oToken1, 1e8, "");
         settler.batchRedeem(oTokens, amounts);
 
-        // oToken2 payout: $700, oToken1 failed but didn't kill the batch
-        assertEq(usdc.balanceOf(mm), mmBefore + 700e6);
+        // Physical: oToken2 full collateral = $2500, oToken1 failed but didn't kill the batch
+        assertEq(usdc.balanceOf(mm), mmBefore + 2500e6);
     }
 
     function test_batchRedeem_continuesOnRevokedApproval() public {
@@ -748,8 +752,8 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchRedeem(oTokens, amounts);
 
-        // oToken1 failed (revoked approval), oToken2 succeeded ($700 payout)
-        assertEq(usdc.balanceOf(mm), mmBefore + 700e6);
+        // oToken1 failed (revoked approval), oToken2 succeeded (physical: full $2500 payout)
+        assertEq(usdc.balanceOf(mm), mmBefore + 2500e6);
         // MM still has oToken1 (pull failed, not burned)
         assertEq(OToken(oToken1).balanceOf(mm), 1e8);
     }
@@ -779,5 +783,554 @@ contract BatchSettlerTest is Test {
 
         vm.expectRevert(BatchSettler.EmptyArray.selector);
         settler.batchRedeem(oTokens, amounts);
+    }
+}
+
+// =============================================================================
+// Mock contracts for physical delivery testing
+// =============================================================================
+
+contract MockAavePool {
+    using SafeERC20 for IERC20;
+
+    uint256 public constant FLASH_LOAN_FEE_BPS = 5; // 0.05%
+
+    function flashLoanSimple(
+        address receiverAddress,
+        address asset,
+        uint256 amount,
+        bytes calldata params,
+        uint16 /* referralCode */
+    ) external {
+        // Transfer asset to receiver
+        IERC20(asset).safeTransfer(receiverAddress, amount);
+
+        // Calculate fee
+        uint256 premium = (amount * FLASH_LOAN_FEE_BPS) / 10_000;
+
+        // Call executeOperation on receiver
+        bool success = IFlashLoanSimpleReceiver(receiverAddress).executeOperation(
+            asset, amount, premium, receiverAddress, params
+        );
+        require(success, "Flash loan callback failed");
+
+        // Pull repayment
+        IERC20(asset).safeTransferFrom(receiverAddress, address(this), amount + premium);
+    }
+}
+
+contract MockSwapRouter {
+    using SafeERC20 for IERC20;
+
+    // Mock exchange rate: how many units of tokenOut per 1e18 tokenIn
+    // For USDC→WETH: rate = ethPrice (e.g., 1800e6 USDC per 1e18 WETH → set as 1e18 * 1e18 / 1800e6)
+    // Simpler: we set a fixed price and compute amountIn from amountOut
+    uint256 public mockEthPriceUsdc; // e.g., 1800e6 = $1800 per ETH
+
+    constructor(uint256 _mockEthPriceUsdc) {
+        mockEthPriceUsdc = _mockEthPriceUsdc;
+    }
+
+    function setMockPrice(uint256 _price) external {
+        mockEthPriceUsdc = _price;
+    }
+
+    function exactOutputSingle(ISwapRouter.ExactOutputSingleParams calldata params)
+        external
+        returns (uint256 amountIn)
+    {
+        // Determine the direction: USDC→WETH or WETH→USDC
+        // We compute amountIn based on the mock price
+        // For USDC→WETH (put delivery): amountIn (USDC) = amountOut (WETH) * price / 1e18
+        // For WETH→USDC (call delivery): amountIn (WETH) = amountOut (USDC) * 1e18 / price
+
+        // Simple heuristic: if tokenIn has fewer decimals, it's USDC→WETH
+        // We check by amount magnitude instead
+        if (params.amountOut > 1e12) {
+            // Large amountOut → this is WETH (18 decimals)
+            // amountIn is USDC (6 decimals)
+            // amountIn = amountOut * mockEthPriceUsdc / 1e18
+            amountIn = (params.amountOut * mockEthPriceUsdc) / 1e18;
+        } else {
+            // Small amountOut → this is USDC (6 decimals)
+            // amountIn is WETH (18 decimals)
+            // amountIn = amountOut * 1e18 / mockEthPriceUsdc
+            amountIn = (params.amountOut * 1e18) / mockEthPriceUsdc;
+        }
+
+        require(amountIn <= params.amountInMaximum, "Too much slippage");
+
+        // Pull tokenIn from sender
+        IERC20(params.tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+
+        // Send tokenOut to recipient
+        IERC20(params.tokenOut).safeTransfer(params.recipient, params.amountOut);
+
+        return amountIn;
+    }
+}
+
+// =============================================================================
+// Physical Delivery Tests
+// =============================================================================
+
+contract PhysicalRedeemTest is Test {
+    using SafeERC20 for IERC20;
+
+    event PhysicalDelivery(
+        address indexed oToken,
+        address indexed user,
+        uint256 contraAmount,
+        uint256 collateralUsed
+    );
+    event PhysicalRedeemFailed(address indexed oToken, address indexed user, uint256 amount, bytes reason);
+
+    AddressBook public addressBook;
+    Controller public controller;
+    MarginPool public pool;
+    OTokenFactory public factory;
+    Oracle public oracle;
+    Whitelist public whitelist;
+    BatchSettler public settler;
+    PriceSheet public priceSheet;
+
+    MockERC20 public weth;
+    MockERC20 public usdc;
+    MockAavePool public mockAave;
+    MockSwapRouter public mockRouter;
+
+    address public mm = address(0xAA00);
+    address public alice = address(0xA11CE);
+    address public bob = address(0xB0B0);
+
+    uint256 public strikePrice = 2000e8; // $2000
+    uint256 public expiry;
+    uint256 public constant MOCK_ETH_PRICE = 1800e6; // $1800
+
+    function setUp() public {
+        vm.warp(1700000000);
+
+        // Deploy tokens
+        weth = new MockERC20("Wrapped ETH", "WETH", 18);
+        usdc = new MockERC20("USD Coin", "USDC", 6);
+
+        // Deploy mocks
+        mockAave = new MockAavePool();
+        mockRouter = new MockSwapRouter(MOCK_ETH_PRICE);
+
+        // Deploy protocol
+        addressBook = new AddressBook();
+        controller = new Controller(address(addressBook));
+        pool = new MarginPool(address(addressBook));
+        factory = new OTokenFactory(address(addressBook));
+        oracle = new Oracle(address(addressBook));
+        whitelist = new Whitelist(address(addressBook));
+        settler = new BatchSettler(address(addressBook), mm);
+        priceSheet = new PriceSheet(address(addressBook), mm);
+
+        // Wire AddressBook
+        addressBook.setController(address(controller));
+        addressBook.setMarginPool(address(pool));
+        addressBook.setOTokenFactory(address(factory));
+        addressBook.setOracle(address(oracle));
+        addressBook.setWhitelist(address(whitelist));
+        addressBook.setBatchSettler(address(settler));
+        addressBook.setPriceSheet(address(priceSheet));
+
+        // Configure physical delivery
+        settler.setAavePool(address(mockAave));
+        settler.setSwapRouter(address(mockRouter));
+        settler.setSwapFeeTier(500);
+
+        // Whitelist
+        whitelist.whitelistUnderlying(address(weth));
+        whitelist.whitelistCollateral(address(usdc));
+        whitelist.whitelistCollateral(address(weth));
+        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);
+        whitelist.whitelistProduct(address(weth), address(usdc), address(weth), false);
+
+        // Expiry
+        uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
+        expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
+
+        // Fund MM
+        usdc.mint(mm, 1_000_000e6);
+        weth.mint(mm, 1_000e18);
+        vm.startPrank(mm);
+        usdc.approve(address(settler), type(uint256).max);
+        weth.approve(address(settler), type(uint256).max);
+        vm.stopPrank();
+
+        // Fund users
+        _fundUser(alice, 50_000e6, 50e18);
+        _fundUser(bob, 50_000e6, 50e18);
+
+        // Fund mock Aave pool with liquidity for flash loans
+        weth.mint(address(mockAave), 1_000e18);
+        usdc.mint(address(mockAave), 10_000_000e6);
+
+        // Fund mock swap router with liquidity
+        weth.mint(address(mockRouter), 1_000e18);
+        usdc.mint(address(mockRouter), 10_000_000e6);
+    }
+
+    function _fundUser(address user, uint256 usdcAmount, uint256 wethAmount) internal {
+        usdc.mint(user, usdcAmount);
+        weth.mint(user, wethAmount);
+        vm.startPrank(user);
+        usdc.approve(address(pool), type(uint256).max);
+        weth.approve(address(pool), type(uint256).max);
+        vm.stopPrank();
+    }
+
+    function _createPut(uint256 strike) internal returns (address) {
+        address oToken = factory.createOToken(
+            address(weth), address(usdc), address(usdc), strike, expiry, true
+        );
+        whitelist.whitelistOToken(oToken);
+        return oToken;
+    }
+
+    function _createCall(uint256 strike) internal returns (address) {
+        address oToken = factory.createOToken(
+            address(weth), address(usdc), address(weth), strike, expiry, false
+        );
+        whitelist.whitelistOToken(oToken);
+        return oToken;
+    }
+
+    function _setupPutPosition(address user, address oToken, uint256 amount) internal {
+        uint256 collateral = (amount * strikePrice) / 1e10;
+
+        vm.prank(user);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+
+        vm.prank(mm);
+        priceSheet.publishQuote(oToken, 70e6, 72e6, block.timestamp + 1 hours, 1000e8);
+
+        vm.prank(user);
+        settler.executeOrder(oToken, amount, collateral);
+
+        // MM approves settler for oTokens (needed for physicalRedeem)
+        vm.prank(mm);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+    }
+
+    function _setupCallPosition(address user, address oToken, uint256 amount) internal {
+        uint256 collateral = amount * 1e10;
+
+        vm.prank(user);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+
+        vm.prank(mm);
+        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, 1000e8);
+
+        vm.prank(user);
+        settler.executeOrder(oToken, amount, collateral);
+
+        vm.prank(mm);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+    }
+
+    // ===== Physical Redeem: PUT ITM =====
+
+    function test_physicalRedeem_putITM() public {
+        address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
+
+        // Expire ITM
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        // Settle vault (alice gets 0 back)
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(mm);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        uint256 aliceWethBefore = weth.balanceOf(alice);
+
+        // Physical delivery: alice should receive 1 ETH
+        vm.prank(mm);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+
+        // Alice received 1 WETH
+        assertEq(weth.balanceOf(alice), aliceWethBefore + 1e18);
+        // oTokens burned (MM had 1e8, now 0)
+        assertEq(OToken(oToken).balanceOf(mm), 0);
+    }
+
+    // ===== Physical Redeem: CALL ITM =====
+
+    function test_physicalRedeem_callITM() public {
+        address oToken = _createCall(strikePrice);
+        _setupCallPosition(alice, oToken, 1e8);
+
+        // Expire ITM (ETH > strike)
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2500e8);
+
+        // Set mock price to match oracle
+        mockRouter.setMockPrice(2500e6);
+
+        // Settle vault
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(mm);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        // Physical delivery: alice should receive $2000 USDC (strike amount)
+        vm.prank(mm);
+        settler.physicalRedeem(oToken, alice, 1e8, 1e18);
+
+        // Alice received strikePrice USDC
+        assertEq(usdc.balanceOf(alice), aliceUsdcBefore + 2000e6);
+    }
+
+    // ===== Reverts on OTM =====
+
+    function test_physicalRedeem_revertsOnOTM() public {
+        address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
+
+        // Expire OTM (ETH > strike)
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.OptionNotITM.selector);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+    }
+
+    // ===== Reverts on ATM (expiryPrice == strike) =====
+
+    function test_physicalRedeem_revertsOnATM() public {
+        address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2000e8); // exactly at strike
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.OptionNotITM.selector);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+    }
+
+    // ===== Reverts on not expired =====
+
+    function test_physicalRedeem_revertsOnNotExpired() public {
+        address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
+
+        // Don't warp past expiry
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.OptionNotExpired.selector);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+    }
+
+    // ===== Reverts on non-operator =====
+
+    function test_physicalRedeem_revertsOnNonOperator() public {
+        address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.OnlyOperator.selector);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+    }
+
+    // ===== Operator receives surplus =====
+
+    function test_physicalRedeem_operatorReceivesSurplus() public {
+        address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        // Settle
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(mm);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        uint256 mmUsdcBefore = usdc.balanceOf(mm);
+
+        // Physical delivery
+        // Collateral from redeem: 2000 USDC
+        // Flash loan: 1 WETH, fee = 1e18 * 5 / 10000 = 5e14
+        // Swap: need 1e18 + 5e14 WETH. At $1800, cost = (1e18 + 5e14) * 1800e6 / 1e18 ≈ 1800.9e6 USDC
+        // Surplus ≈ 2000e6 - 1800.9e6 ≈ 199.1e6 USDC → goes to MM
+        vm.prank(mm);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+
+        uint256 mmUsdcAfter = usdc.balanceOf(mm);
+        uint256 surplus = mmUsdcAfter - mmUsdcBefore;
+
+        // MM should have received surplus (approximately $199 USDC)
+        assertGt(surplus, 0);
+        // Surplus should be less than full collateral (some went to swap)
+        assertLt(surplus, 2000e6);
+    }
+
+    // ===== Batch physical redeem =====
+
+    function test_batchPhysicalRedeem_multipleUsers() public {
+        address oToken = _createPut(strikePrice);
+
+        // Setup positions for alice and bob
+        // Alice first
+        vm.prank(alice);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+
+        vm.prank(mm);
+        priceSheet.publishQuote(oToken, 70e6, 72e6, block.timestamp + 1 hours, 1000e8);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        vm.prank(bob);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+
+        vm.prank(bob);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        vm.prank(mm);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+
+        // Expire ITM
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        // Settle both vaults
+        address[] memory settleOwners = new address[](2);
+        uint256[] memory settleVaults = new uint256[](2);
+        settleOwners[0] = alice;
+        settleOwners[1] = bob;
+        settleVaults[0] = 1;
+        settleVaults[1] = 1;
+        vm.prank(mm);
+        settler.batchSettleVaults(settleOwners, settleVaults);
+
+        uint256 aliceWethBefore = weth.balanceOf(alice);
+        uint256 bobWethBefore = weth.balanceOf(bob);
+
+        // Batch physical delivery
+        address[] memory oTokens = new address[](2);
+        address[] memory users = new address[](2);
+        uint256[] memory amounts = new uint256[](2);
+        uint256[] memory maxSpents = new uint256[](2);
+        oTokens[0] = oToken;
+        oTokens[1] = oToken;
+        users[0] = alice;
+        users[1] = bob;
+        amounts[0] = 1e8;
+        amounts[1] = 1e8;
+        maxSpents[0] = 2000e6;
+        maxSpents[1] = 2000e6;
+
+        vm.prank(mm);
+        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents);
+
+        // Both received 1 WETH each
+        assertEq(weth.balanceOf(alice), aliceWethBefore + 1e18);
+        assertEq(weth.balanceOf(bob), bobWethBefore + 1e18);
+    }
+
+    // ===== Batch continues on failure =====
+
+    function test_batchPhysicalRedeem_continuesOnFailure() public {
+        address oToken = _createPut(strikePrice);
+
+        vm.prank(alice);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+
+        vm.prank(mm);
+        priceSheet.publishQuote(oToken, 70e6, 72e6, block.timestamp + 1 hours, 1000e8);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        vm.prank(mm);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        address[] memory settleOwners = new address[](1);
+        uint256[] memory settleVaults = new uint256[](1);
+        settleOwners[0] = alice;
+        settleVaults[0] = 1;
+        vm.prank(mm);
+        settler.batchSettleVaults(settleOwners, settleVaults);
+
+        uint256 aliceWethBefore = weth.balanceOf(alice);
+
+        // Batch: first item is a bogus oToken (will fail), second is valid
+        address bogusToken = address(0xDEAD);
+
+        address[] memory oTokens = new address[](2);
+        address[] memory users = new address[](2);
+        uint256[] memory amounts = new uint256[](2);
+        uint256[] memory maxSpents = new uint256[](2);
+        oTokens[0] = bogusToken;
+        oTokens[1] = oToken;
+        users[0] = bob;
+        users[1] = alice;
+        amounts[0] = 1e8;
+        amounts[1] = 1e8;
+        maxSpents[0] = 2000e6;
+        maxSpents[1] = 2000e6;
+
+        vm.prank(mm);
+        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents);
+
+        // Alice still got her delivery despite bogus first item
+        assertEq(weth.balanceOf(alice), aliceWethBefore + 1e18);
+    }
+
+    // ===== Setters access control =====
+
+    function test_setAavePool_revertsOnNonOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.OnlyOwner.selector);
+        settler.setAavePool(address(0x1));
+    }
+
+    function test_setSwapRouter_revertsOnNonOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.OnlyOwner.selector);
+        settler.setSwapRouter(address(0x1));
+    }
+
+    function test_physicalRedeem_revertsOnAavePoolNotSet() public {
+        // Deploy a fresh settler without aavePool configured
+        BatchSettler freshSettler = new BatchSettler(address(addressBook), mm);
+        addressBook.setBatchSettler(address(freshSettler));
+        freshSettler.setSwapRouter(address(mockRouter));
+        freshSettler.setSwapFeeTier(500);
+
+        address oToken = _createPut(strikePrice);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.AavePoolNotSet.selector);
+        freshSettler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+
+        // Restore original settler
+        addressBook.setBatchSettler(address(settler));
     }
 }

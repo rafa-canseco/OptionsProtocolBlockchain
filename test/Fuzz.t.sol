@@ -147,7 +147,7 @@ contract ControllerFuzzTest is Test {
         assertEq(OToken(oToken).balanceOf(user), amount);
     }
 
-    /// @notice PUT settlement: user always gets back (collateral - payout), payout >= 0
+    /// @notice PUT settlement (physical): OTM = full collateral back, ITM = 0 back
     function testFuzz_putSettlementPayout(uint256 expiryPrice) public {
         // Price between $1 and $100,000
         expiryPrice = bound(expiryPrice, 1e8, 100_000e8);
@@ -177,20 +177,19 @@ contract ControllerFuzzTest is Test {
         uint256 userBalAfter = usdc.balanceOf(user);
         uint256 returned = userBalAfter - userBalBefore;
 
-        // Returned collateral is always <= deposited
         assertLe(returned, collateral);
 
         if (expiryPrice >= strikePrice) {
-            // OTM: full collateral back
+            // OTM or ATM: full collateral back
             assertEq(returned, collateral);
         } else {
-            // ITM: partial collateral back
-            uint256 payout = (amount * (strikePrice - expiryPrice)) / 1e10;
-            assertEq(returned, collateral - payout);
+            // ITM (physical settlement): user gets 0 back
+            // Full collateral stays in MarginPool for physical delivery
+            assertEq(returned, 0);
         }
     }
 
-    /// @notice CALL settlement: payout math is correct for any expiry price
+    /// @notice CALL settlement (physical): OTM = full collateral back, ITM = 0 back
     function testFuzz_callSettlementPayout(uint256 expiryPrice) public {
         expiryPrice = bound(expiryPrice, 1e8, 100_000e8);
 
@@ -222,10 +221,11 @@ contract ControllerFuzzTest is Test {
         assertLe(returned, collateral);
 
         if (expiryPrice <= strikePrice) {
+            // OTM or ATM: full collateral back
             assertEq(returned, collateral);
         } else {
-            uint256 payout = (amount * (expiryPrice - strikePrice) * 1e10) / expiryPrice;
-            assertEq(returned, collateral - payout);
+            // ITM (physical settlement): user gets 0 back
+            assertEq(returned, 0);
         }
     }
 
