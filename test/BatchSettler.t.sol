@@ -1582,4 +1582,75 @@ contract PhysicalRedeemTest is Test {
         settler.setSwapFeeTier(10000);
         assertEq(settler.swapFeeTier(), 10000);
     }
+
+    function test_setSwapFeeTier_revertsOnNonOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.OnlyOwner.selector);
+        settler.setSwapFeeTier(500);
+    }
+
+    // ===== address(0) validation =====
+
+    function test_physicalRedeem_revertsOnZeroOToken() public {
+        vm.warp(expiry + 1);
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        settler.physicalRedeem(address(0), alice, 1e8, 2000e6);
+    }
+
+    function test_physicalRedeem_revertsOnZeroUser() public {
+        address oToken = _createPut(strikePrice);
+        vm.warp(expiry + 1);
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        settler.physicalRedeem(oToken, address(0), 1e8, 2000e6);
+    }
+
+    function test_setAavePool_revertsOnZeroAddress() public {
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        settler.setAavePool(address(0));
+    }
+
+    function test_setSwapRouter_revertsOnZeroAddress() public {
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        settler.setSwapRouter(address(0));
+    }
+
+    // ===== batchPhysicalRedeem input validation =====
+
+    function test_batchPhysicalRedeem_revertsOnLengthMismatch() public {
+        address[] memory oTokens = new address[](2);
+        address[] memory users = new address[](1);
+        uint256[] memory amounts = new uint256[](2);
+        uint256[] memory maxSpents = new uint256[](2);
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.LengthMismatch.selector);
+        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents);
+    }
+
+    function test_batchPhysicalRedeem_revertsOnEmptyArrays() public {
+        address[] memory oTokens = new address[](0);
+        address[] memory users = new address[](0);
+        uint256[] memory amounts = new uint256[](0);
+        uint256[] memory maxSpents = new uint256[](0);
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.EmptyArray.selector);
+        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents);
+    }
+
+    // ===== CALL ATM boundary =====
+
+    function test_physicalRedeem_callATM_revertsNotITM() public {
+        address oToken = _createCall(strikePrice);
+        _setupCallPosition(alice, oToken, 1e8);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2000e8); // exactly at strike
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.OptionNotITM.selector);
+        settler.physicalRedeem(oToken, alice, 1e8, 1e18);
+    }
 }

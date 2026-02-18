@@ -445,6 +445,8 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         uint256 amount,
         uint256 maxCollateralSpent
     ) private {
+        if (oToken == address(0)) revert InvalidAddress();
+        if (user == address(0)) revert InvalidAddress();
         if (aavePool == address(0)) revert AavePoolNotSet();
         if (swapRouter == address(0)) revert SwapRouterNotSet();
         if (amount == 0) revert InvalidAmount();
