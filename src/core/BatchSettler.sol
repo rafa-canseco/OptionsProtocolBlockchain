@@ -377,7 +377,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
                 tokenOut: contraAsset,
                 fee: swapFeeTier,
                 recipient: address(this),
-                deadline: block.timestamp,
                 amountOut: repayAmount,
                 amountInMaximum: maxCollateralSpent,
                 sqrtPriceLimitX96: 0
