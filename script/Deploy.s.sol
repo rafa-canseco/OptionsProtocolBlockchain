@@ -78,6 +78,12 @@ contract Deploy is Script {
         // 5. Set Chainlink price feed for WETH
         oracle.setPriceFeed(weth, chainlinkEthUsd);
 
+        // 6. Configure protocol fee
+        _configureProtocolFee(settler);
+
+        // 7. Configure physical delivery infrastructure (Aave V3 + Uniswap V3)
+        _configurePhysicalDelivery(settler);
+
         vm.stopBroadcast();
 
         // Summary
@@ -87,5 +93,40 @@ contract Deploy is Script {
         console.log("WETH:", weth);
         console.log("USDC:", usdc);
         console.log("Chainlink ETH/USD:", chainlinkEthUsd);
+    }
+
+    function _configureProtocolFee(BatchSettler settler) internal {
+        address treasury = vm.envOr("TREASURY_ADDRESS", address(0));
+        uint256 feeBps = vm.envOr("PROTOCOL_FEE_BPS", uint256(0));
+
+        if (treasury != address(0)) {
+            settler.setTreasury(treasury);
+            console.log("Treasury:", treasury);
+        }
+        if (feeBps > 0) {
+            settler.setProtocolFeeBps(feeBps);
+            console.log("Protocol Fee (bps):", feeBps);
+        }
+    }
+
+    function _configurePhysicalDelivery(BatchSettler settler) internal {
+        address aavePool = vm.envOr("AAVE_POOL_ADDRESS", address(0));
+        address router = vm.envOr("UNISWAP_SWAP_ROUTER", address(0));
+        uint24 feeTier = uint24(vm.envOr("SWAP_FEE_TIER", uint256(500)));
+
+        if (aavePool == address(0)) {
+            console.log("WARNING: AAVE_POOL_ADDRESS not set. Physical delivery will be non-functional.");
+        } else {
+            settler.setAavePool(aavePool);
+            console.log("Aave Pool:", aavePool);
+        }
+        if (router == address(0)) {
+            console.log("WARNING: UNISWAP_SWAP_ROUTER not set. Physical delivery will be non-functional.");
+        } else {
+            settler.setSwapRouter(router);
+            console.log("Uniswap Router:", router);
+        }
+        settler.setSwapFeeTier(feeTier);
+        console.log("Swap Fee Tier:", feeTier);
     }
 }

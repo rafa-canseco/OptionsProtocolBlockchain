@@ -146,18 +146,14 @@ contract Controller {
     }
 
     /**
-     * @notice Settle a vault after expiry.
+     * @notice Settle a vault after expiry (physical settlement).
      *         Calculates payout based on expiry price and returns remaining collateral.
      *
-     *         For a PUT that expired ITM (price < strike):
-     *           Payout per oToken = (strike - price) / strike * collateral_per_otoken
-     *           Remaining collateral returned to vault owner
-     *
-     *         For a CALL that expired ITM (price > strike):
-     *           Payout per oToken in underlying = (price - strike) / price * amount
-     *           Remaining underlying returned to vault owner
-     *
-     *         For OTM: full collateral returned to vault owner
+     *         Physical settlement behavior:
+     *         - ITM: full collateral stays in MarginPool for redemption via physical delivery.
+     *           Vault owner receives 0 collateral back. They get the contra-asset via
+     *           BatchSettler.physicalRedeem() (flash loan + DEX swap).
+     *         - OTM: full collateral returned to vault owner (no delivery needed).
      */
     function settleVault(address _owner, uint256 _vaultId) external onlyAuthorized(_owner) {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
@@ -255,12 +251,15 @@ contract Controller {
     }
 
     /**
-     * @notice Calculate payout for ITM options.
+     * @notice Calculate payout for physical settlement.
+     *         Physical settlement: ITM options pay out the FULL collateral to the oToken holder.
+     *         The vault owner receives the contra-asset via physical delivery (flash loan).
+     *
      *         PUT ITM (expiryPrice < strike):
-     *           payout = amount * (strike - expiryPrice) / 1e8, in collateral decimals
+     *           payout = full collateral = amount * strike / 1e10, in USDC
      *         CALL ITM (expiryPrice > strike):
-     *           payout = amount * (expiryPrice - strike) / expiryPrice, in underlying decimals
-     *         OTM: payout = 0
+     *           payout = full collateral = amount * 1e10, in WETH
+     *         OTM (including ATM): payout = 0
      */
     function _calculatePayout(OToken oToken, uint256 _amount, uint256 _expiryPrice)
         internal
@@ -270,13 +269,13 @@ contract Controller {
         uint256 strike = oToken.strikePrice();
 
         if (oToken.isPut()) {
-            if (_expiryPrice >= strike) return 0; // OTM
-            // ITM: payout in USDC = amount * (strike - expiryPrice) / 1e10
-            return (_amount * (strike - _expiryPrice)) / 1e10;
+            if (_expiryPrice >= strike) return 0; // OTM or ATM
+            // ITM: full collateral in USDC
+            return (_amount * strike) / 1e10;
         } else {
-            if (_expiryPrice <= strike) return 0; // OTM
-            // ITM: payout in underlying = amount * (expiryPrice - strike) / expiryPrice * 1e10
-            return (_amount * (_expiryPrice - strike) * 1e10) / _expiryPrice;
+            if (_expiryPrice <= strike) return 0; // OTM or ATM
+            // ITM: full collateral in underlying
+            return _amount * 1e10;
         }
     }
 }
