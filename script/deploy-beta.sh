@@ -23,7 +23,7 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 # --- 2. Verify required env vars ---
-for var in PRIVATE_KEY BASE_SEPOLIA_RPC_URL ETHERSCAN_API_KEY; do
+for var in PRIVATE_KEY BASE_SEPOLIA_RPC_URL; do
     if [ -z "${!var:-}" ]; then
         echo "[FAIL] Missing env var: $var"
         echo "Set it in .env or export it before running this script."
@@ -38,12 +38,11 @@ echo "[..] Building contracts..."
 cd "$BLOCKCHAIN_DIR"
 forge build --force --silent 2>/dev/null || forge build --force
 
-# --- 4. Deploy + verify ---
-echo "[..] Deploying to Base Sepolia (with verification)..."
+# --- 4. Deploy (no inline verification — we verify with Blockscout after) ---
+echo "[..] Deploying to Base Sepolia..."
 DEPLOY_OUTPUT=$(forge script script/DeployBeta.s.sol:DeployBeta \
     --rpc-url "$BASE_SEPOLIA_RPC_URL" \
     --broadcast \
-    --verify \
     -vvvv 2>&1) || {
     echo "$DEPLOY_OUTPUT"
     echo "[FAIL] Deployment failed"
@@ -119,7 +118,40 @@ for name, addr in sorted(addrs.items()):
     print(f'  {name:<20s} {addr}')
 "
 
-# --- 7. Export ABIs ---
+# --- 7. Verify contracts on Blockscout ---
+echo "[..] Verifying contracts on Blockscout..."
+BLOCKSCOUT_URL="https://base-sepolia.blockscout.com/api/"
+RPC_URL="$BASE_SEPOLIA_RPC_URL"
+
+verify_contract() {
+    local addr="$1"
+    local contract_path="$2"
+    echo "  Verifying $contract_path at $addr..."
+    forge verify-contract \
+        --rpc-url "$RPC_URL" \
+        --verifier blockscout \
+        --verifier-url "$BLOCKSCOUT_URL" \
+        "$addr" \
+        "$contract_path" 2>&1 | tail -1 || true
+}
+
+verify_contract "$(get_addr LETH)" "src/mocks/MockERC20.sol:MockERC20"
+verify_contract "$(get_addr LUSD)" "src/mocks/MockERC20.sol:MockERC20"
+verify_contract "$(get_addr MockChainlinkFeed)" "src/mocks/MockChainlinkFeed.sol:MockChainlinkFeed"
+verify_contract "$(get_addr MockAavePool)" "src/mocks/MockAavePool.sol:MockAavePool"
+verify_contract "$(get_addr MockSwapRouter)" "src/mocks/MockSwapRouter.sol:MockSwapRouter"
+verify_contract "$(get_addr AddressBook)" "src/core/AddressBook.sol:AddressBook"
+verify_contract "$(get_addr Controller)" "src/core/Controller.sol:Controller"
+verify_contract "$(get_addr MarginPool)" "src/core/MarginPool.sol:MarginPool"
+verify_contract "$(get_addr OTokenFactory)" "src/core/OTokenFactory.sol:OTokenFactory"
+verify_contract "$(get_addr Oracle)" "src/core/Oracle.sol:Oracle"
+verify_contract "$(get_addr Whitelist)" "src/core/Whitelist.sol:Whitelist"
+verify_contract "$(get_addr BatchSettler)" "src/core/BatchSettler.sol:BatchSettler"
+verify_contract "$(get_addr PriceSheet)" "src/core/PriceSheet.sol:PriceSheet"
+
+echo "[ok] Verification submitted"
+
+# --- 8. Export ABIs ---
 echo "[..] Exporting ABIs..."
 ABI_DIR="$BLOCKCHAIN_DIR/abis"
 mkdir -p "$ABI_DIR"
