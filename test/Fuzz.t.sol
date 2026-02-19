@@ -424,10 +424,11 @@ contract BatchSettlerFuzzTest is Test {
         settler.executeOrder(oToken, 1e8, 2000e6);
     }
 
-    /// @notice Fuzz premium with treasury + feeBps — user receives netPremium, not grossPremium
-    function testFuzz_premiumCalculation_withFee(uint256 bidPrice, uint256 feeBps) public {
+    /// @notice Fuzz premium with treasury + feeBps + amount — user receives netPremium, not grossPremium
+    function testFuzz_premiumCalculation_withFee(uint256 bidPrice, uint256 feeBps, uint256 amount) public {
         bidPrice = bound(bidPrice, 1, 1_000e6);
         feeBps = bound(feeBps, 1, 2000);
+        amount = bound(amount, 1e8, 100e8);
 
         address treasury = address(0x7EA5);
         settler.setTreasury(treasury);
@@ -439,24 +440,26 @@ contract BatchSettlerFuzzTest is Test {
         whitelist.whitelistOToken(oToken);
 
         vm.prank(mm);
-        priceSheet.publishQuote(oToken, bidPrice, bidPrice + 1, block.timestamp + 1 hours, 100e8);
+        priceSheet.publishQuote(oToken, bidPrice, bidPrice + 1, block.timestamp + 1 hours, 1000e8);
+
+        uint256 collateral = (amount * strikePrice) / 1e10;
 
         address userAddr = address(0xF100);
-        usdc.mint(userAddr, 10_000e6);
+        usdc.mint(userAddr, 1_000_000e6);
         vm.startPrank(userAddr);
         usdc.approve(address(pool), type(uint256).max);
         IERC20(oToken).approve(address(settler), type(uint256).max);
         vm.stopPrank();
 
         uint256 userBalBefore = usdc.balanceOf(userAddr);
-        uint256 grossPremium = (1e8 * bidPrice) / 1e8;
+        uint256 grossPremium = (amount * bidPrice) / 1e8;
         uint256 fee = (grossPremium * feeBps) / 10000;
         uint256 netPremium = grossPremium - fee;
 
         vm.prank(userAddr);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(oToken, amount, collateral);
 
-        assertEq(usdc.balanceOf(userAddr), userBalBefore - 2000e6 + netPremium);
+        assertEq(usdc.balanceOf(userAddr) + collateral - userBalBefore, netPremium);
         assertEq(usdc.balanceOf(treasury), fee);
     }
 }
@@ -717,6 +720,10 @@ contract PhysicalRedeemFuzzTest is Test {
 
         // User receives exactly amount * 1e10 WETH
         assertEq(weth.balanceOf(alice), aliceWethBefore + amount * 1e10);
+
+        // Settler retains no residual tokens
+        assertEq(weth.balanceOf(address(settler)), 0);
+        assertEq(usdc.balanceOf(address(settler)), 0);
     }
 
     /// @notice CALL ITM: user receives exactly (amount * strikePrice) / 1e10 USDC for any amount
@@ -762,6 +769,10 @@ contract PhysicalRedeemFuzzTest is Test {
 
         // User receives exactly (amount * strikePrice) / 1e10 USDC
         assertEq(usdc.balanceOf(alice), aliceUsdcBefore + (amount * strikePrice) / 1e10);
+
+        // Settler retains no residual tokens
+        assertEq(weth.balanceOf(address(settler)), 0);
+        assertEq(usdc.balanceOf(address(settler)), 0);
     }
 
     /// @notice PUT ITM: physicalRedeem succeeds for any ITM expiry price
@@ -801,9 +812,18 @@ contract PhysicalRedeemFuzzTest is Test {
         vm.prank(mm);
         settler.batchSettleVaults(owners, vaultIds);
 
-        // Should not revert for any ITM price
+        uint256 aliceWethBefore = weth.balanceOf(alice);
+
+        // Physical delivery
         vm.prank(mm);
         settler.physicalRedeem(oToken, alice, amount, collateral);
+
+        // User receives exactly amount * 1e10 WETH
+        assertEq(weth.balanceOf(alice), aliceWethBefore + amount * 1e10);
+
+        // Settler retains no residual tokens
+        assertEq(weth.balanceOf(address(settler)), 0);
+        assertEq(usdc.balanceOf(address(settler)), 0);
     }
 
     /// @notice CALL ITM: physicalRedeem succeeds for any ITM expiry price
@@ -843,9 +863,18 @@ contract PhysicalRedeemFuzzTest is Test {
         vm.prank(mm);
         settler.batchSettleVaults(owners, vaultIds);
 
-        // Should not revert for any ITM price
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        // Physical delivery
         vm.prank(mm);
         settler.physicalRedeem(oToken, alice, amount, collateral);
+
+        // User receives exactly (amount * strikePrice) / 1e10 USDC
+        assertEq(usdc.balanceOf(alice), aliceUsdcBefore + (amount * strikePrice) / 1e10);
+
+        // Settler retains no residual tokens
+        assertEq(weth.balanceOf(address(settler)), 0);
+        assertEq(usdc.balanceOf(address(settler)), 0);
     }
 }
 
@@ -906,10 +935,11 @@ contract ProtocolFeeFuzzTest is Test {
         usdc.approve(address(settler), type(uint256).max);
     }
 
-    /// @notice netPremium + fee == grossPremium for any bidPrice and feeBps
-    function testFuzz_protocolFee_arithmetic(uint256 bidPrice, uint256 feeBps) public {
+    /// @notice netPremium + fee == grossPremium for any bidPrice, feeBps, and amount
+    function testFuzz_protocolFee_arithmetic(uint256 bidPrice, uint256 feeBps, uint256 amount) public {
         bidPrice = bound(bidPrice, 1, 1_000e6);
         feeBps = bound(feeBps, 0, 2000);
+        amount = bound(amount, 1e8, 100e8);
 
         settler.setTreasury(treasury);
         settler.setProtocolFeeBps(feeBps);
@@ -920,10 +950,12 @@ contract ProtocolFeeFuzzTest is Test {
         whitelist.whitelistOToken(oToken);
 
         vm.prank(mm);
-        priceSheet.publishQuote(oToken, bidPrice, bidPrice + 1, block.timestamp + 1 hours, 100e8);
+        priceSheet.publishQuote(oToken, bidPrice, bidPrice + 1, block.timestamp + 1 hours, type(uint128).max);
+
+        uint256 collateral = (amount * strikePrice) / 1e10;
 
         address userAddr = address(0xF100);
-        usdc.mint(userAddr, 10_000e6);
+        usdc.mint(userAddr, collateral + 1_000e6);
         vm.startPrank(userAddr);
         usdc.approve(address(pool), type(uint256).max);
         IERC20(oToken).approve(address(settler), type(uint256).max);
@@ -933,14 +965,14 @@ contract ProtocolFeeFuzzTest is Test {
         uint256 treasuryBalBefore = usdc.balanceOf(treasury);
         uint256 mmBalBefore = usdc.balanceOf(mm);
 
-        uint256 grossPremium = (1e8 * bidPrice) / 1e8;
+        uint256 grossPremium = (amount * bidPrice) / 1e8;
         uint256 expectedFee = (grossPremium * feeBps) / 10000;
         uint256 expectedNet = grossPremium - expectedFee;
 
         vm.prank(userAddr);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(oToken, amount, collateral);
 
-        uint256 actualNet = usdc.balanceOf(userAddr) + 2000e6 - userBalBefore;
+        uint256 actualNet = usdc.balanceOf(userAddr) + collateral - userBalBefore;
         uint256 actualFee = usdc.balanceOf(treasury) - treasuryBalBefore;
 
         // Core invariant: net + fee == gross
