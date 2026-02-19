@@ -451,7 +451,8 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         if (amount == 0) revert InvalidAmount();
 
         OToken ot = OToken(oToken);
-        if (block.timestamp < ot.expiry()) revert OptionNotExpired();
+        Controller ctrl = Controller(addressBook.controller());
+        if (!ctrl.betaMode() && block.timestamp < ot.expiry()) revert OptionNotExpired();
 
         Oracle oracle = Oracle(addressBook.oracle());
         (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(ot.underlying(), ot.expiry());

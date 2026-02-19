@@ -38,11 +38,15 @@ contract Controller {
     /// @notice Whether a vault has been settled
     mapping(address => mapping(uint256 => bool)) public vaultSettled;
 
+    /// @notice When true, expiry time checks are bypassed (for testnet demos)
+    bool public betaMode;
+
     event VaultOpened(address indexed owner, uint256 vaultId);
     event CollateralDeposited(address indexed owner, uint256 vaultId, address asset, uint256 amount);
     event OTokenMinted(address indexed owner, uint256 vaultId, address oToken, uint256 amount);
     event VaultSettled(address indexed owner, uint256 vaultId, uint256 collateralReturned);
     event Redeemed(address indexed oToken, address indexed redeemer, uint256 otokenAmount, uint256 payout);
+    event BetaModeSet(bool enabled);
 
     error OnlyOwnerOrBatchSettler();
     error InvalidVault();
@@ -66,6 +70,13 @@ contract Controller {
     constructor(address _addressBook) {
         addressBook = AddressBook(_addressBook);
         owner = msg.sender;
+    }
+
+    /// @notice Enable or disable beta mode (bypasses expiry time checks). Owner only.
+    function setBetaMode(bool _enabled) external {
+        if (msg.sender != owner) revert Unauthorized();
+        betaMode = _enabled;
+        emit BetaModeSet(_enabled);
     }
 
     // --- Vault Operations ---
@@ -160,7 +171,7 @@ contract Controller {
         if (vaultSettled[_owner][_vaultId]) revert VaultAlreadySettledError();
 
         OToken oToken = OToken(vault.shortOtoken);
-        if (block.timestamp < oToken.expiry()) revert OptionNotExpired();
+        if (!betaMode && block.timestamp < oToken.expiry()) revert OptionNotExpired();
 
         Oracle oracle = Oracle(addressBook.oracle());
         (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(oToken.underlying(), oToken.expiry());
@@ -189,7 +200,7 @@ contract Controller {
         if (_amount == 0) revert NoOtokensToRedeem();
 
         OToken oToken = OToken(_oToken);
-        if (block.timestamp < oToken.expiry()) revert OptionNotExpired();
+        if (!betaMode && block.timestamp < oToken.expiry()) revert OptionNotExpired();
 
         Oracle oracle = Oracle(addressBook.oracle());
         (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(oToken.underlying(), oToken.expiry());
