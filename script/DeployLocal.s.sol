@@ -10,51 +10,8 @@ import "../src/core/Oracle.sol";
 import "../src/core/Whitelist.sol";
 import "../src/core/BatchSettler.sol";
 import "../src/core/PriceSheet.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-
-/**
- * @title MockERC20
- * @notice Simple mintable ERC20 for local testing.
- */
-contract MockERC20 is ERC20 {
-    uint8 private _dec;
-
-    constructor(string memory name_, string memory symbol_, uint8 dec_) ERC20(name_, symbol_) {
-        _dec = dec_;
-    }
-
-    function mint(address to, uint256 amount) external {
-        _mint(to, amount);
-    }
-
-    function decimals() public view override returns (uint8) {
-        return _dec;
-    }
-}
-
-/**
- * @title MockChainlinkFeed
- * @notice Returns a fixed price for local testing.
- */
-contract MockChainlinkFeed {
-    int256 public price;
-
-    constructor(int256 _price) {
-        price = _price;
-    }
-
-    function setPrice(int256 _price) external {
-        price = _price;
-    }
-
-    function latestRoundData()
-        external
-        view
-        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
-    {
-        return (1, price, block.timestamp, block.timestamp, 1);
-    }
-}
+import "../src/mocks/MockERC20.sol";
+import "../src/mocks/MockChainlinkFeed.sol";
 
 /**
  * @title DeployLocal
