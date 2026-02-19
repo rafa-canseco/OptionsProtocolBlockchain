@@ -10,10 +10,12 @@ contract MockChainlinkFeed {
     int256 public price;
 
     constructor(int256 _price) {
+        require(_price > 0, "MockChainlinkFeed: price must be positive");
         price = _price;
     }
 
     function setPrice(int256 _price) external {
+        require(_price > 0, "MockChainlinkFeed: price must be positive");
         price = _price;
     }
 

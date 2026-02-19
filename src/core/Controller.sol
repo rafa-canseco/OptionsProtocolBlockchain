@@ -157,7 +157,7 @@ contract Controller {
     }
 
     /**
-     * @notice Settle a vault after expiry (physical settlement).
+     * @notice Settle a vault after expiry — or immediately if betaMode is active (physical settlement).
      *         Calculates payout based on expiry price and returns remaining collateral.
      *
      *         Physical settlement behavior:
@@ -193,8 +193,8 @@ contract Controller {
     }
 
     /**
-     * @notice Redeem oTokens for payout after expiry (for option holders/buyers).
-     *         Burns the oTokens and pays out if ITM.
+     * @notice Redeem oTokens for payout after expiry — or immediately if betaMode is active
+     *         (for option holders/buyers). Burns the oTokens and pays out if ITM.
      */
     function redeem(address _oToken, uint256 _amount) external {
         if (_amount == 0) revert NoOtokensToRedeem();

@@ -33,9 +33,9 @@ contract MockAavePool is IPool {
         // Calculate fee
         uint256 premium = (amount * FLASH_LOAN_FEE_BPS) / 10_000;
 
-        // Call receiver's callback
+        // Call receiver's callback (initiator = msg.sender, matching real Aave V3)
         bool success = IFlashLoanSimpleReceiver(receiverAddress).executeOperation(
-            asset, amount, premium, receiverAddress, params
+            asset, amount, premium, msg.sender, params
         );
         require(success, "Flash loan callback failed");
 

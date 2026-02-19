@@ -293,7 +293,8 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
      *         on Uniswap V3 to repay the flash loan, and sends surplus collateral to the operator.
      *
      *         Prerequisites:
-     *         - Option must be expired and ITM (strictly: PUT expiryPrice < strike, CALL expiryPrice > strike)
+     *         - Option must be expired (unless Controller.betaMode is active) and ITM
+     *           (strictly: PUT expiryPrice < strike, CALL expiryPrice > strike)
      *         - Oracle expiry price must be set
      *         - Operator must have approved this contract for the oToken
      *         - aavePool and swapRouter must be configured
@@ -436,7 +437,8 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
 
     /**
      * @dev Shared implementation for physicalRedeem and _physicalRedeemSingle.
-     *      Validates the option is expired + ITM, calculates contra-asset, and initiates flash loan.
+     *      Validates the option is expired (or betaMode is active) + ITM, calculates contra-asset,
+     *      and initiates flash loan.
      */
     function _executePhysicalRedeem(
         address oToken,

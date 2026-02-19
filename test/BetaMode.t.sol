@@ -282,12 +282,15 @@ contract BetaModeTest is Test {
         oracle.setExpiryPrice(address(weth), expiry, 1800e8); // ITM
 
         uint256 mmOTokenBefore = OToken(oToken).balanceOf(mm);
+        uint256 mmUsdcBefore = usdc.balanceOf(mm);
 
         // mm redeems oTokens before expiry — should succeed with betaMode
         vm.prank(mm);
         controller.redeem(oToken, mmOTokenBefore);
 
         assertEq(OToken(oToken).balanceOf(mm), 0);
+        // ITM put: full collateral payout = (amount * strike) / 1e10 = (1e8 * 2000e8) / 1e10 = 2000e6
+        assertEq(usdc.balanceOf(mm), mmUsdcBefore + 2000e6);
     }
 
     // ===== physicalRedeem: betaMode off (existing behavior) =====
@@ -558,5 +561,39 @@ contract BetaModeTest is Test {
         vm.prank(alice);
         vm.expectRevert(BatchSettler.OnlyOperator.selector);
         settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+    }
+
+    // ===== Re-lock: disabling betaMode restores expiry enforcement =====
+
+    function test_betaMode_disableRestoresExpiryCheck() public {
+        address putToken = _createPut(strikePrice);
+        _setupPutPosition(alice, putToken, 1e8);
+
+        // Enable betaMode, settle alice's vault successfully before expiry
+        controller.setBetaMode(true);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8); // OTM
+        _settleVault(alice, 1);
+
+        // Now set up bob's position (same oToken needs new quote)
+        _fundUser(bob, 50_000e6, 50e18);
+        vm.prank(bob);
+        IERC20(putToken).approve(address(settler), type(uint256).max);
+        vm.prank(mm);
+        priceSheet.publishQuote(putToken, 70e6, 72e6, block.timestamp + 1 hours, 1000e8);
+        vm.prank(bob);
+        settler.executeOrder(putToken, 1e8, 2000e6);
+
+        // Disable betaMode
+        controller.setBetaMode(false);
+
+        // Bob's vault should now revert — expiry check re-enforced
+        vm.prank(address(settler));
+        vm.expectRevert(Controller.OptionNotExpired.selector);
+        controller.settleVault(bob, 1);
+
+        // physicalRedeem should also revert
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.OptionNotExpired.selector);
+        settler.physicalRedeem(putToken, bob, 1e8, 2000e6);
     }
 }

@@ -12,15 +12,18 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * @notice Mock Uniswap V3 SwapRouter that implements ISwapRouter.exactOutputSingle().
  *         Uses MockChainlinkFeed for realistic ETH/USD conversion rates.
  *         Mints output tokens via MockERC20.mint() — no pre-funded liquidity needed.
+ *         Only supports swaps between the configured WETH and USDC pair.
+ * @dev The fee tier parameter is ignored — all swaps use the single Chainlink price feed.
  */
 contract MockSwapRouter is ISwapRouter {
     using SafeERC20 for IERC20;
 
-    MockChainlinkFeed public priceFeed;
-    address public weth;
-    address public usdc;
+    MockChainlinkFeed public immutable priceFeed;
+    address public immutable weth;
+    address public immutable usdc;
 
     constructor(address _priceFeed, address _weth, address _usdc) {
+        require(_priceFeed != address(0) && _weth != address(0) && _usdc != address(0), "Zero address");
         priceFeed = MockChainlinkFeed(_priceFeed);
         weth = _weth;
         usdc = _usdc;
@@ -32,8 +35,18 @@ contract MockSwapRouter is ISwapRouter {
         override
         returns (uint256 amountIn)
     {
-        (, int256 price,,,) = priceFeed.latestRoundData();
-        uint256 ethPrice = uint256(price); // 8 decimals (e.g., 2500e8)
+        require(
+            params.tokenOut == weth || params.tokenOut == usdc,
+            "MockSwapRouter: unsupported tokenOut"
+        );
+        require(
+            params.tokenIn == weth || params.tokenIn == usdc,
+            "MockSwapRouter: unsupported tokenIn"
+        );
+
+        (, int256 rawPrice,,,) = priceFeed.latestRoundData();
+        require(rawPrice > 0, "MockSwapRouter: invalid price");
+        uint256 ethPrice = uint256(rawPrice); // 8 decimals (e.g., 2500e8)
 
         if (params.tokenOut == weth) {
             // Buying WETH (18 dec) with USDC (6 dec)
