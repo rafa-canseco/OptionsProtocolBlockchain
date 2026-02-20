@@ -98,7 +98,7 @@ contract ProtocolHandler is Test {
         controller.openVault(u);
         uint256 vaultId = controller.vaultCount(u);
         controller.depositCollateral(u, vaultId, address(usdc), collateral);
-        controller.mintOtoken(u, vaultId, oToken, amount);
+        controller.mintOtoken(u, vaultId, oToken, amount, u);
         vm.stopPrank();
 
         totalDeposited += collateral;

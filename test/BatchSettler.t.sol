@@ -149,6 +149,19 @@ contract BatchSettlerTest is Test {
 
     // ===== executeOrder (instant settlement) =====
 
+    function test_executeOrder_noOTokenApprovalNeeded() public {
+        address oToken = _createPut(strikePrice);
+        // NOTE: deliberately do NOT call _approveOToken — no oToken approval should be needed
+        _publishPutQuote(oToken, 70e6, 100e8);
+
+        vm.prank(alice);
+        settler.executeOrder(oToken, 1e8, 2000e6);
+
+        // MM got oTokens directly via mint, user never held them
+        assertEq(OToken(oToken).balanceOf(mm), 1e8);
+        assertEq(OToken(oToken).balanceOf(alice), 0);
+    }
+
     function test_executeOrder_singlePut() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
