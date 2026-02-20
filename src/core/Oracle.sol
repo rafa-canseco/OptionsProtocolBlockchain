@@ -2,6 +2,7 @@
 pragma solidity 0.8.20;
 
 import "./AddressBook.sol";
+import "./Controller.sol";
 
 /**
  * @title Oracle
@@ -25,6 +26,7 @@ contract Oracle {
 
     event PriceFeedSet(address indexed asset, address indexed feed);
     event ExpiryPriceSet(address indexed asset, uint256 indexed expiry, uint256 price);
+    event ExpiryPriceReset(address indexed asset, uint256 indexed expiry);
 
     error OnlyOwner();
     error PriceAlreadySet();
@@ -32,6 +34,7 @@ contract Oracle {
     error FeedNotSet();
     error InvalidPrice();
     error InvalidAddress();
+    error NotBetaMode();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -69,8 +72,25 @@ contract Oracle {
     }
 
     /**
+     * @notice Reset an expiry price so it can be set again (owner only).
+     *         Only callable when Controller.betaMode() is true.
+     */
+    function resetExpiryPrice(address _asset, uint256 _expiry) external onlyOwner {
+        if (_asset == address(0)) revert InvalidAddress();
+
+        Controller ctrl = Controller(addressBook.controller());
+        if (!ctrl.betaMode()) revert NotBetaMode();
+        if (!expiryPriceSet[_asset][_expiry]) revert PriceNotSet();
+
+        expiryPrice[_asset][_expiry] = 0;
+        expiryPriceSet[_asset][_expiry] = false;
+
+        emit ExpiryPriceReset(_asset, _expiry);
+    }
+
+    /**
      * @notice Get the settlement price for an asset at expiry.
-     *         Reverts if not yet set.
+     *         Returns (0, false) if not yet set.
      */
     function getExpiryPrice(address _asset, uint256 _expiry) external view returns (uint256, bool) {
         return (expiryPrice[_asset][_expiry], expiryPriceSet[_asset][_expiry]);
