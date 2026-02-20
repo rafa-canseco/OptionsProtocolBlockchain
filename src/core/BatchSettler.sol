@@ -137,7 +137,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
      *
      *         Prerequisites:
      *         - User has approved MarginPool for collateral asset
-     *         - User has approved this contract for oToken transfers
      *         - MM (operator) has approved this contract for premium asset
      *         - A valid, non-expired quote exists on PriceSheet with remaining capacity
      *
@@ -175,13 +174,10 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         address collateralAsset = OToken(oToken).collateralAsset();
         ctrl.depositCollateral(msg.sender, vaultId, collateralAsset, collateral);
 
-        // 6. Mint oTokens to user
-        ctrl.mintOtoken(msg.sender, vaultId, oToken, amount);
+        // 6. Mint oTokens directly to operator (MM)
+        ctrl.mintOtoken(msg.sender, vaultId, oToken, amount, operator);
 
-        // 7. Transfer oTokens from user to operator (MM)
-        IERC20(oToken).safeTransferFrom(msg.sender, operator, amount);
-
-        // 8. Transfer premium from operator (MM) to user (minus protocol fee)
+        // 7. Transfer premium from operator (MM) to user (minus protocol fee)
         _transferPremium(oToken, amount, premium, collateral, vaultId);
     }
 

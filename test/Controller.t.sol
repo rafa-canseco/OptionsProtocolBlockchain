@@ -147,7 +147,7 @@ contract ControllerTest is Test {
 
         vm.prank(attacker);
         vm.expectRevert(Controller.Unauthorized.selector);
-        controller.mintOtoken(user, 1, oToken, 1e8);
+        controller.mintOtoken(user, 1, oToken, 1e8, user);
     }
 
     function test_unauthorizedCannotSettleVault() public {
@@ -155,7 +155,7 @@ contract ControllerTest is Test {
         vm.startPrank(user);
         controller.openVault(user);
         controller.depositCollateral(user, 1, address(usdc), 2000e6);
-        controller.mintOtoken(user, 1, oToken, 1e8);
+        controller.mintOtoken(user, 1, oToken, 1e8, user);
         vm.stopPrank();
 
         vm.warp(expiry + 1);
@@ -174,7 +174,7 @@ contract ControllerTest is Test {
         vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
-        controller.mintOtoken(user, vaultId, oToken, 1e8);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
 
         assertEq(OToken(oToken).balanceOf(user), 1e8);
         assertEq(usdc.balanceOf(address(pool)), 2000e6);
@@ -200,7 +200,7 @@ contract ControllerTest is Test {
         vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
-        controller.mintOtoken(user, vaultId, oToken, 1e8);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
         OToken(oToken).transfer(buyer, 1e8);
         vm.stopPrank();
 
@@ -226,7 +226,7 @@ contract ControllerTest is Test {
         vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(weth), 1e18);
-        controller.mintOtoken(user, vaultId, oToken, 1e8);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
         OToken(oToken).transfer(buyer, 1e8);
         vm.stopPrank();
 
@@ -248,7 +248,7 @@ contract ControllerTest is Test {
         vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(weth), 1e18);
-        controller.mintOtoken(user, vaultId, oToken, 1e8);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
         OToken(oToken).transfer(buyer, 1e8);
         vm.stopPrank();
 
@@ -275,7 +275,7 @@ contract ControllerTest is Test {
 
         vm.prank(user);
         vm.expectRevert(Controller.InsufficientCollateral.selector);
-        controller.mintOtoken(user, 1, oToken, 1e8);
+        controller.mintOtoken(user, 1, oToken, 1e8, user);
     }
 
     function test_cannotMintInsufficientCollateral() public {
@@ -285,7 +285,7 @@ contract ControllerTest is Test {
         controller.depositCollateral(user, vaultId, address(usdc), 1000e6);
 
         vm.expectRevert(Controller.InsufficientCollateral.selector);
-        controller.mintOtoken(user, vaultId, oToken, 1e8);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
         vm.stopPrank();
     }
 
@@ -294,7 +294,7 @@ contract ControllerTest is Test {
         vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
-        controller.mintOtoken(user, vaultId, oToken, 1e8);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
 
         vm.expectRevert(Controller.OptionNotExpired.selector);
         controller.settleVault(user, vaultId);
@@ -306,7 +306,7 @@ contract ControllerTest is Test {
         vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
-        controller.mintOtoken(user, vaultId, oToken, 1e8);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
         vm.stopPrank();
 
         vm.warp(expiry + 1);
@@ -321,7 +321,7 @@ contract ControllerTest is Test {
         vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
-        controller.mintOtoken(user, vaultId, oToken, 1e8);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
         vm.stopPrank();
 
         vm.warp(expiry + 1);
@@ -345,7 +345,7 @@ contract ControllerTest is Test {
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
 
         vm.expectRevert(Controller.OTokenNotWhitelisted.selector);
-        controller.mintOtoken(user, vaultId, oToken, 1e8);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
         vm.stopPrank();
     }
 
@@ -360,7 +360,7 @@ contract ControllerTest is Test {
         uint256 microCollateral = 1e6;
 
         controller.depositCollateral(user, vaultId, address(usdc), microCollateral);
-        controller.mintOtoken(user, vaultId, oToken, microAmount);
+        controller.mintOtoken(user, vaultId, oToken, microAmount, user);
         vm.stopPrank();
 
         assertEq(OToken(oToken).balanceOf(user), microAmount);

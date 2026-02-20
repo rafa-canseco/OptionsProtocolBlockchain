@@ -125,12 +125,19 @@ contract Controller {
      *           e.g., 1 PUT at $2000 strike = 2000e6 USDC (2000 * 1e6) collateral
      *         For a CALL: collateral is the underlying. Need shortAmount of underlying.
      *           e.g., 1 CALL = 1e18 WETH collateral
+     *
+     * @param _owner   Vault owner whose collateral backs the position
+     * @param _vaultId Vault to mint from
+     * @param _oToken  The oToken to mint
+     * @param _amount  Amount of oTokens to mint (8 decimals)
+     * @param _to      Recipient of the minted oTokens (e.g. operator/MM)
      */
     function mintOtoken(
         address _owner,
         uint256 _vaultId,
         address _oToken,
-        uint256 _amount
+        uint256 _amount,
+        address _to
     ) external onlyAuthorized(_owner) {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
 
@@ -151,7 +158,7 @@ contract Controller {
         vault.shortOtoken = _oToken;
         vault.shortAmount += _amount;
 
-        oToken.mintOtoken(_owner, _amount);
+        oToken.mintOtoken(_to, _amount);
 
         emit OTokenMinted(_owner, _vaultId, _oToken, _amount);
     }

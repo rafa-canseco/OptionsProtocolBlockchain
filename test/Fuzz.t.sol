@@ -103,7 +103,7 @@ contract ControllerFuzzTest is Test {
         vm.startPrank(user);
         controller.openVault(user);
         controller.depositCollateral(user, 1, address(usdc), requiredCollateral);
-        controller.mintOtoken(user, 1, oToken, amount);
+        controller.mintOtoken(user, 1, oToken, amount, user);
         vm.stopPrank();
 
         assertEq(OToken(oToken).balanceOf(user), amount);
@@ -127,7 +127,7 @@ contract ControllerFuzzTest is Test {
         controller.depositCollateral(user, 1, address(usdc), collateral);
 
         vm.expectRevert(Controller.InsufficientCollateral.selector);
-        controller.mintOtoken(user, 1, oToken, amount);
+        controller.mintOtoken(user, 1, oToken, amount, user);
         vm.stopPrank();
     }
 
@@ -145,7 +145,7 @@ contract ControllerFuzzTest is Test {
         vm.startPrank(user);
         controller.openVault(user);
         controller.depositCollateral(user, 1, address(weth), requiredCollateral);
-        controller.mintOtoken(user, 1, oToken, amount);
+        controller.mintOtoken(user, 1, oToken, amount, user);
         vm.stopPrank();
 
         assertEq(OToken(oToken).balanceOf(user), amount);
@@ -167,7 +167,7 @@ contract ControllerFuzzTest is Test {
         vm.startPrank(user);
         controller.openVault(user);
         controller.depositCollateral(user, 1, address(usdc), collateral);
-        controller.mintOtoken(user, 1, oToken, amount);
+        controller.mintOtoken(user, 1, oToken, amount, user);
         vm.stopPrank();
 
         uint256 userBalBefore = usdc.balanceOf(user);
@@ -208,7 +208,7 @@ contract ControllerFuzzTest is Test {
         vm.startPrank(user);
         controller.openVault(user);
         controller.depositCollateral(user, 1, address(weth), collateral);
-        controller.mintOtoken(user, 1, oToken, amount);
+        controller.mintOtoken(user, 1, oToken, amount, user);
         vm.stopPrank();
 
         uint256 userBalBefore = weth.balanceOf(user);
