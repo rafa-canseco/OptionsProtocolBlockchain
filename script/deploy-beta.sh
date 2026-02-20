@@ -43,6 +43,7 @@ echo "[..] Deploying to Base Sepolia..."
 DEPLOY_OUTPUT=$(forge script script/DeployBeta.s.sol:DeployBeta \
     --rpc-url "$BASE_SEPOLIA_RPC_URL" \
     --broadcast \
+    --slow \
     -vvvv 2>&1) || {
     echo "$DEPLOY_OUTPUT"
     echo "[FAIL] Deployment failed"

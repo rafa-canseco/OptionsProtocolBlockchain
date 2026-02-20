@@ -1,0 +1,26 @@
+{
+  "chain": "base-sepolia",
+  "chainId": 84532,
+  "deployer": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+  "betaMode": true,
+  "contracts": {
+    "LETH": "0x931927a1B911D72862518e0Ea3815D335df87919",
+    "LUSD": "0xDa97d8aec7aAD92F9Cba114Abd97a259FdCBC0e3",
+    "MockChainlinkFeed": "0xa93c66698030210ea8eb4e56F11bF53409e84F1a",
+    "MockAavePool": "0x9475c6587d09d60D3F38a4363D76eCCc2163C1d5",
+    "MockSwapRouter": "0xad1A3023dcCB2D0049786a9367E435669845786f",
+    "AddressBook": "0x2530248C7F5fD76edCA8706225747cD914bD5Bc7",
+    "Controller": "0x54Dd9eBF1eC5D1a9DFd66bF84e23bA7b097C4cfe",
+    "MarginPool": "0xDBF9BD7b51287DF4C04375e6299F4A1713FD2155",
+    "OTokenFactory": "0x235B51B00Ea8C989D10537CBd4A27E315d4aA0F2",
+    "Oracle": "0xA4d4D2ac1b14E1031F8ae16553Df95C20C9cAfe0",
+    "Whitelist": "0x510A4CC3d9BFf05d6BcBc05c26cBcE8Ab6ee7d20",
+    "BatchSettler": "0x409f4C0c8b91FeaE64F54617481668e9d8cFb658",
+    "PriceSheet": "0xE26ECA2365E0eb56099ef04984B22c1049434C43"
+  },
+  "config": {
+    "protocolFeeBps": 400,
+    "swapFeeTier": 500,
+    "initialEthPrice": "2500e8"
+  }
+}
