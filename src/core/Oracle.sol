@@ -2,6 +2,7 @@
 pragma solidity 0.8.20;
 
 import "./AddressBook.sol";
+import "./Controller.sol";
 
 /**
  * @title Oracle
@@ -32,6 +33,7 @@ contract Oracle {
     error FeedNotSet();
     error InvalidPrice();
     error InvalidAddress();
+    error NotBetaMode();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -66,6 +68,17 @@ contract Oracle {
         expiryPriceSet[_asset][_expiry] = true;
 
         emit ExpiryPriceSet(_asset, _expiry, _price);
+    }
+
+    /**
+     * @notice Reset an expiry price so it can be set again. Only works in beta mode.
+     */
+    function resetExpiryPrice(address _asset, uint256 _expiry) external onlyOwner {
+        Controller ctrl = Controller(addressBook.controller());
+        if (!ctrl.betaMode()) revert NotBetaMode();
+
+        expiryPrice[_asset][_expiry] = 0;
+        expiryPriceSet[_asset][_expiry] = false;
     }
 
     /**
