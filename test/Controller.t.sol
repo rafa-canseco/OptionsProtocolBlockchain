@@ -349,6 +349,22 @@ contract ControllerTest is Test {
         vm.stopPrank();
     }
 
+    // --- Mint to different recipient ---
+
+    function test_mintOtoken_sendsToRecipient() public {
+        address oToken = _createPut();
+        address recipient = address(0xDEAD);
+
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, recipient);
+        vm.stopPrank();
+
+        assertEq(OToken(oToken).balanceOf(recipient), 1e8);
+        assertEq(OToken(oToken).balanceOf(user), 0);
+    }
+
     // --- Micro-options ---
 
     function test_microOption_1USDC() public {
