@@ -9,7 +9,6 @@ import "../src/core/MarginPool.sol";
 import "../src/core/OToken.sol";
 import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
-import "../src/core/PriceSheet.sol";
 import "../src/core/Whitelist.sol";
 import "../src/interfaces/IFlashLoanSimple.sol";
 import "../src/interfaces/ISwapRouter.sol";
@@ -34,6 +33,7 @@ contract BatchSettlerTest is Test {
     event OrderExecuted(
         address indexed user,
         address indexed oToken,
+        address indexed mm,
         uint256 amount,
         uint256 grossPremium,
         uint256 netPremium,
@@ -51,12 +51,12 @@ contract BatchSettlerTest is Test {
     Oracle public oracle;
     Whitelist public whitelist;
     BatchSettler public settler;
-    PriceSheet public priceSheet;
 
     MockERC20 public weth;
     MockERC20 public usdc;
 
-    address public mm = address(0xAA00);
+    uint256 public mmKey = 0xAA01;
+    address public mm;
     address public alice = address(0xA11CE);
     address public bob = address(0xB0B0);
     address public carol = address(0xCA201);
@@ -64,8 +64,12 @@ contract BatchSettlerTest is Test {
     uint256 public strikePrice = 2000e8;
     uint256 public expiry;
 
+    uint256 nextQuoteId = 1;
+
     function setUp() public {
         vm.warp(1700000000);
+
+        mm = vm.addr(mmKey);
 
         // Deploy tokens
         weth = new MockERC20("Wrapped ETH", "WETH", 18);
@@ -79,7 +83,6 @@ contract BatchSettlerTest is Test {
         oracle = new Oracle(address(addressBook));
         whitelist = new Whitelist(address(addressBook));
         settler = new BatchSettler(address(addressBook), mm);
-        priceSheet = new PriceSheet(address(addressBook), mm);
 
         // Wire AddressBook
         addressBook.setController(address(controller));
@@ -88,9 +91,11 @@ contract BatchSettlerTest is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
-        addressBook.setPriceSheet(address(priceSheet));
 
-        // Whitelist
+        // Whitelist MM
+        settler.setWhitelistedMM(mm, true);
+
+        // Whitelist assets & products
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
         whitelist.whitelistCollateral(address(weth));
@@ -142,20 +147,31 @@ contract BatchSettlerTest is Test {
         IERC20(oToken).approve(address(settler), type(uint256).max);
     }
 
-    function _publishPutQuote(address oToken, uint256 bidPrice, uint256 maxAmount) internal {
-        vm.prank(mm);
-        priceSheet.publishQuote(oToken, bidPrice, bidPrice + 2e6, block.timestamp + 1 hours, maxAmount);
+    function _signQuote(address oToken, uint256 bidPrice, uint256 deadline, uint256 maxAmount)
+        internal returns (BatchSettler.Quote memory quote, bytes memory sig)
+    {
+        quote = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: bidPrice,
+            deadline: deadline,
+            quoteId: nextQuoteId++,
+            maxAmount: maxAmount,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(quote);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        sig = abi.encodePacked(r, s, v);
     }
 
     // ===== executeOrder (instant settlement) =====
 
     function test_executeOrder_noOTokenApprovalNeeded() public {
         address oToken = _createPut(strikePrice);
-        // NOTE: deliberately do NOT call _approveOToken — no oToken approval should be needed
-        _publishPutQuote(oToken, 70e6, 100e8);
+        // NOTE: deliberately do NOT call _approveOToken -- no oToken approval should be needed
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // MM got oTokens directly via mint, user never held them
         assertEq(OToken(oToken).balanceOf(mm), 1e8);
@@ -165,13 +181,13 @@ contract BatchSettlerTest is Test {
     function test_executeOrder_singlePut() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8); // max 100 oTokens
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         uint256 aliceBefore = usdc.balanceOf(alice);
         uint256 mmBefore = usdc.balanceOf(mm);
 
         vm.prank(alice);
-        uint256 vaultId = settler.executeOrder(oToken, 1e8, 2000e6);
+        uint256 vaultId = settler.executeOrder(q, sig, 1e8, 2000e6);
 
         assertEq(vaultId, 1);
         // Alice: -2000 collateral, +70 premium
@@ -186,15 +202,13 @@ contract BatchSettlerTest is Test {
     function test_executeOrder_singleCall() public {
         address oToken = _createCall(2300e8);
         _approveOToken(bob, oToken);
-
-        vm.prank(mm);
-        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 50e6, block.timestamp + 1 hours, 100e8);
 
         uint256 bobUsdcBefore = usdc.balanceOf(bob);
         uint256 bobWethBefore = weth.balanceOf(bob);
 
         vm.prank(bob);
-        settler.executeOrder(oToken, 1e8, 1e18);
+        settler.executeOrder(q, sig, 1e8, 1e18);
 
         // Bob: -1 WETH collateral, +50 USDC premium
         assertEq(weth.balanceOf(bob), bobWethBefore - 1e18);
@@ -206,13 +220,13 @@ contract BatchSettlerTest is Test {
     function test_executeOrder_premiumCalculation() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         uint256 aliceBefore = usdc.balanceOf(alice);
 
         // 2.5 oTokens -> premium = (2.5e8 * 70e6) / 1e8 = 175e6
         vm.prank(alice);
-        settler.executeOrder(oToken, 2.5e8, 5000e6);
+        settler.executeOrder(q, sig, 2.5e8, 5000e6);
 
         assertEq(usdc.balanceOf(alice), aliceBefore - 5000e6 + 175e6);
     }
@@ -221,94 +235,175 @@ contract BatchSettlerTest is Test {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
         _approveOToken(bob, oToken);
-        _publishPutQuote(oToken, 70e6, 3e8); // max 3 oTokens
+
+        // Create a single quote with maxAmount=3e8 that both users will fill against
+        BatchSettler.Quote memory q = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: 70e6,
+            deadline: block.timestamp + 1 hours,
+            quoteId: nextQuoteId++,
+            maxAmount: 3e8,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(q);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
 
         // Alice fills 1 oToken
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
-        (, , , uint256 filled1, ) = priceSheet.getQuote(oToken);
+        (uint256 filled1, bool cancelled1) = settler.getQuoteState(mm, digest);
         assertEq(filled1, 1e8);
+        assertFalse(cancelled1);
 
         // Bob fills 2 oTokens
         vm.prank(bob);
-        settler.executeOrder(oToken, 2e8, 4000e6);
+        settler.executeOrder(q, sig, 2e8, 4000e6);
 
-        (, , , uint256 filled2, ) = priceSheet.getQuote(oToken);
+        (uint256 filled2, bool cancelled2) = settler.getQuoteState(mm, digest);
         assertEq(filled2, 3e8);
+        assertFalse(cancelled2);
     }
 
     function test_executeOrder_revertsOnCapacityExceeded() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
         _approveOToken(bob, oToken);
-        _publishPutQuote(oToken, 70e6, 1.5e8); // max 1.5 oTokens
+
+        // Create a single quote with maxAmount=1.5e8 that both users will fill against
+        BatchSettler.Quote memory q = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: 70e6,
+            deadline: block.timestamp + 1 hours,
+            quoteId: nextQuoteId++,
+            maxAmount: 1.5e8,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(q);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
 
         // Alice fills 1 oToken
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // Bob tries 1 more -> exceeds capacity (1e8 + 1e8 > 1.5e8)
         vm.prank(bob);
-        vm.expectRevert(PriceSheet.CapacityExceeded.selector);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        vm.expectRevert(BatchSettler.CapacityExceeded.selector);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
     }
 
     function test_executeOrder_revertsOnExpiredQuote() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         vm.warp(block.timestamp + 2 hours);
 
         vm.prank(alice);
-        vm.expectRevert(BatchSettler.QuoteInvalid.selector);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        vm.expectRevert(BatchSettler.QuoteExpired.selector);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
     }
 
-    function test_executeOrder_revertsOnNoQuote() public {
+    function test_executeOrder_revertsOnInvalidSignature() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        // No quote published
+
+        BatchSettler.Quote memory q = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: 70e6,
+            deadline: block.timestamp + 1 hours,
+            quoteId: nextQuoteId++,
+            maxAmount: 100e8,
+            makerNonce: settler.makerNonce(mm)
+        });
+
+        // Create a random bad signature
+        bytes memory badSig = abi.encodePacked(bytes32(uint256(1)), bytes32(uint256(2)), uint8(27));
 
         vm.prank(alice);
-        vm.expectRevert(BatchSettler.QuoteInvalid.selector);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        vm.expectRevert(BatchSettler.MMNotWhitelisted.selector);
+        settler.executeOrder(q, badSig, 1e8, 2000e6);
     }
 
-    function test_executeOrder_revertsOnInvalidatedQuote() public {
+    function test_executeOrder_revertsOnMMNotWhitelisted() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
 
+        // Sign with a non-whitelisted key
+        uint256 randomKey = 0xBB01;
+        address randomMM = vm.addr(randomKey);
+
+        BatchSettler.Quote memory q = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: 70e6,
+            deadline: block.timestamp + 1 hours,
+            quoteId: nextQuoteId++,
+            maxAmount: 100e8,
+            makerNonce: settler.makerNonce(randomMM)
+        });
+        bytes32 digest = settler.hashQuote(q);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(randomKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
+
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.MMNotWhitelisted.selector);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
+    }
+
+    function test_executeOrder_revertsOnStaleNonce() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+
+        // Sign a quote with current makerNonce (0)
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
+
+        // MM increments nonce (circuit breaker)
         vm.prank(mm);
-        priceSheet.invalidateQuote(oToken);
+        settler.incrementMakerNonce();
+
+        // Now the quote has stale makerNonce
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.StaleNonce.selector);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
+    }
+
+    function test_executeOrder_revertsOnCancelledQuote() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
+
+        // MM cancels the quote
+        bytes32 digest = settler.hashQuote(q);
+        vm.prank(mm);
+        settler.cancelQuote(digest);
 
         vm.prank(alice);
-        vm.expectRevert(BatchSettler.QuoteInvalid.selector);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        vm.expectRevert(BatchSettler.QuoteAlreadyCancelled.selector);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
     }
 
     function test_executeOrder_revertsOnZeroAmount() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         vm.prank(alice);
         vm.expectRevert(BatchSettler.InvalidAmount.selector);
-        settler.executeOrder(oToken, 0, 2000e6);
+        settler.executeOrder(q, sig, 0, 2000e6);
     }
 
     function test_executeOrder_emitsEvent() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         vm.prank(alice);
         // premium = (1e8 * 70e6) / 1e8 = 70e6, fee = 0 (no treasury/feeBps set)
-        vm.expectEmit(true, true, false, true);
-        emit OrderExecuted(alice, oToken, 1e8, 70e6, 70e6, 0, 2000e6, 1);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        vm.expectEmit(true, true, true, true);
+        emit OrderExecuted(alice, oToken, mm, 1e8, 70e6, 70e6, 0, 2000e6, 1);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
     }
 
     // ===== Full E2E: executeOrder -> Expiry -> Settle -> Redeem =====
@@ -317,14 +412,26 @@ contract BatchSettlerTest is Test {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
         _approveOToken(bob, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+
+        // Create a single quote for both users
+        BatchSettler.Quote memory q = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: 70e6,
+            deadline: block.timestamp + 1 hours,
+            quoteId: nextQuoteId++,
+            maxAmount: 100e8,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(q);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
 
         // Alice and Bob sell puts via executeOrder
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         vm.prank(bob);
-        settler.executeOrder(oToken, 2e8, 4000e6);
+        settler.executeOrder(q, sig, 2e8, 4000e6);
 
         // MM has 3 oTokens total
         assertEq(OToken(oToken).balanceOf(mm), 3e8);
@@ -344,7 +451,7 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchSettleVaults(owners, vaultIds);
 
-        // Physical settlement: ITM put → users get 0 collateral back
+        // Physical settlement: ITM put -> users get 0 collateral back
         // Alice: -2000 collateral + 70 premium + 0 returned
         assertEq(usdc.balanceOf(alice), 10_000e6 - 2000e6 + 70e6);
         // Bob: -4000 collateral + 140 premium + 0 returned
@@ -376,12 +483,23 @@ contract BatchSettlerTest is Test {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
         _approveOToken(bob, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+
+        BatchSettler.Quote memory q = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: 70e6,
+            deadline: block.timestamp + 1 hours,
+            quoteId: nextQuoteId++,
+            maxAmount: 100e8,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(q);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
 
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
         vm.prank(bob);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // Expire OTM
         vm.warp(expiry + 1);
@@ -406,12 +524,23 @@ contract BatchSettlerTest is Test {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
         _approveOToken(bob, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+
+        BatchSettler.Quote memory q = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: 70e6,
+            deadline: block.timestamp + 1 hours,
+            quoteId: nextQuoteId++,
+            maxAmount: 100e8,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(q);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
 
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
         vm.prank(bob);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // Warp past expiry, set oracle price, and pre-settle Alice's vault
         vm.warp(expiry + 1);
@@ -426,7 +555,7 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchSettleVaults(owners1, vaults1);
 
-        // Now batch with Alice (already settled) + Bob (valid) — Alice should emit failure event
+        // Now batch with Alice (already settled) + Bob (valid) -- Alice should emit failure event
         address[] memory owners2 = new address[](2);
         uint256[] memory vaults2 = new uint256[](2);
         owners2[0] = alice;
@@ -448,11 +577,11 @@ contract BatchSettlerTest is Test {
     function test_batchRedeem_singleOtoken() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         // Alice sells put
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // Expire ITM
         vm.warp(expiry + 1);
@@ -546,14 +675,12 @@ contract BatchSettlerTest is Test {
     function test_executeOrder_zeroBidPrice() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-
-        vm.prank(mm);
-        priceSheet.publishQuote(oToken, 0, 2e6, block.timestamp + 1 hours, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 0, block.timestamp + 1 hours, 100e8);
 
         uint256 aliceBefore = usdc.balanceOf(alice);
 
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // Alice gets zero premium (intentional), only loses collateral
         assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6);
@@ -565,12 +692,11 @@ contract BatchSettlerTest is Test {
         _approveOToken(alice, oToken);
 
         // bidPrice = 50e6, amount = 1 (smallest unit) -> premium = (1 * 50e6) / 1e8 = 0
-        vm.prank(mm);
-        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 50e6, block.timestamp + 1 hours, 100e8);
 
         vm.prank(alice);
         vm.expectRevert(BatchSettler.PremiumTooSmall.selector);
-        settler.executeOrder(oToken, 1, 1);
+        settler.executeOrder(q, sig, 1, 1);
     }
 
     // ===== batchRedeem edge cases =====
@@ -581,13 +707,14 @@ contract BatchSettlerTest is Test {
         address oToken2 = _createPut(2500e8);
         _approveOToken(alice, oToken1);
         _approveOToken(bob, oToken2);
-        _publishPutQuote(oToken1, 70e6, 100e8);
-        _publishPutQuote(oToken2, 90e6, 100e8);
+
+        (BatchSettler.Quote memory q1, bytes memory sig1) = _signQuote(oToken1, 70e6, block.timestamp + 1 hours, 100e8);
+        (BatchSettler.Quote memory q2, bytes memory sig2) = _signQuote(oToken2, 90e6, block.timestamp + 1 hours, 100e8);
 
         vm.prank(alice);
-        settler.executeOrder(oToken1, 1e8, 2000e6);
+        settler.executeOrder(q1, sig1, 1e8, 2000e6);
         vm.prank(bob);
-        settler.executeOrder(oToken2, 1e8, 2500e6);
+        settler.executeOrder(q2, sig2, 1e8, 2500e6);
 
         // Expire ITM for both (price = $1800)
         vm.warp(expiry + 1);
@@ -631,10 +758,10 @@ contract BatchSettlerTest is Test {
     function test_batchRedeem_otmZeroPayout() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // Expire OTM
         vm.warp(expiry + 1);
@@ -648,7 +775,7 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchSettleVaults(owners, vaultIds);
 
-        // MM redeems OTM oToken — zero payout but should not revert
+        // MM redeems OTM oToken -- zero payout but should not revert
         vm.prank(mm);
         OToken(oToken).approve(address(settler), 1e8);
 
@@ -672,13 +799,14 @@ contract BatchSettlerTest is Test {
         address oToken2 = _createPut(2500e8);
         _approveOToken(alice, oToken1);
         _approveOToken(bob, oToken2);
-        _publishPutQuote(oToken1, 70e6, 100e8);
-        _publishPutQuote(oToken2, 90e6, 100e8);
+
+        (BatchSettler.Quote memory q1, bytes memory sig1) = _signQuote(oToken1, 70e6, block.timestamp + 1 hours, 100e8);
+        (BatchSettler.Quote memory q2, bytes memory sig2) = _signQuote(oToken2, 90e6, block.timestamp + 1 hours, 100e8);
 
         vm.prank(alice);
-        settler.executeOrder(oToken1, 1e8, 2000e6);
+        settler.executeOrder(q1, sig1, 1e8, 2000e6);
         vm.prank(bob);
-        settler.executeOrder(oToken2, 1e8, 2500e6);
+        settler.executeOrder(q2, sig2, 1e8, 2500e6);
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
@@ -729,13 +857,14 @@ contract BatchSettlerTest is Test {
         address oToken2 = _createPut(2500e8);
         _approveOToken(alice, oToken1);
         _approveOToken(bob, oToken2);
-        _publishPutQuote(oToken1, 70e6, 100e8);
-        _publishPutQuote(oToken2, 90e6, 100e8);
+
+        (BatchSettler.Quote memory q1, bytes memory sig1) = _signQuote(oToken1, 70e6, block.timestamp + 1 hours, 100e8);
+        (BatchSettler.Quote memory q2, bytes memory sig2) = _signQuote(oToken2, 90e6, block.timestamp + 1 hours, 100e8);
 
         vm.prank(alice);
-        settler.executeOrder(oToken1, 1e8, 2000e6);
+        settler.executeOrder(q1, sig1, 1e8, 2000e6);
         vm.prank(bob);
-        settler.executeOrder(oToken2, 1e8, 2500e6);
+        settler.executeOrder(q2, sig2, 1e8, 2500e6);
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
@@ -776,11 +905,22 @@ contract BatchSettlerTest is Test {
     // ===== New validation tests =====
 
     function test_executeOrder_revertsOnZeroAddress() public {
-        _publishPutQuote(address(0x1), 70e6, 100e8); // dummy, won't reach PriceSheet
+        // Create a quote with oToken=address(0), sign it, expect revert
+        BatchSettler.Quote memory q = BatchSettler.Quote({
+            oToken: address(0),
+            bidPrice: 70e6,
+            deadline: block.timestamp + 1 hours,
+            quoteId: nextQuoteId++,
+            maxAmount: 100e8,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(q);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
 
         vm.prank(alice);
         vm.expectRevert(BatchSettler.InvalidAddress.selector);
-        settler.executeOrder(address(0), 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
     }
 
     function test_batchSettleVaults_revertsOnEmptyArrays() public {
@@ -809,13 +949,13 @@ contract BatchSettlerTest is Test {
 
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         uint256 aliceBefore = usdc.balanceOf(alice);
         uint256 mmBefore = usdc.balanceOf(mm);
 
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // grossPremium = 70e6, fee = 70e6 * 400 / 10000 = 2.8e6, netPremium = 67.2e6
         uint256 expectedFee = (70e6 * 400) / 10000; // 2_800_000
@@ -830,19 +970,19 @@ contract BatchSettlerTest is Test {
     }
 
     function test_executeOrder_zeroFee_noBps() public {
-        // feeBps = 0, treasury set → no fee
+        // feeBps = 0, treasury set -> no fee
         address treasury = address(0x7EA5);
         settler.setTreasury(treasury);
         // protocolFeeBps defaults to 0
 
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         uint256 aliceBefore = usdc.balanceOf(alice);
 
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // Full premium to alice, 0 to treasury
         assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6 + 70e6);
@@ -850,18 +990,18 @@ contract BatchSettlerTest is Test {
     }
 
     function test_executeOrder_zeroFee_noTreasury() public {
-        // feeBps set, treasury = address(0) → no fee
+        // feeBps set, treasury = address(0) -> no fee
         settler.setProtocolFeeBps(400);
         // treasury defaults to address(0)
 
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         uint256 aliceBefore = usdc.balanceOf(alice);
 
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // Full premium to alice
         assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6 + 70e6);
@@ -878,13 +1018,12 @@ contract BatchSettlerTest is Test {
         // Tiny bid: 1 (1e-6 USDC per 1e8 oTokens)
         // premium = (1e8 * 1) / 1e8 = 1 (1 wei USDC)
         // fee = (1 * 400) / 10000 = 0 (truncates to 0)
-        vm.prank(mm);
-        priceSheet.publishQuote(oToken, 1, 2, block.timestamp + 1 hours, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 1, block.timestamp + 1 hours, 100e8);
 
         uint256 aliceBefore = usdc.balanceOf(alice);
 
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // Fee truncates to 0, alice gets full 1 wei premium
         assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6 + 1);
@@ -898,15 +1037,15 @@ contract BatchSettlerTest is Test {
 
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
-        _publishPutQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         uint256 expectedFee = (70e6 * 400) / 10000;
         uint256 expectedNet = 70e6 - expectedFee;
 
         vm.prank(alice);
-        vm.expectEmit(true, true, false, true);
-        emit OrderExecuted(alice, oToken, 1e8, 70e6, expectedNet, expectedFee, 2000e6, 1);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        vm.expectEmit(true, true, true, true);
+        emit OrderExecuted(alice, oToken, mm, 1e8, 70e6, expectedNet, expectedFee, 2000e6, 1);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
     }
 
     function test_setProtocolFeeBps_onlyOwner() public {
@@ -974,7 +1113,7 @@ contract MockSwapRouter {
     using SafeERC20 for IERC20;
 
     // Mock exchange rate: how many units of tokenOut per 1e18 tokenIn
-    // For USDC→WETH: rate = ethPrice (e.g., 1800e6 USDC per 1e18 WETH → set as 1e18 * 1e18 / 1800e6)
+    // For USDC->WETH: rate = ethPrice (e.g., 1800e6 USDC per 1e18 WETH -> set as 1e18 * 1e18 / 1800e6)
     // Simpler: we set a fixed price and compute amountIn from amountOut
     uint256 public mockEthPriceUsdc; // e.g., 1800e6 = $1800 per ETH
 
@@ -990,20 +1129,20 @@ contract MockSwapRouter {
         external
         returns (uint256 amountIn)
     {
-        // Determine the direction: USDC→WETH or WETH→USDC
+        // Determine the direction: USDC->WETH or WETH->USDC
         // We compute amountIn based on the mock price
-        // For USDC→WETH (put delivery): amountIn (USDC) = amountOut (WETH) * price / 1e18
-        // For WETH→USDC (call delivery): amountIn (WETH) = amountOut (USDC) * 1e18 / price
+        // For USDC->WETH (put delivery): amountIn (USDC) = amountOut (WETH) * price / 1e18
+        // For WETH->USDC (call delivery): amountIn (WETH) = amountOut (USDC) * 1e18 / price
 
-        // Simple heuristic: if tokenIn has fewer decimals, it's USDC→WETH
+        // Simple heuristic: if tokenIn has fewer decimals, it's USDC->WETH
         // We check by amount magnitude instead
         if (params.amountOut > 1e12) {
-            // Large amountOut → this is WETH (18 decimals)
+            // Large amountOut -> this is WETH (18 decimals)
             // amountIn is USDC (6 decimals)
             // amountIn = amountOut * mockEthPriceUsdc / 1e18
             amountIn = (params.amountOut * mockEthPriceUsdc) / 1e18;
         } else {
-            // Small amountOut → this is USDC (6 decimals)
+            // Small amountOut -> this is USDC (6 decimals)
             // amountIn is WETH (18 decimals)
             // amountIn = amountOut * 1e18 / mockEthPriceUsdc
             amountIn = (params.amountOut * 1e18) / mockEthPriceUsdc;
@@ -1043,14 +1182,14 @@ contract PhysicalRedeemTest is Test {
     Oracle public oracle;
     Whitelist public whitelist;
     BatchSettler public settler;
-    PriceSheet public priceSheet;
 
     MockERC20 public weth;
     MockERC20 public usdc;
     MockAavePool public mockAave;
     MockSwapRouter public mockRouter;
 
-    address public mm = address(0xAA00);
+    uint256 public mmKey = 0xAA01;
+    address public mm;
     address public alice = address(0xA11CE);
     address public bob = address(0xB0B0);
 
@@ -1058,8 +1197,12 @@ contract PhysicalRedeemTest is Test {
     uint256 public expiry;
     uint256 public constant MOCK_ETH_PRICE = 1800e6; // $1800
 
+    uint256 nextQuoteId = 1;
+
     function setUp() public {
         vm.warp(1700000000);
+
+        mm = vm.addr(mmKey);
 
         // Deploy tokens
         weth = new MockERC20("Wrapped ETH", "WETH", 18);
@@ -1077,7 +1220,6 @@ contract PhysicalRedeemTest is Test {
         oracle = new Oracle(address(addressBook));
         whitelist = new Whitelist(address(addressBook));
         settler = new BatchSettler(address(addressBook), mm);
-        priceSheet = new PriceSheet(address(addressBook), mm);
 
         // Wire AddressBook
         addressBook.setController(address(controller));
@@ -1086,7 +1228,9 @@ contract PhysicalRedeemTest is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
-        addressBook.setPriceSheet(address(priceSheet));
+
+        // Whitelist MM
+        settler.setWhitelistedMM(mm, true);
 
         // Configure physical delivery
         settler.setAavePool(address(mockAave));
@@ -1150,17 +1294,32 @@ contract PhysicalRedeemTest is Test {
         return oToken;
     }
 
+    function _signQuote(address oToken, uint256 bidPrice, uint256 deadline, uint256 maxAmount)
+        internal returns (BatchSettler.Quote memory quote, bytes memory sig)
+    {
+        quote = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: bidPrice,
+            deadline: deadline,
+            quoteId: nextQuoteId++,
+            maxAmount: maxAmount,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(quote);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        sig = abi.encodePacked(r, s, v);
+    }
+
     function _setupPutPosition(address user, address oToken, uint256 amount) internal {
         uint256 collateral = (amount * strikePrice) / 1e10;
 
         vm.prank(user);
         IERC20(oToken).approve(address(settler), type(uint256).max);
 
-        vm.prank(mm);
-        priceSheet.publishQuote(oToken, 70e6, 72e6, block.timestamp + 1 hours, 1000e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 1000e8);
 
         vm.prank(user);
-        settler.executeOrder(oToken, amount, collateral);
+        settler.executeOrder(q, sig, amount, collateral);
 
         // MM approves settler for oTokens (needed for physicalRedeem)
         vm.prank(mm);
@@ -1173,11 +1332,10 @@ contract PhysicalRedeemTest is Test {
         vm.prank(user);
         IERC20(oToken).approve(address(settler), type(uint256).max);
 
-        vm.prank(mm);
-        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, 1000e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 50e6, block.timestamp + 1 hours, 1000e8);
 
         vm.prank(user);
-        settler.executeOrder(oToken, amount, collateral);
+        settler.executeOrder(q, sig, amount, collateral);
 
         vm.prank(mm);
         IERC20(oToken).approve(address(settler), type(uint256).max);
@@ -1321,8 +1479,8 @@ contract PhysicalRedeemTest is Test {
         // Physical delivery
         // Collateral from redeem: 2000 USDC
         // Flash loan: 1 WETH, fee = 1e18 * 5 / 10000 = 5e14
-        // Swap: need 1e18 + 5e14 WETH. At $1800, cost = (1e18 + 5e14) * 1800e6 / 1e18 ≈ 1800.9e6 USDC
-        // Surplus ≈ 2000e6 - 1800.9e6 ≈ 199.1e6 USDC → goes to MM
+        // Swap: need 1e18 + 5e14 WETH. At $1800, cost = (1e18 + 5e14) * 1800e6 / 1e18 ~ 1800.9e6 USDC
+        // Surplus ~ 2000e6 - 1800.9e6 ~ 199.1e6 USDC -> goes to MM
         vm.prank(mm);
         settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
 
@@ -1340,22 +1498,31 @@ contract PhysicalRedeemTest is Test {
     function test_batchPhysicalRedeem_multipleUsers() public {
         address oToken = _createPut(strikePrice);
 
-        // Setup positions for alice and bob
-        // Alice first
+        // Setup positions for alice and bob using a single quote
         vm.prank(alice);
         IERC20(oToken).approve(address(settler), type(uint256).max);
 
-        vm.prank(mm);
-        priceSheet.publishQuote(oToken, 70e6, 72e6, block.timestamp + 1 hours, 1000e8);
+        // Create a single quote with enough capacity for both users
+        BatchSettler.Quote memory q = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: 70e6,
+            deadline: block.timestamp + 1 hours,
+            quoteId: nextQuoteId++,
+            maxAmount: 1000e8,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(q);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
 
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         vm.prank(bob);
         IERC20(oToken).approve(address(settler), type(uint256).max);
 
         vm.prank(bob);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         vm.prank(mm);
         IERC20(oToken).approve(address(settler), type(uint256).max);
@@ -1407,11 +1574,10 @@ contract PhysicalRedeemTest is Test {
         vm.prank(alice);
         IERC20(oToken).approve(address(settler), type(uint256).max);
 
-        vm.prank(mm);
-        priceSheet.publishQuote(oToken, 70e6, 72e6, block.timestamp + 1 hours, 1000e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 1000e8);
 
         vm.prank(alice);
-        settler.executeOrder(oToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         vm.prank(mm);
         IERC20(oToken).approve(address(settler), type(uint256).max);
@@ -1469,6 +1635,7 @@ contract PhysicalRedeemTest is Test {
         // Deploy a fresh settler without aavePool configured
         BatchSettler freshSettler = new BatchSettler(address(addressBook), mm);
         addressBook.setBatchSettler(address(freshSettler));
+        freshSettler.setWhitelistedMM(mm, true);
         freshSettler.setSwapRouter(address(mockRouter));
         freshSettler.setSwapFeeTier(500);
 
@@ -1488,6 +1655,7 @@ contract PhysicalRedeemTest is Test {
     function test_physicalRedeem_revertsOnSwapRouterNotSet() public {
         BatchSettler freshSettler = new BatchSettler(address(addressBook), mm);
         addressBook.setBatchSettler(address(freshSettler));
+        freshSettler.setWhitelistedMM(mm, true);
         freshSettler.setAavePool(address(mockAave));
         // swapRouter left as address(0)
 

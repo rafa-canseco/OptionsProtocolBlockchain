@@ -5,21 +5,22 @@ import "./AddressBook.sol";
 import "./Controller.sol";
 import "./OToken.sol";
 import "./Oracle.sol";
-import "./PriceSheet.sol";
 import "../interfaces/IFlashLoanSimple.sol";
 import "../interfaces/ISwapRouter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 /**
  * @title BatchSettler
  * @notice Handles option order execution and post-expiry settlement.
  *
  *         Primary flow (instant per-order):
- *         1. MM publishes quotes on PriceSheet (bid/ask + TTL + capacity)
- *         2. User (msg.sender) calls executeOrder() — atomic: vault, collateral, mint, oToken->MM, premium->user
- *         3. PriceSheet tracks filled capacity in oToken units; reverts when full
+ *         1. MM signs EIP-712 quotes off-chain (bidPrice, deadline, quoteId, maxAmount, makerNonce)
+ *         2. User calls executeOrder() with the signed quote + signature
+ *         3. Contract recovers MM address via ECDSA, verifies whitelist, checks fills
+ *         4. Atomic: vault, collateral, mint oTokens→MM, premium→user
  *
  *         Post-expiry flow (physical settlement):
  *         - batchSettleVaults() settles expired vaults (ITM: user gets 0 back, OTM: full refund)
@@ -29,10 +30,37 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     using SafeERC20 for IERC20;
 
+    // ===== EIP-712 =====
+
+    bytes32 private constant _DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant _NAME_HASH = keccak256("b1nary");
+    bytes32 private constant _VERSION_HASH = keccak256("1");
+
+    bytes32 private immutable _CACHED_DOMAIN_SEPARATOR;
+    uint256 private immutable _CACHED_CHAIN_ID;
+
+    struct Quote {
+        address oToken;
+        uint256 bidPrice;     // premium per oToken (1e8 scale, in strike asset units)
+        uint256 deadline;     // unix timestamp
+        uint256 quoteId;      // unique per MM, for fill tracking + cancellation
+        uint256 maxAmount;    // max oTokens fillable (8 decimals)
+        uint256 makerNonce;   // must match current makerNonce[signer]
+    }
+
+    bytes32 public constant QUOTE_TYPEHASH = keccak256(
+        "Quote(address oToken,uint256 bidPrice,uint256 deadline,uint256 quoteId,uint256 maxAmount,uint256 makerNonce)"
+    );
+
+    uint256 private constant CANCEL_BIT = 1 << 255;
+
+    // ===== Storage =====
+
     AddressBook public addressBook;
     address public owner;
-    address public operator; // The Market Maker (MM)
-    uint256 public batchNonce; // Incremented on each batchSettleVaults() call
+    address public operator; // Settlement bot (batchSettleVaults, physicalRedeem)
+    uint256 public batchNonce;
 
     // Protocol fee
     address public treasury;
@@ -41,11 +69,22 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     // Physical delivery infrastructure
     address public aavePool;
     address public swapRouter;
-    uint24 public swapFeeTier; // Uniswap V3 fee tier in hundredths of a bps (e.g. 500 = 0.05%)
+    uint24 public swapFeeTier;
+
+    // EIP-712 signed quotes
+    /// @notice Per-MM fill tracking. Lower 255 bits = filled amount, bit 255 = cancelled.
+    mapping(address => mapping(bytes32 => uint256)) public quoteState;
+    /// @notice Global nonce per MM for bulk cancellation (circuit breaker).
+    mapping(address => uint256) public makerNonce;
+    /// @notice Whitelisted market makers.
+    mapping(address => bool) public whitelistedMMs;
+
+    // ===== Events =====
 
     event OrderExecuted(
         address indexed user,
         address indexed oToken,
+        address indexed mm,
         uint256 amount,
         uint256 grossPremium,
         uint256 netPremium,
@@ -63,6 +102,12 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         uint256 collateralUsed
     );
     event PhysicalRedeemFailed(address indexed oToken, address indexed user, uint256 amount, bytes reason);
+    event QuoteCancelled(address indexed mm, bytes32 indexed quoteHash);
+    event QuoteCancelSkipped(address indexed mm, bytes32 indexed quoteHash);
+    event MakerNonceIncremented(address indexed mm, uint256 newNonce);
+    event MMWhitelisted(address indexed mm, bool status);
+
+    // ===== Errors =====
 
     error OnlyOwner();
     error OnlyOperator();
@@ -70,7 +115,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     error InvalidAmount();
     error LengthMismatch();
     error PremiumTooSmall();
-    error QuoteInvalid();
     error EmptyArray();
     error OptionNotExpired();
     error ExpiryPriceNotSet();
@@ -81,6 +125,17 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     error FeeTooHigh();
     error InvalidFeeTier();
     error RedeemReturnedZero();
+    error InvalidSignature();
+    error MMNotWhitelisted();
+    error QuoteExpired();
+    error CapacityExceeded();
+    error StaleNonce();
+    error QuoteAlreadyCancelled();
+
+    // Panic(uint256) selector: 0x4e487b71
+    bytes4 private constant _PANIC_SELECTOR = 0x4e487b71;
+
+    // ===== Modifiers =====
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -97,7 +152,23 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         addressBook = AddressBook(_addressBook);
         owner = msg.sender;
         operator = _operator;
+        _CACHED_CHAIN_ID = block.chainid;
+        _CACHED_DOMAIN_SEPARATOR = _buildDomainSeparator();
     }
+
+    function _buildDomainSeparator() private view returns (bytes32) {
+        return keccak256(abi.encode(
+            _DOMAIN_TYPEHASH, _NAME_HASH, _VERSION_HASH, block.chainid, address(this)
+        ));
+    }
+
+    function _domainSeparator() private view returns (bytes32) {
+        return block.chainid == _CACHED_CHAIN_ID
+            ? _CACHED_DOMAIN_SEPARATOR
+            : _buildDomainSeparator();
+    }
+
+    // ===== Owner setters =====
 
     function setOperator(address _operator) external onlyOwner {
         if (_operator == address(0)) revert InvalidAddress();
@@ -132,65 +203,150 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         swapFeeTier = _feeTier;
     }
 
+    function setWhitelistedMM(address _mm, bool _status) external onlyOwner {
+        if (_mm == address(0)) revert InvalidAddress();
+        whitelistedMMs[_mm] = _status;
+        if (!_status) {
+            uint256 newNonce = ++makerNonce[_mm];
+            emit MakerNonceIncremented(_mm, newNonce);
+        }
+        emit MMWhitelisted(_mm, _status);
+    }
+
+    // ===== EIP-712 Quote Helpers =====
+
+    /// @notice Compute the EIP-712 digest for a Quote struct.
+    function hashQuote(Quote calldata quote) public view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(
+            QUOTE_TYPEHASH,
+            quote.oToken,
+            quote.bidPrice,
+            quote.deadline,
+            quote.quoteId,
+            quote.maxAmount,
+            quote.makerNonce
+        ));
+        return keccak256(abi.encodePacked("\x19\x01", _domainSeparator(), structHash));
+    }
+
+    /// @notice Returns the EIP-712 domain separator (recomputed if chain forked).
+    function DOMAIN_SEPARATOR() external view returns (bytes32) {
+        return _domainSeparator();
+    }
+
+    /// @notice Read fill state for a quote.
+    function getQuoteState(address mm, bytes32 quoteHash)
+        external
+        view
+        returns (uint256 filledAmount, bool isCancelled)
+    {
+        uint256 state = quoteState[mm][quoteHash];
+        filledAmount = state & ~CANCEL_BIT;
+        isCancelled = state & CANCEL_BIT != 0;
+    }
+
+    // ===== Quote Cancellation =====
+
+    /// @notice Cancel a single quote. Only affects msg.sender's quotes.
+    function cancelQuote(bytes32 quoteHash) external {
+        uint256 state = quoteState[msg.sender][quoteHash];
+        if (state & CANCEL_BIT != 0) revert QuoteAlreadyCancelled();
+        quoteState[msg.sender][quoteHash] = state | CANCEL_BIT;
+        emit QuoteCancelled(msg.sender, quoteHash);
+    }
+
+    /// @notice Cancel multiple quotes. Only affects msg.sender's quotes.
+    ///         Unlike cancelQuote(), already-cancelled quotes are skipped (not reverted)
+    ///         to avoid a single duplicate aborting the entire batch.
+    function cancelQuotes(bytes32[] calldata quoteHashes) external {
+        for (uint256 i = 0; i < quoteHashes.length; i++) {
+            uint256 state = quoteState[msg.sender][quoteHashes[i]];
+            if (state & CANCEL_BIT != 0) {
+                emit QuoteCancelSkipped(msg.sender, quoteHashes[i]);
+                continue;
+            }
+            quoteState[msg.sender][quoteHashes[i]] = state | CANCEL_BIT;
+            emit QuoteCancelled(msg.sender, quoteHashes[i]);
+        }
+    }
+
+    /// @notice Increment maker nonce — invalidates ALL outstanding quotes (circuit breaker).
+    function incrementMakerNonce() external returns (uint256 newNonce) {
+        newNonce = ++makerNonce[msg.sender];
+        emit MakerNonceIncremented(msg.sender, newNonce);
+    }
+
+    // ===== Order Execution =====
+
     /**
      * @notice Execute a single order instantly. Permissionless — msg.sender is the user.
      *
      *         Prerequisites:
      *         - User has approved MarginPool for collateral asset
-     *         - MM (operator) has approved this contract for premium asset
-     *         - A valid, non-expired quote exists on PriceSheet with remaining capacity
+     *         - MM (signer) has approved this contract for premium asset (strike asset)
+     *         - A valid, non-expired, non-cancelled signed quote with remaining capacity
      *
-     * @param oToken      The oToken to mint
-     * @param amount      Amount of oTokens to mint (8 decimals)
-     * @param collateral  Collateral to deposit (in collateral asset's decimals)
-     * @return vaultId    The vault ID created for this order
+     * @param quote      The EIP-712 signed quote from a whitelisted MM
+     * @param signature  The MM's ECDSA signature over the quote
+     * @param amount     Amount of oTokens to mint (8 decimals, <= quote.maxAmount - filled)
+     * @param collateral Collateral to deposit (in collateral asset's decimals)
+     * @return vaultId   The vault ID created for this order
      */
     function executeOrder(
-        address oToken,
+        Quote calldata quote,
+        bytes calldata signature,
         uint256 amount,
         uint256 collateral
-    ) external returns (uint256 vaultId) {
-        if (oToken == address(0)) revert InvalidAddress();
+    ) external nonReentrant returns (uint256 vaultId) {
+        if (quote.oToken == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
 
-        PriceSheet ps = PriceSheet(addressBook.priceSheet());
+        // 1. Recover MM from EIP-712 signature
+        bytes32 digest = hashQuote(quote);
+        (address mm, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signature);
+        if (err != ECDSA.RecoverError.NoError || mm == address(0)) revert InvalidSignature();
+        if (!whitelistedMMs[mm]) revert MMNotWhitelisted();
+
+        // 2. Validate quote liveness
+        if (block.timestamp > quote.deadline) revert QuoteExpired();
+        if (quote.makerNonce != makerNonce[mm]) revert StaleNonce();
+
+        // 3. Check and update fill state (packed: lower 255 bits = filled, bit 255 = cancelled)
+        uint256 state = quoteState[mm][digest];
+        if (state & CANCEL_BIT != 0) revert QuoteAlreadyCancelled();
+        uint256 filled = state & ~CANCEL_BIT;
+        if (filled + amount > quote.maxAmount) revert CapacityExceeded();
+        quoteState[mm][digest] = filled + amount; // cancel bit stays 0
+
+        // 4. Calculate premium
+        uint256 premium = (amount * quote.bidPrice) / 1e8;
+        if (premium == 0 && quote.bidPrice > 0) revert PremiumTooSmall();
+
+        // 5. Open vault for user
         Controller ctrl = Controller(addressBook.controller());
-
-        // 1. Read and validate quote
-        (uint256 bidPrice, , , , bool isValid) = ps.getQuote(oToken);
-        if (!isValid) revert QuoteInvalid();
-
-        // 2. Calculate premium early to fail fast on truncation
-        uint256 premium = (amount * bidPrice) / 1e8;
-        if (premium == 0 && bidPrice > 0) revert PremiumTooSmall();
-
-        // 3. Fill capacity on PriceSheet in oToken units (reverts if expired or exceeded)
-        ps.fillQuote(oToken, amount);
-
-        // 4. Open vault for user
         vaultId = ctrl.openVault(msg.sender);
 
-        // 5. Deposit user's collateral
-        address collateralAsset = OToken(oToken).collateralAsset();
+        // 6. Deposit user's collateral
+        address collateralAsset = OToken(quote.oToken).collateralAsset();
         ctrl.depositCollateral(msg.sender, vaultId, collateralAsset, collateral);
 
-        // 6. Mint oTokens directly to operator (MM)
-        ctrl.mintOtoken(msg.sender, vaultId, oToken, amount, operator);
+        // 7. Mint oTokens directly to MM
+        ctrl.mintOtoken(msg.sender, vaultId, quote.oToken, amount, mm);
 
-        // 7. Transfer premium from operator (MM) to user (minus protocol fee)
-        _transferPremium(oToken, amount, premium, collateral, vaultId);
+        // 8. Transfer premium from MM to user (minus protocol fee)
+        _transferPremium(quote.oToken, amount, premium, collateral, vaultId, mm);
     }
 
     /**
-     * @dev Transfer premium from operator to user, deducting protocol fee if configured.
-     *      Extracted from executeOrder to avoid stack-too-deep.
+     * @dev Transfer premium from MM to user, deducting protocol fee if configured.
      */
     function _transferPremium(
         address oToken,
         uint256 amount,
         uint256 premium,
         uint256 collateral,
-        uint256 vaultId
+        uint256 vaultId,
+        address mm
     ) private {
         address premiumAsset = OToken(oToken).strikeAsset();
         uint256 fee = 0;
@@ -199,18 +355,18 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         }
         uint256 netPremium = premium - fee;
 
-        IERC20(premiumAsset).safeTransferFrom(operator, msg.sender, netPremium);
+        IERC20(premiumAsset).safeTransferFrom(mm, msg.sender, netPremium);
         if (fee > 0) {
-            IERC20(premiumAsset).safeTransferFrom(operator, treasury, fee);
+            IERC20(premiumAsset).safeTransferFrom(mm, treasury, fee);
         }
 
-        emit OrderExecuted(msg.sender, oToken, amount, premium, netPremium, fee, collateral, vaultId);
+        emit OrderExecuted(msg.sender, oToken, mm, amount, premium, netPremium, fee, collateral, vaultId);
     }
+
+    // ===== Post-Expiry Settlement =====
 
     /**
      * @notice Settle multiple expired vaults in a single tx. Only callable by operator.
-     *         Called by keeper bot after expiry + oracle price is set.
-     *         Individual failures are logged via VaultSettleFailed events.
      */
     function batchSettleVaults(
         address[] calldata owners,
@@ -225,17 +381,14 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         for (uint256 i = 0; i < owners.length; i++) {
             try ctrl.settleVault(owners[i], vaultIds[i]) {}
             catch (bytes memory reason) {
+                _revertOnPanic(reason);
                 emit VaultSettleFailed(owners[i], vaultIds[i], reason);
             }
         }
     }
 
     /**
-     * @notice Redeem oTokens in batch after expiry. Caller must have approved this
-     *         contract for each oToken. For each item: pulls oTokens from caller,
-     *         redeems via Controller, and forwards the payout to caller.
-     *         Individual failures (bad approval, insufficient balance, redeem revert)
-     *         emit RedeemFailed and continue — the batch never reverts due to one item.
+     * @notice Redeem oTokens in batch after expiry.
      */
     function batchRedeem(address[] calldata oTokens, uint256[] calldata amounts) external {
         if (oTokens.length != amounts.length) revert LengthMismatch();
@@ -248,17 +401,12 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
 
             try this._redeemSingle(oTokens[i], amounts[i], msg.sender, ctrl) {
             } catch (bytes memory reason) {
+                _revertOnPanic(reason);
                 emit RedeemFailed(oTokens[i], amounts[i], reason);
             }
         }
     }
 
-    /**
-     * @notice Self-call target for batchRedeem — redeems a single oToken position.
-     *         External so batchRedeem can wrap it in try/catch for full fault isolation.
-     *         Any revert (pull, redeem, payout) is caught by the caller and rolled back
-     *         atomically — no tokens can get stuck in this contract.
-     */
     function _redeemSingle(
         address oToken,
         uint256 amount,
@@ -283,23 +431,7 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     // ===== Physical Delivery (flash loan + DEX swap) =====
 
     /**
-     * @notice Deliver the contra-asset to a user whose ITM option was physically settled.
-     *         Uses an Aave V3 flash loan to borrow the contra-asset, delivers it to the user,
-     *         redeems oTokens to get collateral from MarginPool, swaps collateral → contra-asset
-     *         on Uniswap V3 to repay the flash loan, and sends surplus collateral to the operator.
-     *
-     *         Prerequisites:
-     *         - Option must be expired (unless Controller.betaMode is active) and ITM
-     *           (strictly: PUT expiryPrice < strike, CALL expiryPrice > strike)
-     *         - Oracle expiry price must be set
-     *         - Operator must have approved this contract for the oToken
-     *         - aavePool and swapRouter must be configured
-     *
-     * @param oToken             The expired oToken
-     * @param user               The address to receive the contra-asset (typically the vault owner
-     *                           whose collateral was retained at settlement)
-     * @param amount             Amount of oTokens to redeem (8 decimals)
-     * @param maxCollateralSpent Maximum collateral to spend in the DEX swap (slippage protection)
+     * @notice Deliver contra-asset to ITM user via flash loan.
      */
     function physicalRedeem(
         address oToken,
@@ -310,12 +442,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         _executePhysicalRedeem(oToken, user, amount, maxCollateralSpent);
     }
 
-    /**
-     * @notice Aave V3 flash loan callback. Called by the Aave Pool after sending the flash-loaned asset.
-     *         Handles: deliver contra-asset to user → redeem oTokens → swap collateral → repay flash loan.
-     * @dev MUST NOT be called externally — only by the Aave Pool as part of flashLoanSimple.
-     *      The `premium` parameter here is the Aave flash loan fee (NOT the option premium used elsewhere).
-     */
     function executeOperation(
         address asset,
         uint256 amount,
@@ -343,10 +469,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         return true;
     }
 
-    /**
-     * @dev Pull oTokens from operator, redeem for collateral, swap collateral → contra-asset,
-     *      and sweep surplus to operator. Extracted to avoid stack-too-deep in executeOperation.
-     */
     function _redeemAndSwap(
         address oToken,
         uint256 oTokenAmount,
@@ -365,7 +487,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         uint256 collateralReceived = IERC20(collateralAsset).balanceOf(address(this)) - collateralBefore;
         if (collateralReceived == 0) revert RedeemReturnedZero();
 
-        // Swap collateral → contra-asset to repay flash loan
         IERC20(collateralAsset).forceApprove(swapRouter, collateralReceived);
 
         collateralUsed = ISwapRouter(swapRouter).exactOutputSingle(
@@ -380,22 +501,14 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
             })
         );
 
-        // Sweep surplus collateral to operator (MM's profit from ITM assignment)
         uint256 surplus = collateralReceived - collateralUsed;
         if (surplus > 0) {
             IERC20(collateralAsset).safeTransfer(operator, surplus);
         }
 
-        // Clear leftover approval to prevent residual allowance from being exploited
         IERC20(collateralAsset).forceApprove(swapRouter, 0);
     }
 
-    /**
-     * @notice Batch physical delivery for multiple ITM users. Operator-only.
-     *         Individual failures emit PhysicalRedeemFailed and continue.
-     *
-     *         Expected flow: call batchSettleVaults() first, then batchPhysicalRedeem().
-     */
     function batchPhysicalRedeem(
         address[] calldata oTokens,
         address[] calldata users,
@@ -411,16 +524,12 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
 
             try this._physicalRedeemSingle(oTokens[i], users[i], amounts[i], maxCollateralSpents[i]) {
             } catch (bytes memory reason) {
+                _revertOnPanic(reason);
                 emit PhysicalRedeemFailed(oTokens[i], users[i], amounts[i], reason);
             }
         }
     }
 
-    /**
-     * @notice Self-call target for batchPhysicalRedeem — delegates to shared _executePhysicalRedeem.
-     *         External so the batch can catch individual failures without reverting the entire batch.
-     *         Cannot call physicalRedeem directly because onlyOperator would fail (msg.sender is address(this)).
-     */
     function _physicalRedeemSingle(
         address oToken,
         address user,
@@ -431,11 +540,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         _executePhysicalRedeem(oToken, user, amount, maxCollateralSpent);
     }
 
-    /**
-     * @dev Shared implementation for physicalRedeem and _physicalRedeemSingle.
-     *      Validates the option is expired (or betaMode is active) + ITM, calculates contra-asset,
-     *      and initiates flash loan.
-     */
     function _executePhysicalRedeem(
         address oToken,
         address user,
@@ -467,13 +571,24 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         uint256 contraAmount;
         if (ot.isPut()) {
             contraAsset = ot.underlying();
-            contraAmount = amount * 1e10; // oToken 8 dec → underlying 18 dec (assumes 18 dec underlying)
+            contraAmount = amount * 1e10;
         } else {
             contraAsset = ot.strikeAsset();
-            contraAmount = (amount * strike) / 1e10; // oToken 8 dec → USDC 6 dec (assumes 6 dec strike asset)
+            contraAmount = (amount * strike) / 1e10;
         }
 
         bytes memory params = abi.encode(oToken, user, amount, maxCollateralSpent);
         IPool(aavePool).flashLoanSimple(address(this), contraAsset, contraAmount, params, 0);
+    }
+
+    /// @dev Re-reverts if `reason` is a Panic(uint256). Panics indicate bugs, not expected failures.
+    function _revertOnPanic(bytes memory reason) private pure {
+        if (reason.length >= 4) {
+            bytes4 selector;
+            assembly { selector := mload(add(reason, 32)) }
+            if (selector == _PANIC_SELECTOR) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
+        }
     }
 }

@@ -9,7 +9,6 @@ import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
 import "../src/core/Whitelist.sol";
 import "../src/core/BatchSettler.sol";
-import "../src/core/PriceSheet.sol";
 import "../src/mocks/MockERC20.sol";
 import "../src/mocks/MockChainlinkFeed.sol";
 import "../src/mocks/MockAavePool.sol";
@@ -19,7 +18,7 @@ import "../src/mocks/MockSwapRouter.sol";
  * @title DeployBeta
  * @notice Deploys the full beta stack to Base Sepolia.
  *         Includes mock tokens (LUSD/LETH), mock infrastructure (Aave/SwapRouter),
- *         all 8 protocol contracts, and enables betaMode for instant settlement.
+ *         all 7 protocol contracts, and enables betaMode for instant settlement.
  *
  *         Usage:
  *         forge script script/DeployBeta.s.sol:DeployBeta \
@@ -42,7 +41,6 @@ contract DeployBeta is Script {
     Oracle oracle;
     Whitelist whitelist;
     BatchSettler settler;
-    PriceSheet priceSheet;
 
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
@@ -76,7 +74,6 @@ contract DeployBeta is Script {
         oracle = new Oracle(address(addressBook));
         whitelist = new Whitelist(address(addressBook));
         settler = new BatchSettler(address(addressBook), deployer);
-        priceSheet = new PriceSheet(address(addressBook), deployer);
     }
 
     function _wireAddressBook() internal {
@@ -86,10 +83,12 @@ contract DeployBeta is Script {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
-        addressBook.setPriceSheet(address(priceSheet));
     }
 
     function _configure(address deployer) internal {
+        // Whitelist deployer as MM
+        settler.setWhitelistedMM(deployer, true);
+
         // Whitelist tokens and products
         whitelist.whitelistUnderlying(address(leth));
         whitelist.whitelistCollateral(address(lusd));
@@ -128,6 +127,5 @@ contract DeployBeta is Script {
         console.log("DEPLOYED:Oracle:%s", address(oracle));
         console.log("DEPLOYED:Whitelist:%s", address(whitelist));
         console.log("DEPLOYED:BatchSettler:%s", address(settler));
-        console.log("DEPLOYED:PriceSheet:%s", address(priceSheet));
     }
 }

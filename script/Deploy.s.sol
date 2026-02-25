@@ -9,7 +9,6 @@ import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
 import "../src/core/Whitelist.sol";
 import "../src/core/BatchSettler.sol";
-import "../src/core/PriceSheet.sol";
 
 /**
  * @title Deploy
@@ -56,9 +55,6 @@ contract Deploy is Script {
         BatchSettler settler = new BatchSettler(address(addressBook), operator);
         console.log("BatchSettler:", address(settler));
 
-        PriceSheet priceSheet = new PriceSheet(address(addressBook), operator);
-        console.log("PriceSheet:", address(priceSheet));
-
         // 3. Wire AddressBook
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -66,22 +62,24 @@ contract Deploy is Script {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
-        addressBook.setPriceSheet(address(priceSheet));
 
-        // 4. Whitelist assets and products (ETH only for MVP)
+        // 4. Whitelist MM (operator is default MM for beta)
+        settler.setWhitelistedMM(operator, true);
+
+        // 5. Whitelist assets and products (ETH only for MVP)
         whitelist.whitelistUnderlying(weth);
         whitelist.whitelistCollateral(usdc);
         whitelist.whitelistCollateral(weth);
         whitelist.whitelistProduct(weth, usdc, usdc, true);   // ETH PUT (USDC collateral)
         whitelist.whitelistProduct(weth, usdc, weth, false);   // ETH CALL (WETH collateral)
 
-        // 5. Set Chainlink price feed for WETH
+        // 6. Set Chainlink price feed for WETH
         oracle.setPriceFeed(weth, chainlinkEthUsd);
 
-        // 6. Configure protocol fee
+        // 7. Configure protocol fee
         _configureProtocolFee(settler);
 
-        // 7. Configure physical delivery infrastructure (Aave V3 + Uniswap V3)
+        // 8. Configure physical delivery infrastructure (Aave V3 + Uniswap V3)
         _configurePhysicalDelivery(settler);
 
         vm.stopBroadcast();

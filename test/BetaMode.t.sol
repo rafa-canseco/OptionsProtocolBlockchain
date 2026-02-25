@@ -9,7 +9,6 @@ import "../src/core/MarginPool.sol";
 import "../src/core/OToken.sol";
 import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
-import "../src/core/PriceSheet.sol";
 import "../src/core/Whitelist.sol";
 import "../src/mocks/MockERC20.sol";
 import "../src/mocks/MockChainlinkFeed.sol";
@@ -32,7 +31,6 @@ contract BetaModeTest is Test {
     Oracle public oracle;
     Whitelist public whitelist;
     BatchSettler public settler;
-    PriceSheet public priceSheet;
 
     MockERC20 public weth;
     MockERC20 public usdc;
@@ -40,15 +38,20 @@ contract BetaModeTest is Test {
     MockAavePool public mockAave;
     MockSwapRouter public mockRouter;
 
-    address public mm = address(0xAA00);
+    uint256 public mmKey = 0xAA01;
+    address public mm;
     address public alice = address(0xA11CE);
     address public bob = address(0xB0B0);
+
+    uint256 nextQuoteId = 1;
 
     uint256 public strikePrice = 2000e8;
     uint256 public expiry;
 
     function setUp() public {
         vm.warp(1700000000);
+
+        mm = vm.addr(mmKey);
 
         // Deploy tokens
         weth = new MockERC20("Loot ETH", "LETH", 18);
@@ -69,7 +72,6 @@ contract BetaModeTest is Test {
         oracle = new Oracle(address(addressBook));
         whitelist = new Whitelist(address(addressBook));
         settler = new BatchSettler(address(addressBook), mm);
-        priceSheet = new PriceSheet(address(addressBook), mm);
 
         // Wire AddressBook
         addressBook.setController(address(controller));
@@ -78,12 +80,14 @@ contract BetaModeTest is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
-        addressBook.setPriceSheet(address(priceSheet));
 
         // Configure physical delivery
         settler.setAavePool(address(mockAave));
         settler.setSwapRouter(address(mockRouter));
         settler.setSwapFeeTier(500);
+
+        // Whitelist MM for signed quotes
+        settler.setWhitelistedMM(mm, true);
 
         // Whitelist
         whitelist.whitelistUnderlying(address(weth));
@@ -99,7 +103,7 @@ contract BetaModeTest is Test {
         uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
         expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
 
-        // Fund MM
+        // Fund MM and approve settler for premium transfers
         usdc.mint(mm, 1_000_000e6);
         weth.mint(mm, 1_000e18);
         vm.startPrank(mm);
@@ -119,6 +123,22 @@ contract BetaModeTest is Test {
         usdc.approve(address(pool), type(uint256).max);
         weth.approve(address(pool), type(uint256).max);
         vm.stopPrank();
+    }
+
+    function _signQuote(address oToken, uint256 bidPrice, uint256 deadline, uint256 maxAmount)
+        internal returns (BatchSettler.Quote memory quote, bytes memory sig)
+    {
+        quote = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: bidPrice,
+            deadline: deadline,
+            quoteId: nextQuoteId++,
+            maxAmount: maxAmount,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(quote);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        sig = abi.encodePacked(r, s, v);
     }
 
     function _createPut(uint256 strike) internal returns (address) {
@@ -143,11 +163,10 @@ contract BetaModeTest is Test {
         vm.prank(user);
         IERC20(oToken).approve(address(settler), type(uint256).max);
 
-        vm.prank(mm);
-        priceSheet.publishQuote(oToken, 70e6, 72e6, block.timestamp + 1 hours, 1000e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 1000e8);
 
         vm.prank(user);
-        settler.executeOrder(oToken, amount, collateral);
+        settler.executeOrder(q, sig, amount, collateral);
 
         vm.prank(mm);
         IERC20(oToken).approve(address(settler), type(uint256).max);
@@ -159,11 +178,10 @@ contract BetaModeTest is Test {
         vm.prank(user);
         IERC20(oToken).approve(address(settler), type(uint256).max);
 
-        vm.prank(mm);
-        priceSheet.publishQuote(oToken, 50e6, 52e6, block.timestamp + 1 hours, 1000e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 50e6, block.timestamp + 1 hours, 1000e8);
 
         vm.prank(user);
-        settler.executeOrder(oToken, amount, collateral);
+        settler.executeOrder(q, sig, amount, collateral);
 
         vm.prank(mm);
         IERC20(oToken).approve(address(settler), type(uint256).max);
@@ -574,14 +592,14 @@ contract BetaModeTest is Test {
         oracle.setExpiryPrice(address(weth), expiry, 2100e8); // OTM
         _settleVault(alice, 1);
 
-        // Now set up bob's position (same oToken needs new quote)
+        // Now set up bob's position (same oToken needs new signed quote)
         _fundUser(bob, 50_000e6, 50e18);
         vm.prank(bob);
         IERC20(putToken).approve(address(settler), type(uint256).max);
-        vm.prank(mm);
-        priceSheet.publishQuote(putToken, 70e6, 72e6, block.timestamp + 1 hours, 1000e8);
+
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(putToken, 70e6, block.timestamp + 1 hours, 1000e8);
         vm.prank(bob);
-        settler.executeOrder(putToken, 1e8, 2000e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         // Disable betaMode
         controller.setBetaMode(false);
