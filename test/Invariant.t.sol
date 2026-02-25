@@ -10,7 +10,6 @@ import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
 import "../src/core/Whitelist.sol";
 import "../src/core/BatchSettler.sol";
-import "../src/core/PriceSheet.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -292,19 +291,40 @@ contract BatchRedeemInvariantTest is Test {
     Oracle public oracle;
     Whitelist public whitelist;
     BatchSettler public settler;
-    PriceSheet public priceSheet;
 
     MockERC20 public usdc;
     MockERC20 public weth;
 
     BatchRedeemHandler public batchHandler;
 
-    address public mm = address(0xAA00);
+    uint256 public mmKey = 0xAA01;
+    address public mm;
     uint256 public expiry;
     uint256 constant NUM_TOKENS = 5;
 
+    uint256 nextQuoteId = 1;
+
+    function _signQuote(address _oToken, uint256 _bidPrice, uint256 _deadline, uint256 _maxAmount)
+        internal
+        returns (BatchSettler.Quote memory quote, bytes memory sig)
+    {
+        quote = BatchSettler.Quote({
+            oToken: _oToken,
+            bidPrice: _bidPrice,
+            deadline: _deadline,
+            quoteId: nextQuoteId++,
+            maxAmount: _maxAmount,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(quote);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        sig = abi.encodePacked(r, s, v);
+    }
+
     function setUp() public {
         vm.warp(1700000000);
+
+        mm = vm.addr(mmKey);
 
         usdc = new MockERC20("USDC", "USDC", 6);
         weth = new MockERC20("WETH", "WETH", 18);
@@ -316,7 +336,6 @@ contract BatchRedeemInvariantTest is Test {
         oracle = new Oracle(address(addressBook));
         whitelist = new Whitelist(address(addressBook));
         settler = new BatchSettler(address(addressBook), mm);
-        priceSheet = new PriceSheet(address(addressBook), mm);
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -324,7 +343,8 @@ contract BatchRedeemInvariantTest is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
-        addressBook.setPriceSheet(address(priceSheet));
+
+        settler.setWhitelistedMM(mm, true);
 
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
@@ -357,11 +377,9 @@ contract BatchRedeemInvariantTest is Test {
             IERC20(oTokens[i]).approve(address(settler), type(uint256).max);
             vm.stopPrank();
 
-            vm.prank(mm);
-            priceSheet.publishQuote(oTokens[i], 50e6, 52e6, block.timestamp + 1 hours, 100e8);
-
+            (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oTokens[i], 50e6, block.timestamp + 1 hours, 100e8);
             vm.prank(users[i]);
-            settler.executeOrder(oTokens[i], 1e8, collateral);
+            settler.executeOrder(q, sig, 1e8, collateral);
         }
 
         // Expire ITM (all puts in the money at $1500)

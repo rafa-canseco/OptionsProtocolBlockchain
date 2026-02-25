@@ -9,7 +9,6 @@ import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
 import "../src/core/Whitelist.sol";
 import "../src/core/BatchSettler.sol";
-import "../src/core/PriceSheet.sol";
 import "../src/mocks/MockERC20.sol";
 import "../src/mocks/MockChainlinkFeed.sol";
 
@@ -47,7 +46,6 @@ contract DeployLocal is Script {
         Oracle oracle = new Oracle(address(addressBook));
         Whitelist whitelist = new Whitelist(address(addressBook));
         BatchSettler settler = new BatchSettler(address(addressBook), deployer);
-        PriceSheet priceSheet = new PriceSheet(address(addressBook), deployer);
 
         // --- Wire AddressBook ---
         addressBook.setController(address(controller));
@@ -56,7 +54,9 @@ contract DeployLocal is Script {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
-        addressBook.setPriceSheet(address(priceSheet));
+
+        // --- Whitelist deployer as MM ---
+        settler.setWhitelistedMM(deployer, true);
 
         // --- Whitelist assets and products ---
         whitelist.whitelistUnderlying(address(weth));
@@ -94,7 +94,6 @@ contract DeployLocal is Script {
         console.log("DEPLOYED:Oracle:%s", address(oracle));
         console.log("DEPLOYED:Whitelist:%s", address(whitelist));
         console.log("DEPLOYED:BatchSettler:%s", address(settler));
-        console.log("DEPLOYED:PriceSheet:%s", address(priceSheet));
         console.log("DEPLOYED:MockWETH:%s", address(weth));
         console.log("DEPLOYED:MockUSDC:%s", address(usdc));
         console.log("DEPLOYED:MockChainlinkFeed:%s", address(ethFeed));

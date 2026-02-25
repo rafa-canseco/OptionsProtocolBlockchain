@@ -14,7 +14,6 @@ contract AddressBook is Ownable {
     address public oracle;
     address public whitelist;
     address public batchSettler;
-    address public priceSheet;
 
     error InvalidAddress();
 
@@ -24,7 +23,6 @@ contract AddressBook is Ownable {
     event OracleUpdated(address indexed oldAddress, address indexed newAddress);
     event WhitelistUpdated(address indexed oldAddress, address indexed newAddress);
     event BatchSettlerUpdated(address indexed oldAddress, address indexed newAddress);
-    event PriceSheetUpdated(address indexed oldAddress, address indexed newAddress);
 
     constructor() Ownable(msg.sender) {}
 
@@ -62,11 +60,5 @@ contract AddressBook is Ownable {
         if (_batchSettler == address(0)) revert InvalidAddress();
         emit BatchSettlerUpdated(batchSettler, _batchSettler);
         batchSettler = _batchSettler;
-    }
-
-    function setPriceSheet(address _priceSheet) external onlyOwner {
-        if (_priceSheet == address(0)) revert InvalidAddress();
-        emit PriceSheetUpdated(priceSheet, _priceSheet);
-        priceSheet = _priceSheet;
     }
 }
