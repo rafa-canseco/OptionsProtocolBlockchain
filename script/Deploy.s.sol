@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
 import "forge-std/Script.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../src/core/AddressBook.sol";
 import "../src/core/Controller.sol";
 import "../src/core/MarginPool.sol";
@@ -12,7 +13,7 @@ import "../src/core/BatchSettler.sol";
 
 /**
  * @title Deploy
- * @notice Deploys the full options protocol to Base Sepolia.
+ * @notice Deploys the full options protocol to Base Sepolia (UUPS proxied).
  *
  *         Usage:
  *         forge script script/Deploy.s.sol:Deploy \
@@ -25,6 +26,7 @@ contract Deploy is Script {
     function run() external {
         // Load config from environment
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
+        address deployer = vm.addr(deployerKey);
         address operator = vm.envAddress("OPERATOR_ADDRESS");
         address weth = vm.envAddress("WETH_ADDRESS");
         address usdc = vm.envAddress("USDC_ADDRESS");
@@ -33,26 +35,47 @@ contract Deploy is Script {
         vm.startBroadcast(deployerKey);
 
         // 1. Deploy AddressBook (central registry)
-        AddressBook addressBook = new AddressBook();
+        AddressBook addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (deployer))
+        )));
         console.log("AddressBook:", address(addressBook));
 
         // 2. Deploy core contracts
-        Controller controller = new Controller(address(addressBook));
+        Controller controller = Controller(address(new ERC1967Proxy(
+            address(new Controller()),
+            abi.encodeCall(Controller.initialize, (address(addressBook), deployer))
+        )));
         console.log("Controller:", address(controller));
 
-        MarginPool pool = new MarginPool(address(addressBook));
+        MarginPool pool = MarginPool(address(new ERC1967Proxy(
+            address(new MarginPool()),
+            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+        )));
         console.log("MarginPool:", address(pool));
 
-        OTokenFactory factory = new OTokenFactory(address(addressBook));
+        OTokenFactory factory = OTokenFactory(address(new ERC1967Proxy(
+            address(new OTokenFactory()),
+            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+        )));
         console.log("OTokenFactory:", address(factory));
 
-        Oracle oracle = new Oracle(address(addressBook));
+        Oracle oracle = Oracle(address(new ERC1967Proxy(
+            address(new Oracle()),
+            abi.encodeCall(Oracle.initialize, (address(addressBook), deployer))
+        )));
         console.log("Oracle:", address(oracle));
 
-        Whitelist whitelist = new Whitelist(address(addressBook));
+        Whitelist whitelist = Whitelist(address(new ERC1967Proxy(
+            address(new Whitelist()),
+            abi.encodeCall(Whitelist.initialize, (address(addressBook), deployer))
+        )));
         console.log("Whitelist:", address(whitelist));
 
-        BatchSettler settler = new BatchSettler(address(addressBook), operator);
+        BatchSettler settler = BatchSettler(address(new ERC1967Proxy(
+            address(new BatchSettler()),
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), operator, deployer))
+        )));
         console.log("BatchSettler:", address(settler));
 
         // 3. Wire AddressBook

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
+import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import "./AddressBook.sol";
 import "./Controller.sol";
 
@@ -11,7 +13,7 @@ import "./Controller.sol";
  *         The owner sets the Chainlink feed per asset.
  *         At expiry, the owner (or a bot) locks in the settlement price.
  */
-contract Oracle {
+contract Oracle is Initializable, UUPSUpgradeable {
     AddressBook public addressBook;
     address public owner;
 
@@ -41,25 +43,23 @@ contract Oracle {
         _;
     }
 
-    constructor(address _addressBook) {
-        addressBook = AddressBook(_addressBook);
-        owner = msg.sender;
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
 
-    /**
-     * @notice Set the Chainlink price feed for an asset.
-     */
+    function initialize(address _addressBook, address _owner) external initializer {
+        if (_addressBook == address(0) || _owner == address(0)) revert InvalidAddress();
+        addressBook = AddressBook(_addressBook);
+        owner = _owner;
+    }
+
     function setPriceFeed(address _asset, address _feed) external onlyOwner {
         if (_asset == address(0) || _feed == address(0)) revert InvalidAddress();
         priceFeed[_asset] = _feed;
         emit PriceFeedSet(_asset, _feed);
     }
 
-    /**
-     * @notice Set the settlement price for an asset at a specific expiry.
-     *         Called by the owner (or settlement bot) after expiry.
-     *         Price is in 8 decimals (e.g., $2000 = 200000000000).
-     */
     function setExpiryPrice(address _asset, uint256 _expiry, uint256 _price) external onlyOwner {
         if (_asset == address(0)) revert InvalidAddress();
         if (_price == 0) revert InvalidPrice();
@@ -71,10 +71,6 @@ contract Oracle {
         emit ExpiryPriceSet(_asset, _expiry, _price);
     }
 
-    /**
-     * @notice Reset an expiry price so it can be set again (owner only).
-     *         Only callable when Controller.betaMode() is true.
-     */
     function resetExpiryPrice(address _asset, uint256 _expiry) external onlyOwner {
         if (_asset == address(0)) revert InvalidAddress();
 
@@ -88,17 +84,10 @@ contract Oracle {
         emit ExpiryPriceReset(_asset, _expiry);
     }
 
-    /**
-     * @notice Get the settlement price for an asset at expiry.
-     *         Returns (0, false) if not yet set.
-     */
     function getExpiryPrice(address _asset, uint256 _expiry) external view returns (uint256, bool) {
         return (expiryPrice[_asset][_expiry], expiryPriceSet[_asset][_expiry]);
     }
 
-    /**
-     * @notice Get live price from Chainlink feed. Returns price in 8 decimals.
-     */
     function getPrice(address _asset) external view returns (uint256) {
         address feed = priceFeed[_asset];
         if (feed == address(0)) revert FeedNotSet();
@@ -108,6 +97,20 @@ contract Oracle {
 
         return uint256(answer);
     }
+
+    // --- Ownership ---
+
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    function transferOwnership(address _newOwner) external onlyOwner {
+        if (_newOwner == address(0)) revert InvalidAddress();
+        emit OwnershipTransferred(owner, _newOwner);
+        owner = _newOwner;
+    }
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    uint256[45] private __gap;
 }
 
 interface IChainlinkAggregator {

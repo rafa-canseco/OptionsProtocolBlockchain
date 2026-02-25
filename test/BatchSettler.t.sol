@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../src/core/AddressBook.sol";
 import "../src/core/BatchSettler.sol";
 import "../src/core/Controller.sol";
@@ -75,14 +76,35 @@ contract BatchSettlerTest is Test {
         weth = new MockERC20("Wrapped ETH", "WETH", 18);
         usdc = new MockERC20("USD Coin", "USDC", 6);
 
-        // Deploy protocol
-        addressBook = new AddressBook();
-        controller = new Controller(address(addressBook));
-        pool = new MarginPool(address(addressBook));
-        factory = new OTokenFactory(address(addressBook));
-        oracle = new Oracle(address(addressBook));
-        whitelist = new Whitelist(address(addressBook));
-        settler = new BatchSettler(address(addressBook), mm);
+        // Deploy protocol (behind UUPS proxies)
+        addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (address(this)))
+        )));
+        controller = Controller(address(new ERC1967Proxy(
+            address(new Controller()),
+            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+        )));
+        pool = MarginPool(address(new ERC1967Proxy(
+            address(new MarginPool()),
+            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+        )));
+        factory = OTokenFactory(address(new ERC1967Proxy(
+            address(new OTokenFactory()),
+            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+        )));
+        oracle = Oracle(address(new ERC1967Proxy(
+            address(new Oracle()),
+            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+        )));
+        whitelist = Whitelist(address(new ERC1967Proxy(
+            address(new Whitelist()),
+            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+        )));
+        settler = BatchSettler(address(new ERC1967Proxy(
+            address(new BatchSettler()),
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+        )));
 
         // Wire AddressBook
         addressBook.setController(address(controller));
@@ -662,12 +684,26 @@ contract BatchSettlerTest is Test {
         settler.batchSettleVaults(owners, vaultIds);
     }
 
-    function test_constructorRevertsOnZeroAddress() public {
-        vm.expectRevert(BatchSettler.InvalidAddress.selector);
-        new BatchSettler(address(0), mm);
+    function test_initializeRevertsOnZeroAddress() public {
+        address impl = address(new BatchSettler());
 
         vm.expectRevert(BatchSettler.InvalidAddress.selector);
-        new BatchSettler(address(addressBook), address(0));
+        new ERC1967Proxy(
+            impl,
+            abi.encodeCall(BatchSettler.initialize, (address(0), mm, address(this)))
+        );
+
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        new ERC1967Proxy(
+            impl,
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), address(0), address(this)))
+        );
+
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        new ERC1967Proxy(
+            impl,
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(0)))
+        );
     }
 
     // ===== Premium edge cases =====
@@ -1212,14 +1248,35 @@ contract PhysicalRedeemTest is Test {
         mockAave = new MockAavePool();
         mockRouter = new MockSwapRouter(MOCK_ETH_PRICE);
 
-        // Deploy protocol
-        addressBook = new AddressBook();
-        controller = new Controller(address(addressBook));
-        pool = new MarginPool(address(addressBook));
-        factory = new OTokenFactory(address(addressBook));
-        oracle = new Oracle(address(addressBook));
-        whitelist = new Whitelist(address(addressBook));
-        settler = new BatchSettler(address(addressBook), mm);
+        // Deploy protocol (behind UUPS proxies)
+        addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (address(this)))
+        )));
+        controller = Controller(address(new ERC1967Proxy(
+            address(new Controller()),
+            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+        )));
+        pool = MarginPool(address(new ERC1967Proxy(
+            address(new MarginPool()),
+            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+        )));
+        factory = OTokenFactory(address(new ERC1967Proxy(
+            address(new OTokenFactory()),
+            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+        )));
+        oracle = Oracle(address(new ERC1967Proxy(
+            address(new Oracle()),
+            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+        )));
+        whitelist = Whitelist(address(new ERC1967Proxy(
+            address(new Whitelist()),
+            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+        )));
+        settler = BatchSettler(address(new ERC1967Proxy(
+            address(new BatchSettler()),
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+        )));
 
         // Wire AddressBook
         addressBook.setController(address(controller));
@@ -1633,7 +1690,10 @@ contract PhysicalRedeemTest is Test {
 
     function test_physicalRedeem_revertsOnAavePoolNotSet() public {
         // Deploy a fresh settler without aavePool configured
-        BatchSettler freshSettler = new BatchSettler(address(addressBook), mm);
+        BatchSettler freshSettler = BatchSettler(address(new ERC1967Proxy(
+            address(new BatchSettler()),
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+        )));
         addressBook.setBatchSettler(address(freshSettler));
         freshSettler.setWhitelistedMM(mm, true);
         freshSettler.setSwapRouter(address(mockRouter));
@@ -1653,7 +1713,10 @@ contract PhysicalRedeemTest is Test {
     }
 
     function test_physicalRedeem_revertsOnSwapRouterNotSet() public {
-        BatchSettler freshSettler = new BatchSettler(address(addressBook), mm);
+        BatchSettler freshSettler = BatchSettler(address(new ERC1967Proxy(
+            address(new BatchSettler()),
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+        )));
         addressBook.setBatchSettler(address(freshSettler));
         freshSettler.setWhitelistedMM(mm, true);
         freshSettler.setAavePool(address(mockAave));

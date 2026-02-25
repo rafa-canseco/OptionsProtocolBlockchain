@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
 import "forge-std/Script.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../src/core/AddressBook.sol";
 import "../src/core/Controller.sol";
 import "../src/core/MarginPool.sol";
@@ -16,9 +17,9 @@ import "../src/mocks/MockSwapRouter.sol";
 
 /**
  * @title DeployBeta
- * @notice Deploys the full beta stack to Base Sepolia.
+ * @notice Deploys the full beta stack to Base Sepolia (UUPS proxied).
  *         Includes mock tokens (LUSD/LETH), mock infrastructure (Aave/SwapRouter),
- *         all 7 protocol contracts, and enables betaMode for instant settlement.
+ *         all 7 protocol contracts behind proxies, and enables betaMode.
  *
  *         Usage:
  *         forge script script/DeployBeta.s.sol:DeployBeta \
@@ -67,13 +68,34 @@ contract DeployBeta is Script {
     }
 
     function _deployProtocol(address deployer) internal {
-        addressBook = new AddressBook();
-        controller = new Controller(address(addressBook));
-        pool = new MarginPool(address(addressBook));
-        factory = new OTokenFactory(address(addressBook));
-        oracle = new Oracle(address(addressBook));
-        whitelist = new Whitelist(address(addressBook));
-        settler = new BatchSettler(address(addressBook), deployer);
+        addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (deployer))
+        )));
+        controller = Controller(address(new ERC1967Proxy(
+            address(new Controller()),
+            abi.encodeCall(Controller.initialize, (address(addressBook), deployer))
+        )));
+        pool = MarginPool(address(new ERC1967Proxy(
+            address(new MarginPool()),
+            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+        )));
+        factory = OTokenFactory(address(new ERC1967Proxy(
+            address(new OTokenFactory()),
+            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+        )));
+        oracle = Oracle(address(new ERC1967Proxy(
+            address(new Oracle()),
+            abi.encodeCall(Oracle.initialize, (address(addressBook), deployer))
+        )));
+        whitelist = Whitelist(address(new ERC1967Proxy(
+            address(new Whitelist()),
+            abi.encodeCall(Whitelist.initialize, (address(addressBook), deployer))
+        )));
+        settler = BatchSettler(address(new ERC1967Proxy(
+            address(new BatchSettler()),
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), deployer, deployer))
+        )));
     }
 
     function _wireAddressBook() internal {

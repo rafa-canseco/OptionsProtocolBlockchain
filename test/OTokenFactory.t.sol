@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
 import "../src/core/OTokenFactory.sol";
 import "../src/core/AddressBook.sol";
 import "../src/core/OToken.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract OTokenFactoryTest is Test {
     AddressBook public addressBook;
@@ -18,9 +19,16 @@ contract OTokenFactoryTest is Test {
     uint256 public expiry;
 
     function setUp() public {
-        addressBook = new AddressBook();
+        addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (address(this)))
+        )));
         addressBook.setController(controller);
-        factory = new OTokenFactory(address(addressBook));
+
+        factory = OTokenFactory(address(new ERC1967Proxy(
+            address(new OTokenFactory()),
+            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+        )));
 
         // Set expiry to next day at 08:00 UTC
         // Round up to next 08:00 UTC

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
+import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import "./AddressBook.sol";
 
 /**
@@ -9,7 +11,7 @@ import "./AddressBook.sol";
  *         For MVP: only ETH/USDC. Expandable later.
  *         A "product" is a valid combination of (underlying, strikeAsset, collateralAsset, isPut).
  */
-contract Whitelist {
+contract Whitelist is Initializable, UUPSUpgradeable {
     AddressBook public addressBook;
     address public owner;
 
@@ -38,9 +40,15 @@ contract Whitelist {
         _;
     }
 
-    constructor(address _addressBook) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address _addressBook, address _owner) external initializer {
+        if (_addressBook == address(0) || _owner == address(0)) revert InvalidAddress();
         addressBook = AddressBook(_addressBook);
-        owner = msg.sender;
+        owner = _owner;
     }
 
     function whitelistCollateral(address _asset) external onlyOwner {
@@ -55,11 +63,6 @@ contract Whitelist {
         emit UnderlyingWhitelisted(_asset);
     }
 
-    /**
-     * @notice Whitelist a valid product combination.
-     *         For a CSP: (WETH, USDC, USDC, true)  — put, collateral is USDC
-     *         For a CC:  (WETH, USDC, WETH, false)  — call, collateral is WETH
-     */
     function whitelistProduct(
         address _underlying,
         address _strikeAsset,
@@ -76,9 +79,6 @@ contract Whitelist {
         emit ProductWhitelisted(_underlying, _strikeAsset, _collateralAsset, _isPut);
     }
 
-    /**
-     * @notice Check if a product combination is whitelisted.
-     */
     function isProductWhitelisted(
         address _underlying,
         address _strikeAsset,
@@ -91,12 +91,23 @@ contract Whitelist {
         return isWhitelistedProduct[productHash];
     }
 
-    /**
-     * @notice Whitelist an oToken. Only the owner can whitelist.
-     */
     function whitelistOToken(address _oToken) external onlyOwner {
         if (_oToken == address(0)) revert InvalidAddress();
         isWhitelistedOToken[_oToken] = true;
         emit OTokenWhitelisted(_oToken);
     }
+
+    // --- Ownership ---
+
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    function transferOwnership(address _newOwner) external onlyOwner {
+        if (_newOwner == address(0)) revert InvalidAddress();
+        emit OwnershipTransferred(owner, _newOwner);
+        owner = _newOwner;
+    }
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    uint256[44] private __gap;
 }

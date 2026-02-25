@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
 import "../src/core/Whitelist.sol";
 import "../src/core/AddressBook.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract WhitelistTest is Test {
     AddressBook public addressBook;
@@ -14,9 +15,16 @@ contract WhitelistTest is Test {
     address public factory = address(0xFAC0);
 
     function setUp() public {
-        addressBook = new AddressBook();
+        addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (address(this)))
+        )));
         addressBook.setOTokenFactory(factory);
-        whitelist = new Whitelist(address(addressBook));
+
+        whitelist = Whitelist(address(new ERC1967Proxy(
+            address(new Whitelist()),
+            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+        )));
     }
 
     function test_whitelistCollateral() public {

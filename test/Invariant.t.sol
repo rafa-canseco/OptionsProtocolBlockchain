@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../src/core/AddressBook.sol";
 import "../src/core/Controller.sol";
 import "../src/core/MarginPool.sol";
@@ -148,12 +149,30 @@ contract InvariantTest is Test {
         usdc = new MockERC20("USDC", "USDC", 6);
         weth = new MockERC20("WETH", "WETH", 18);
 
-        addressBook = new AddressBook();
-        controller = new Controller(address(addressBook));
-        pool = new MarginPool(address(addressBook));
-        factory = new OTokenFactory(address(addressBook));
-        oracle = new Oracle(address(addressBook));
-        whitelist = new Whitelist(address(addressBook));
+        addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (address(this)))
+        )));
+        controller = Controller(address(new ERC1967Proxy(
+            address(new Controller()),
+            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+        )));
+        pool = MarginPool(address(new ERC1967Proxy(
+            address(new MarginPool()),
+            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+        )));
+        factory = OTokenFactory(address(new ERC1967Proxy(
+            address(new OTokenFactory()),
+            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+        )));
+        oracle = Oracle(address(new ERC1967Proxy(
+            address(new Oracle()),
+            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+        )));
+        whitelist = Whitelist(address(new ERC1967Proxy(
+            address(new Whitelist()),
+            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+        )));
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -329,13 +348,34 @@ contract BatchRedeemInvariantTest is Test {
         usdc = new MockERC20("USDC", "USDC", 6);
         weth = new MockERC20("WETH", "WETH", 18);
 
-        addressBook = new AddressBook();
-        controller = new Controller(address(addressBook));
-        pool = new MarginPool(address(addressBook));
-        factory = new OTokenFactory(address(addressBook));
-        oracle = new Oracle(address(addressBook));
-        whitelist = new Whitelist(address(addressBook));
-        settler = new BatchSettler(address(addressBook), mm);
+        addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (address(this)))
+        )));
+        controller = Controller(address(new ERC1967Proxy(
+            address(new Controller()),
+            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+        )));
+        pool = MarginPool(address(new ERC1967Proxy(
+            address(new MarginPool()),
+            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+        )));
+        factory = OTokenFactory(address(new ERC1967Proxy(
+            address(new OTokenFactory()),
+            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+        )));
+        oracle = Oracle(address(new ERC1967Proxy(
+            address(new Oracle()),
+            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+        )));
+        whitelist = Whitelist(address(new ERC1967Proxy(
+            address(new Whitelist()),
+            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+        )));
+        settler = BatchSettler(address(new ERC1967Proxy(
+            address(new BatchSettler()),
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+        )));
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
