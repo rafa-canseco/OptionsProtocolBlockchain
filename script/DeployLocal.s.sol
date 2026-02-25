@@ -66,7 +66,7 @@ contract DeployLocal is Script {
         )));
         BatchSettler settler = BatchSettler(address(new ERC1967Proxy(
             address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), deployer))
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), deployer, deployer))
         )));
 
         // --- Wire AddressBook ---

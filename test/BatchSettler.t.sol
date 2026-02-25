@@ -103,7 +103,7 @@ contract BatchSettlerTest is Test {
         )));
         settler = BatchSettler(address(new ERC1967Proxy(
             address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm))
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
         )));
 
         // Wire AddressBook
@@ -690,13 +690,19 @@ contract BatchSettlerTest is Test {
         vm.expectRevert(BatchSettler.InvalidAddress.selector);
         new ERC1967Proxy(
             impl,
-            abi.encodeCall(BatchSettler.initialize, (address(0), mm))
+            abi.encodeCall(BatchSettler.initialize, (address(0), mm, address(this)))
         );
 
         vm.expectRevert(BatchSettler.InvalidAddress.selector);
         new ERC1967Proxy(
             impl,
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), address(0)))
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), address(0), address(this)))
+        );
+
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        new ERC1967Proxy(
+            impl,
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(0)))
         );
     }
 
@@ -1269,7 +1275,7 @@ contract PhysicalRedeemTest is Test {
         )));
         settler = BatchSettler(address(new ERC1967Proxy(
             address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm))
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
         )));
 
         // Wire AddressBook
@@ -1686,7 +1692,7 @@ contract PhysicalRedeemTest is Test {
         // Deploy a fresh settler without aavePool configured
         BatchSettler freshSettler = BatchSettler(address(new ERC1967Proxy(
             address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm))
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
         )));
         addressBook.setBatchSettler(address(freshSettler));
         freshSettler.setWhitelistedMM(mm, true);
@@ -1709,7 +1715,7 @@ contract PhysicalRedeemTest is Test {
     function test_physicalRedeem_revertsOnSwapRouterNotSet() public {
         BatchSettler freshSettler = BatchSettler(address(new ERC1967Proxy(
             address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm))
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
         )));
         addressBook.setBatchSettler(address(freshSettler));
         freshSettler.setWhitelistedMM(mm, true);

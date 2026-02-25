@@ -155,10 +155,10 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         _disableInitializers();
     }
 
-    function initialize(address _addressBook, address _operator) external initializer {
-        if (_addressBook == address(0) || _operator == address(0)) revert InvalidAddress();
+    function initialize(address _addressBook, address _operator, address _owner) external initializer {
+        if (_addressBook == address(0) || _operator == address(0) || _owner == address(0)) revert InvalidAddress();
         addressBook = AddressBook(_addressBook);
-        owner = msg.sender;
+        owner = _owner;
         operator = _operator;
         _cachedChainId = block.chainid;
         _cachedDomainSeparator = _buildDomainSeparator();
@@ -571,5 +571,17 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         }
     }
 
+    // --- Ownership ---
+
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    function transferOwnership(address _newOwner) external onlyOwner {
+        if (_newOwner == address(0)) revert InvalidAddress();
+        emit OwnershipTransferred(owner, _newOwner);
+        owner = _newOwner;
+    }
+
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    uint256[37] private __gap;
 }

@@ -374,7 +374,7 @@ contract BatchRedeemInvariantTest is Test {
         )));
         settler = BatchSettler(address(new ERC1967Proxy(
             address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm))
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
         )));
 
         addressBook.setController(address(controller));

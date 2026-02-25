@@ -3,6 +3,7 @@ pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import "../src/core/AddressBook.sol";
 import "../src/core/Controller.sol";
 import "../src/core/MarginPool.sol";
@@ -33,6 +34,17 @@ contract WhitelistV2 is Whitelist {
     function version() external pure returns (uint256) { return 2; }
 }
 contract BatchSettlerV2 is BatchSettler {
+    function version() external pure returns (uint256) { return 2; }
+}
+
+// V2 stub with reinitializer(2) for reinitializer upgrade test
+contract AddressBookV2Reinit is AddressBook {
+    uint256 public v2Value;
+
+    function initializeV2(uint256 _val) external reinitializer(2) {
+        v2Value = _val;
+    }
+
     function version() external pure returns (uint256) { return 2; }
 }
 
@@ -84,7 +96,7 @@ contract UpgradeTest is Test {
         )));
         settler = BatchSettler(address(new ERC1967Proxy(
             address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), operator))
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), operator, owner))
         )));
 
         // Wire AddressBook
@@ -96,81 +108,147 @@ contract UpgradeTest is Test {
         addressBook.setBatchSettler(address(settler));
     }
 
-    // ===== Double-initialization prevention =====
+    // ===== Double-initialization prevention (Suggestion #9: specific revert selectors) =====
 
     function test_cannotReinitializeAddressBook() public {
-        vm.expectRevert();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
         addressBook.initialize(address(0xDEAD));
     }
 
     function test_cannotReinitializeController() public {
-        vm.expectRevert();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
         controller.initialize(address(addressBook), address(0xDEAD));
     }
 
     function test_cannotReinitializeMarginPool() public {
-        vm.expectRevert();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
         pool.initialize(address(addressBook));
     }
 
     function test_cannotReinitializeOTokenFactory() public {
-        vm.expectRevert();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
         factory.initialize(address(addressBook));
     }
 
     function test_cannotReinitializeOracle() public {
-        vm.expectRevert();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
         oracle.initialize(address(addressBook), address(0xDEAD));
     }
 
     function test_cannotReinitializeWhitelist() public {
-        vm.expectRevert();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
         whitelist.initialize(address(addressBook), address(0xDEAD));
     }
 
     function test_cannotReinitializeBatchSettler() public {
-        vm.expectRevert();
-        settler.initialize(address(addressBook), address(0xDEAD));
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        settler.initialize(address(addressBook), address(0xDEAD), owner);
     }
 
-    // ===== Implementation cannot be initialized =====
+    // ===== Implementation cannot be initialized (Important #5: all 7 contracts) =====
 
     function test_implementationLockedAddressBook() public {
         AddressBook impl = new AddressBook();
-        vm.expectRevert();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
         impl.initialize(owner);
     }
 
     function test_implementationLockedController() public {
         Controller impl = new Controller();
-        vm.expectRevert();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        impl.initialize(address(addressBook), owner);
+    }
+
+    function test_implementationLockedMarginPool() public {
+        MarginPool impl = new MarginPool();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        impl.initialize(address(addressBook));
+    }
+
+    function test_implementationLockedOTokenFactory() public {
+        OTokenFactory impl = new OTokenFactory();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        impl.initialize(address(addressBook));
+    }
+
+    function test_implementationLockedOracle() public {
+        Oracle impl = new Oracle();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        impl.initialize(address(addressBook), owner);
+    }
+
+    function test_implementationLockedWhitelist() public {
+        Whitelist impl = new Whitelist();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
         impl.initialize(address(addressBook), owner);
     }
 
     function test_implementationLockedBatchSettler() public {
         BatchSettler impl = new BatchSettler();
-        vm.expectRevert();
-        impl.initialize(address(addressBook), operator);
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        impl.initialize(address(addressBook), operator, owner);
+    }
+
+    // ===== Zero-address initialization tests (Suggestion #11) =====
+
+    function test_initializeAddressBook_revertsOnZeroOwner() public {
+        address impl = address(new AddressBook());
+        vm.expectRevert(AddressBook.InvalidAddress.selector);
+        new ERC1967Proxy(impl, abi.encodeCall(AddressBook.initialize, (address(0))));
+    }
+
+    function test_initializeController_revertsOnZeroAddress() public {
+        address impl = address(new Controller());
+        vm.expectRevert(Controller.InvalidAddress.selector);
+        new ERC1967Proxy(impl, abi.encodeCall(Controller.initialize, (address(0), owner)));
+
+        vm.expectRevert(Controller.InvalidAddress.selector);
+        new ERC1967Proxy(impl, abi.encodeCall(Controller.initialize, (address(addressBook), address(0))));
+    }
+
+    function test_initializeOracle_revertsOnZeroAddress() public {
+        address impl = address(new Oracle());
+        vm.expectRevert(Oracle.InvalidAddress.selector);
+        new ERC1967Proxy(impl, abi.encodeCall(Oracle.initialize, (address(0), owner)));
+
+        vm.expectRevert(Oracle.InvalidAddress.selector);
+        new ERC1967Proxy(impl, abi.encodeCall(Oracle.initialize, (address(addressBook), address(0))));
+    }
+
+    function test_initializeWhitelist_revertsOnZeroAddress() public {
+        address impl = address(new Whitelist());
+        vm.expectRevert(Whitelist.InvalidAddress.selector);
+        new ERC1967Proxy(impl, abi.encodeCall(Whitelist.initialize, (address(0), owner)));
+
+        vm.expectRevert(Whitelist.InvalidAddress.selector);
+        new ERC1967Proxy(impl, abi.encodeCall(Whitelist.initialize, (address(addressBook), address(0))));
+    }
+
+    function test_initializeMarginPool_revertsOnZeroAddress() public {
+        address impl = address(new MarginPool());
+        vm.expectRevert(MarginPool.InvalidAddress.selector);
+        new ERC1967Proxy(impl, abi.encodeCall(MarginPool.initialize, (address(0))));
+    }
+
+    function test_initializeOTokenFactory_revertsOnZeroAddress() public {
+        address impl = address(new OTokenFactory());
+        vm.expectRevert(OTokenFactory.InvalidAddress.selector);
+        new ERC1967Proxy(impl, abi.encodeCall(OTokenFactory.initialize, (address(0))));
     }
 
     // ===== Upgrade: state preserved =====
 
     function test_upgradeAddressBook_preservesState() public {
-        // Set some state
         address testAddr = address(0x1234);
         addressBook.setController(testAddr);
         assertEq(addressBook.controller(), testAddr);
         assertEq(addressBook.owner(), owner);
 
-        // Upgrade
         AddressBookV2 v2Impl = new AddressBookV2();
         addressBook.upgradeToAndCall(address(v2Impl), "");
 
-        // State preserved
         assertEq(addressBook.controller(), testAddr);
         assertEq(addressBook.owner(), owner);
-
-        // New functionality available
         assertEq(AddressBookV2(address(addressBook)).version(), 2);
     }
 
@@ -190,7 +268,6 @@ contract UpgradeTest is Test {
         assertEq(address(pool.addressBook()), address(addressBook));
 
         MarginPoolV2 v2Impl = new MarginPoolV2();
-        // MarginPool upgrade authorized by AddressBook owner
         pool.upgradeToAndCall(address(v2Impl), "");
 
         assertEq(address(pool.addressBook()), address(addressBook));
@@ -201,7 +278,6 @@ contract UpgradeTest is Test {
         assertEq(address(factory.addressBook()), address(addressBook));
 
         OTokenFactoryV2 v2Impl = new OTokenFactoryV2();
-        // OTokenFactory upgrade authorized by AddressBook owner
         factory.upgradeToAndCall(address(v2Impl), "");
 
         assertEq(address(factory.addressBook()), address(addressBook));
@@ -250,49 +326,243 @@ contract UpgradeTest is Test {
     function test_upgradeRevertsForNonOwner_AddressBook() public {
         AddressBookV2 v2Impl = new AddressBookV2();
         vm.prank(address(0xBAD));
-        vm.expectRevert();
+        vm.expectRevert(AddressBook.OnlyOwner.selector);
         addressBook.upgradeToAndCall(address(v2Impl), "");
     }
 
     function test_upgradeRevertsForNonOwner_Controller() public {
         ControllerV2 v2Impl = new ControllerV2();
         vm.prank(address(0xBAD));
-        vm.expectRevert();
+        vm.expectRevert(Controller.OnlyOwner.selector);
         controller.upgradeToAndCall(address(v2Impl), "");
     }
 
     function test_upgradeRevertsForNonOwner_MarginPool() public {
         MarginPoolV2 v2Impl = new MarginPoolV2();
         vm.prank(address(0xBAD));
-        vm.expectRevert();
+        vm.expectRevert(MarginPool.Unauthorized.selector);
         pool.upgradeToAndCall(address(v2Impl), "");
     }
 
     function test_upgradeRevertsForNonOwner_OTokenFactory() public {
         OTokenFactoryV2 v2Impl = new OTokenFactoryV2();
         vm.prank(address(0xBAD));
-        vm.expectRevert();
+        vm.expectRevert(OTokenFactory.Unauthorized.selector);
         factory.upgradeToAndCall(address(v2Impl), "");
     }
 
     function test_upgradeRevertsForNonOwner_Oracle() public {
         OracleV2 v2Impl = new OracleV2();
         vm.prank(address(0xBAD));
-        vm.expectRevert();
+        vm.expectRevert(Oracle.OnlyOwner.selector);
         oracle.upgradeToAndCall(address(v2Impl), "");
     }
 
     function test_upgradeRevertsForNonOwner_Whitelist() public {
         WhitelistV2 v2Impl = new WhitelistV2();
         vm.prank(address(0xBAD));
-        vm.expectRevert();
+        vm.expectRevert(Whitelist.OnlyOwner.selector);
         whitelist.upgradeToAndCall(address(v2Impl), "");
     }
 
     function test_upgradeRevertsForNonOwner_BatchSettler() public {
         BatchSettlerV2 v2Impl = new BatchSettlerV2();
         vm.prank(address(0xBAD));
-        vm.expectRevert();
+        vm.expectRevert(BatchSettler.OnlyOwner.selector);
         settler.upgradeToAndCall(address(v2Impl), "");
+    }
+
+    // ===== Delegated upgrade auth with AddressBook owner change (Important #6) =====
+
+    function test_upgradeMarginPool_onlyAddressBookOwner() public {
+        address newOwner = address(0xCAFE);
+
+        // Transfer AddressBook ownership (two-step)
+        addressBook.transferOwnership(newOwner);
+        vm.prank(newOwner);
+        addressBook.acceptOwnership();
+        assertEq(addressBook.owner(), newOwner);
+
+        // Old owner (this) can no longer upgrade MarginPool
+        MarginPoolV2 v2Impl = new MarginPoolV2();
+        vm.expectRevert(MarginPool.Unauthorized.selector);
+        pool.upgradeToAndCall(address(v2Impl), "");
+
+        // New owner can upgrade
+        vm.prank(newOwner);
+        pool.upgradeToAndCall(address(v2Impl), "");
+        assertEq(MarginPoolV2(address(pool)).version(), 2);
+    }
+
+    function test_upgradeOTokenFactory_onlyAddressBookOwner() public {
+        address newOwner = address(0xCAFE);
+
+        // Transfer AddressBook ownership (two-step)
+        addressBook.transferOwnership(newOwner);
+        vm.prank(newOwner);
+        addressBook.acceptOwnership();
+        assertEq(addressBook.owner(), newOwner);
+
+        // Old owner (this) can no longer upgrade OTokenFactory
+        OTokenFactoryV2 v2Impl = new OTokenFactoryV2();
+        vm.expectRevert(OTokenFactory.Unauthorized.selector);
+        factory.upgradeToAndCall(address(v2Impl), "");
+
+        // New owner can upgrade
+        vm.prank(newOwner);
+        factory.upgradeToAndCall(address(v2Impl), "");
+        assertEq(OTokenFactoryV2(address(factory)).version(), 2);
+    }
+
+    // ===== BatchSettler domain separator proxy correctness (Important #7) =====
+
+    function test_domainSeparator_usesProxyAddress() public {
+        bytes32 expected = keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256("b1nary"),
+            keccak256("1"),
+            block.chainid,
+            address(settler) // proxy address, not implementation
+        ));
+        assertEq(settler.DOMAIN_SEPARATOR(), expected);
+    }
+
+    function test_upgradeBatchSettler_domainSeparatorPreserved() public {
+        bytes32 domainBefore = settler.DOMAIN_SEPARATOR();
+
+        BatchSettlerV2 v2Impl = new BatchSettlerV2();
+        settler.upgradeToAndCall(address(v2Impl), "");
+
+        // Domain separator should remain the same after upgrade (same proxy address)
+        assertEq(settler.DOMAIN_SEPARATOR(), domainBefore);
+    }
+
+    // ===== Two-step ownership on AddressBook (Important #4) =====
+
+    function test_addressBook_twoStepOwnership() public {
+        address newOwner = address(0x1234);
+
+        // Step 1: transferOwnership sets pendingOwner
+        addressBook.transferOwnership(newOwner);
+        assertEq(addressBook.pendingOwner(), newOwner);
+        assertEq(addressBook.owner(), owner); // still the old owner
+
+        // Step 2: acceptOwnership completes transfer
+        vm.prank(newOwner);
+        addressBook.acceptOwnership();
+        assertEq(addressBook.owner(), newOwner);
+        assertEq(addressBook.pendingOwner(), address(0));
+    }
+
+    function test_addressBook_onlyPendingOwnerCanAccept() public {
+        address newOwner = address(0x1234);
+        addressBook.transferOwnership(newOwner);
+
+        // Random address cannot accept
+        vm.prank(address(0xBAD));
+        vm.expectRevert(AddressBook.OnlyPendingOwner.selector);
+        addressBook.acceptOwnership();
+
+        // Old owner cannot accept
+        vm.expectRevert(AddressBook.OnlyPendingOwner.selector);
+        addressBook.acceptOwnership();
+    }
+
+    function test_addressBook_transferOwnershipRevertsOnZero() public {
+        vm.expectRevert(AddressBook.InvalidAddress.selector);
+        addressBook.transferOwnership(address(0));
+    }
+
+    // ===== transferOwnership tests for Controller, Oracle, Whitelist, BatchSettler =====
+
+    function test_transferOwnership_Controller() public {
+        address newOwner = address(0x1234);
+        controller.transferOwnership(newOwner);
+        assertEq(controller.owner(), newOwner);
+
+        // Old owner can no longer call owner-only functions
+        vm.expectRevert(Controller.OnlyOwner.selector);
+        controller.setBetaMode(true);
+
+        // New owner can
+        vm.prank(newOwner);
+        controller.setBetaMode(true);
+        assertTrue(controller.betaMode());
+    }
+
+    function test_transferOwnership_Oracle() public {
+        address newOwner = address(0x1234);
+        oracle.transferOwnership(newOwner);
+        assertEq(oracle.owner(), newOwner);
+
+        vm.expectRevert(Oracle.OnlyOwner.selector);
+        oracle.setPriceFeed(address(weth), address(feed));
+
+        vm.prank(newOwner);
+        oracle.setPriceFeed(address(weth), address(feed));
+        assertEq(oracle.priceFeed(address(weth)), address(feed));
+    }
+
+    function test_transferOwnership_Whitelist() public {
+        address newOwner = address(0x1234);
+        whitelist.transferOwnership(newOwner);
+        assertEq(whitelist.owner(), newOwner);
+
+        vm.expectRevert(Whitelist.OnlyOwner.selector);
+        whitelist.whitelistUnderlying(address(weth));
+
+        vm.prank(newOwner);
+        whitelist.whitelistUnderlying(address(weth));
+        assertTrue(whitelist.isWhitelistedUnderlying(address(weth)));
+    }
+
+    function test_transferOwnership_BatchSettler() public {
+        address newOwner = address(0x1234);
+        settler.transferOwnership(newOwner);
+        assertEq(settler.owner(), newOwner);
+
+        vm.expectRevert(BatchSettler.OnlyOwner.selector);
+        settler.setOperator(address(0xDEAD));
+
+        vm.prank(newOwner);
+        settler.setOperator(address(0xDEAD));
+        assertEq(settler.operator(), address(0xDEAD));
+    }
+
+    function test_transferOwnership_revertsOnZero_Controller() public {
+        vm.expectRevert(Controller.InvalidAddress.selector);
+        controller.transferOwnership(address(0));
+    }
+
+    function test_transferOwnership_revertsOnZero_Oracle() public {
+        vm.expectRevert(Oracle.InvalidAddress.selector);
+        oracle.transferOwnership(address(0));
+    }
+
+    function test_transferOwnership_revertsOnZero_Whitelist() public {
+        vm.expectRevert(Whitelist.InvalidAddress.selector);
+        whitelist.transferOwnership(address(0));
+    }
+
+    function test_transferOwnership_revertsOnZero_BatchSettler() public {
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        settler.transferOwnership(address(0));
+    }
+
+    // ===== Reinitializer upgrade test (Suggestion #12) =====
+
+    function test_upgradeToAndCall_withReinitializer() public {
+        AddressBookV2Reinit v2Impl = new AddressBookV2Reinit();
+
+        // Upgrade and call reinitializer(2) in one step
+        addressBook.upgradeToAndCall(
+            address(v2Impl),
+            abi.encodeCall(AddressBookV2Reinit.initializeV2, (42))
+        );
+
+        assertEq(AddressBookV2Reinit(address(addressBook)).v2Value(), 42);
+        assertEq(AddressBookV2Reinit(address(addressBook)).version(), 2);
+        // Original state preserved
+        assertEq(addressBook.owner(), owner);
     }
 }

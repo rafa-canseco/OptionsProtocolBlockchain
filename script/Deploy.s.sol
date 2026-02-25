@@ -74,7 +74,7 @@ contract Deploy is Script {
 
         BatchSettler settler = BatchSettler(address(new ERC1967Proxy(
             address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), operator))
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), operator, deployer))
         )));
         console.log("BatchSettler:", address(settler));
 

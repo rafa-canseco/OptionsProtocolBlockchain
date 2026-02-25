@@ -17,10 +17,14 @@ contract AddressBook is Initializable, UUPSUpgradeable {
     address public whitelist;
     address public batchSettler;
 
+    address public pendingOwner;
+
     error InvalidAddress();
     error OnlyOwner();
+    error OnlyPendingOwner();
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event ControllerUpdated(address indexed oldAddress, address indexed newAddress);
     event MarginPoolUpdated(address indexed oldAddress, address indexed newAddress);
     event OTokenFactoryUpdated(address indexed oldAddress, address indexed newAddress);
@@ -45,8 +49,15 @@ contract AddressBook is Initializable, UUPSUpgradeable {
 
     function transferOwnership(address _newOwner) external onlyOwner {
         if (_newOwner == address(0)) revert InvalidAddress();
-        emit OwnershipTransferred(owner, _newOwner);
-        owner = _newOwner;
+        pendingOwner = _newOwner;
+        emit OwnershipTransferStarted(owner, _newOwner);
+    }
+
+    function acceptOwnership() external {
+        if (msg.sender != pendingOwner) revert OnlyPendingOwner();
+        emit OwnershipTransferred(owner, msg.sender);
+        owner = msg.sender;
+        pendingOwner = address(0);
     }
 
     function setController(address _controller) external onlyOwner {
@@ -86,4 +97,6 @@ contract AddressBook is Initializable, UUPSUpgradeable {
     }
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    uint256[42] private __gap;
 }

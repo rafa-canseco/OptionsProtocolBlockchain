@@ -53,4 +53,6 @@ contract MarginPool is Initializable, UUPSUpgradeable {
     function _authorizeUpgrade(address) internal override {
         if (msg.sender != addressBook.owner()) revert Unauthorized();
     }
+
+    uint256[49] private __gap;
 }

@@ -97,5 +97,17 @@ contract Whitelist is Initializable, UUPSUpgradeable {
         emit OTokenWhitelisted(_oToken);
     }
 
+    // --- Ownership ---
+
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    function transferOwnership(address _newOwner) external onlyOwner {
+        if (_newOwner == address(0)) revert InvalidAddress();
+        emit OwnershipTransferred(owner, _newOwner);
+        owner = _newOwner;
+    }
+
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    uint256[44] private __gap;
 }

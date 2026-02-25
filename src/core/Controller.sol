@@ -50,7 +50,7 @@ contract Controller is Initializable, UUPSUpgradeable {
     event Redeemed(address indexed oToken, address indexed redeemer, uint256 otokenAmount, uint256 payout);
     event BetaModeSet(bool enabled);
 
-    error OnlyOwnerOrBatchSettler();
+    error OnlyOwner();
     error InvalidVault();
     error VaultAlreadyHasShort();
     error VaultAlreadySettledError();
@@ -64,7 +64,7 @@ contract Controller is Initializable, UUPSUpgradeable {
     error InvalidAddress();
 
     modifier onlyOwner() {
-        if (msg.sender != owner) revert Unauthorized();
+        if (msg.sender != owner) revert OnlyOwner();
         _;
     }
 
@@ -243,5 +243,17 @@ contract Controller is Initializable, UUPSUpgradeable {
         }
     }
 
+    // --- Ownership ---
+
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    function transferOwnership(address _newOwner) external onlyOwner {
+        if (_newOwner == address(0)) revert InvalidAddress();
+        emit OwnershipTransferred(owner, _newOwner);
+        owner = _newOwner;
+    }
+
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    uint256[44] private __gap;
 }

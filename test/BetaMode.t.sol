@@ -92,7 +92,7 @@ contract BetaModeTest is Test {
         )));
         settler = BatchSettler(address(new ERC1967Proxy(
             address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm))
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
         )));
 
         // Wire AddressBook
@@ -222,7 +222,7 @@ contract BetaModeTest is Test {
 
     function test_setBetaMode_onlyOwner() public {
         vm.prank(alice);
-        vm.expectRevert(Controller.Unauthorized.selector);
+        vm.expectRevert(Controller.OnlyOwner.selector);
         controller.setBetaMode(true);
     }
 
@@ -253,7 +253,7 @@ contract BetaModeTest is Test {
 
     function test_setBetaMode_operatorCannotSet() public {
         vm.prank(mm);
-        vm.expectRevert(Controller.Unauthorized.selector);
+        vm.expectRevert(Controller.OnlyOwner.selector);
         controller.setBetaMode(true);
     }
 
