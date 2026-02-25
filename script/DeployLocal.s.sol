@@ -2,6 +2,7 @@
 pragma solidity 0.8.24;
 
 import "forge-std/Script.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../src/core/AddressBook.sol";
 import "../src/core/Controller.sol";
 import "../src/core/MarginPool.sol";
@@ -14,7 +15,7 @@ import "../src/mocks/MockChainlinkFeed.sol";
 
 /**
  * @title DeployLocal
- * @notice Deploys the full options protocol to local Anvil.
+ * @notice Deploys the full options protocol to local Anvil (UUPS proxied).
  *         Uses Anvil's default account[0] as deployer and operator.
  *         Deploys mock WETH, USDC, and a mock Chainlink feed.
  *
@@ -38,14 +39,35 @@ contract DeployLocal is Script {
         // --- Deploy mock Chainlink feed (ETH = $2500) ---
         MockChainlinkFeed ethFeed = new MockChainlinkFeed(2500e8);
 
-        // --- Deploy protocol ---
-        AddressBook addressBook = new AddressBook();
-        Controller controller = new Controller(address(addressBook));
-        MarginPool pool = new MarginPool(address(addressBook));
-        OTokenFactory factory = new OTokenFactory(address(addressBook));
-        Oracle oracle = new Oracle(address(addressBook));
-        Whitelist whitelist = new Whitelist(address(addressBook));
-        BatchSettler settler = new BatchSettler(address(addressBook), deployer);
+        // --- Deploy protocol (behind proxies) ---
+        AddressBook addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (deployer))
+        )));
+        Controller controller = Controller(address(new ERC1967Proxy(
+            address(new Controller()),
+            abi.encodeCall(Controller.initialize, (address(addressBook), deployer))
+        )));
+        MarginPool pool = MarginPool(address(new ERC1967Proxy(
+            address(new MarginPool()),
+            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+        )));
+        OTokenFactory factory = OTokenFactory(address(new ERC1967Proxy(
+            address(new OTokenFactory()),
+            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+        )));
+        Oracle oracle = Oracle(address(new ERC1967Proxy(
+            address(new Oracle()),
+            abi.encodeCall(Oracle.initialize, (address(addressBook), deployer))
+        )));
+        Whitelist whitelist = Whitelist(address(new ERC1967Proxy(
+            address(new Whitelist()),
+            abi.encodeCall(Whitelist.initialize, (address(addressBook), deployer))
+        )));
+        BatchSettler settler = BatchSettler(address(new ERC1967Proxy(
+            address(new BatchSettler()),
+            abi.encodeCall(BatchSettler.initialize, (address(addressBook), deployer))
+        )));
 
         // --- Wire AddressBook ---
         addressBook.setController(address(controller));
