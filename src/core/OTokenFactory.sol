@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import "./OToken.sol";
 import "./AddressBook.sol";
 
@@ -10,7 +12,7 @@ import "./AddressBook.sol";
  *         Uses CREATE2 for deterministic addresses — given the same parameters,
  *         the oToken address is always the same.
  */
-contract OTokenFactory {
+contract OTokenFactory is Initializable, UUPSUpgradeable {
     AddressBook public addressBook;
 
     /// @notice All oTokens ever created
@@ -37,15 +39,18 @@ contract OTokenFactory {
     error AssetNotWhitelisted();
     error InvalidAddress();
     error InvalidStrikePrice();
+    error Unauthorized();
 
-    constructor(address _addressBook) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address _addressBook) external initializer {
+        if (_addressBook == address(0)) revert InvalidAddress();
         addressBook = AddressBook(_addressBook);
     }
 
-    /**
-     * @notice Create a new oToken for an option series.
-     * @return The address of the newly created oToken.
-     */
     function createOToken(
         address _underlying,
         address _strikeAsset,
@@ -59,7 +64,6 @@ contract OTokenFactory {
         }
         if (_strikePrice == 0) revert InvalidStrikePrice();
 
-        // Expiry must be in the future and at 08:00 UTC
         if (_expiry <= block.timestamp) revert InvalidExpiry();
         if (_expiry % (24 hours) != 8 hours) revert InvalidExpiry();
 
@@ -69,7 +73,6 @@ contract OTokenFactory {
 
         if (getOToken[paramsHash] != address(0)) revert OTokenAlreadyExists();
 
-        // Deploy oToken with CREATE2 using paramsHash as salt
         OToken oToken = new OToken{salt: paramsHash}();
 
         oToken.init(
@@ -94,17 +97,10 @@ contract OTokenFactory {
         return oTokenAddress;
     }
 
-    /**
-     * @notice Get the total number of oTokens created.
-     */
     function getOTokensLength() external view returns (uint256) {
         return oTokens.length;
     }
 
-    /**
-     * @notice Compute the address of an oToken before it's created.
-     *         Useful for the backend to know the address in advance.
-     */
     function getTargetOTokenAddress(
         address _underlying,
         address _strikeAsset,
@@ -140,5 +136,9 @@ contract OTokenFactory {
         return keccak256(
             abi.encodePacked(_underlying, _strikeAsset, _collateralAsset, _strikePrice, _expiry, _isPut)
         );
+    }
+
+    function _authorizeUpgrade(address) internal override {
+        if (msg.sender != addressBook.owner()) revert Unauthorized();
     }
 }

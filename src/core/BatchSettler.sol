@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import "./AddressBook.sol";
 import "./Controller.sol";
 import "./OToken.sol";
@@ -27,7 +29,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  *         - batchPhysicalRedeem() delivers contra-asset to ITM users via flash loan + DEX swap
  *         - batchRedeem() redeems remaining oTokens after expiry
  */
-contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
+contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlashLoanSimpleReceiver {
     using SafeERC20 for IERC20;
 
     // ===== EIP-712 =====
@@ -37,8 +39,9 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     bytes32 private constant _NAME_HASH = keccak256("b1nary");
     bytes32 private constant _VERSION_HASH = keccak256("1");
 
-    bytes32 private immutable _CACHED_DOMAIN_SEPARATOR;
-    uint256 private immutable _CACHED_CHAIN_ID;
+    // Cached domain separator (storage vars, not immutable — proxy-compatible)
+    bytes32 private _cachedDomainSeparator;
+    uint256 private _cachedChainId;
 
     struct Quote {
         address oToken;
@@ -147,13 +150,18 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         _;
     }
 
-    constructor(address _addressBook, address _operator) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address _addressBook, address _operator) external initializer {
         if (_addressBook == address(0) || _operator == address(0)) revert InvalidAddress();
         addressBook = AddressBook(_addressBook);
         owner = msg.sender;
         operator = _operator;
-        _CACHED_CHAIN_ID = block.chainid;
-        _CACHED_DOMAIN_SEPARATOR = _buildDomainSeparator();
+        _cachedChainId = block.chainid;
+        _cachedDomainSeparator = _buildDomainSeparator();
     }
 
     function _buildDomainSeparator() private view returns (bytes32) {
@@ -163,8 +171,8 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     }
 
     function _domainSeparator() private view returns (bytes32) {
-        return block.chainid == _CACHED_CHAIN_ID
-            ? _CACHED_DOMAIN_SEPARATOR
+        return block.chainid == _cachedChainId
+            ? _cachedDomainSeparator
             : _buildDomainSeparator();
     }
 
@@ -278,20 +286,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
 
     // ===== Order Execution =====
 
-    /**
-     * @notice Execute a single order instantly. Permissionless — msg.sender is the user.
-     *
-     *         Prerequisites:
-     *         - User has approved MarginPool for collateral asset
-     *         - MM (signer) has approved this contract for premium asset (strike asset)
-     *         - A valid, non-expired, non-cancelled signed quote with remaining capacity
-     *
-     * @param quote      The EIP-712 signed quote from a whitelisted MM
-     * @param signature  The MM's ECDSA signature over the quote
-     * @param amount     Amount of oTokens to mint (8 decimals, <= quote.maxAmount - filled)
-     * @param collateral Collateral to deposit (in collateral asset's decimals)
-     * @return vaultId   The vault ID created for this order
-     */
     function executeOrder(
         Quote calldata quote,
         bytes calldata signature,
@@ -337,9 +331,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         _transferPremium(quote.oToken, amount, premium, collateral, vaultId, mm);
     }
 
-    /**
-     * @dev Transfer premium from MM to user, deducting protocol fee if configured.
-     */
     function _transferPremium(
         address oToken,
         uint256 amount,
@@ -365,9 +356,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
 
     // ===== Post-Expiry Settlement =====
 
-    /**
-     * @notice Settle multiple expired vaults in a single tx. Only callable by operator.
-     */
     function batchSettleVaults(
         address[] calldata owners,
         uint256[] calldata vaultIds
@@ -387,9 +375,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         }
     }
 
-    /**
-     * @notice Redeem oTokens in batch after expiry.
-     */
     function batchRedeem(address[] calldata oTokens, uint256[] calldata amounts) external {
         if (oTokens.length != amounts.length) revert LengthMismatch();
         if (oTokens.length == 0) revert EmptyArray();
@@ -430,9 +415,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
 
     // ===== Physical Delivery (flash loan + DEX swap) =====
 
-    /**
-     * @notice Deliver contra-asset to ITM user via flash loan.
-     */
     function physicalRedeem(
         address oToken,
         address user,
@@ -455,13 +437,10 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         (address oToken, address user, uint256 oTokenAmount, uint256 maxCollateralSpent) =
             abi.decode(params, (address, address, uint256, uint256));
 
-        // 1. Deliver contra-asset to user
         IERC20(asset).safeTransfer(user, amount);
 
-        // 2. Pull oTokens from operator, redeem, swap, and repay
         uint256 collateralUsed = _redeemAndSwap(oToken, oTokenAmount, asset, amount + premium, maxCollateralSpent);
 
-        // 3. Approve Aave Pool to pull repayment
         IERC20(asset).forceApprove(aavePool, amount + premium);
 
         emit PhysicalDelivery(oToken, user, amount, collateralUsed);
@@ -591,4 +570,6 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
             }
         }
     }
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 }
