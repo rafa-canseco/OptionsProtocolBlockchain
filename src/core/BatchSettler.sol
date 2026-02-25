@@ -37,7 +37,8 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     bytes32 private constant _NAME_HASH = keccak256("b1nary");
     bytes32 private constant _VERSION_HASH = keccak256("1");
 
-    bytes32 private immutable _DOMAIN_SEPARATOR;
+    bytes32 private immutable _CACHED_DOMAIN_SEPARATOR;
+    uint256 private immutable _CACHED_CHAIN_ID;
 
     struct Quote {
         address oToken;
@@ -102,6 +103,7 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     );
     event PhysicalRedeemFailed(address indexed oToken, address indexed user, uint256 amount, bytes reason);
     event QuoteCancelled(address indexed mm, bytes32 indexed quoteHash);
+    event QuoteCancelSkipped(address indexed mm, bytes32 indexed quoteHash);
     event MakerNonceIncremented(address indexed mm, uint256 newNonce);
     event MMWhitelisted(address indexed mm, bool status);
 
@@ -130,6 +132,9 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     error StaleNonce();
     error QuoteAlreadyCancelled();
 
+    // Panic(uint256) selector: 0x4e487b71
+    bytes4 private constant _PANIC_SELECTOR = 0x4e487b71;
+
     // ===== Modifiers =====
 
     modifier onlyOwner() {
@@ -147,9 +152,20 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         addressBook = AddressBook(_addressBook);
         owner = msg.sender;
         operator = _operator;
-        _DOMAIN_SEPARATOR = keccak256(abi.encode(
+        _CACHED_CHAIN_ID = block.chainid;
+        _CACHED_DOMAIN_SEPARATOR = _buildDomainSeparator();
+    }
+
+    function _buildDomainSeparator() private view returns (bytes32) {
+        return keccak256(abi.encode(
             _DOMAIN_TYPEHASH, _NAME_HASH, _VERSION_HASH, block.chainid, address(this)
         ));
+    }
+
+    function _domainSeparator() private view returns (bytes32) {
+        return block.chainid == _CACHED_CHAIN_ID
+            ? _CACHED_DOMAIN_SEPARATOR
+            : _buildDomainSeparator();
     }
 
     // ===== Owner setters =====
@@ -190,6 +206,10 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     function setWhitelistedMM(address _mm, bool _status) external onlyOwner {
         if (_mm == address(0)) revert InvalidAddress();
         whitelistedMMs[_mm] = _status;
+        if (!_status) {
+            uint256 newNonce = ++makerNonce[_mm];
+            emit MakerNonceIncremented(_mm, newNonce);
+        }
         emit MMWhitelisted(_mm, _status);
     }
 
@@ -206,12 +226,12 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
             quote.maxAmount,
             quote.makerNonce
         ));
-        return keccak256(abi.encodePacked("\x19\x01", _DOMAIN_SEPARATOR, structHash));
+        return keccak256(abi.encodePacked("\x19\x01", _domainSeparator(), structHash));
     }
 
-    /// @notice Returns the EIP-712 domain separator.
+    /// @notice Returns the EIP-712 domain separator (recomputed if chain forked).
     function DOMAIN_SEPARATOR() external view returns (bytes32) {
-        return _DOMAIN_SEPARATOR;
+        return _domainSeparator();
     }
 
     /// @notice Read fill state for a quote.
@@ -236,10 +256,15 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
     }
 
     /// @notice Cancel multiple quotes. Only affects msg.sender's quotes.
+    ///         Unlike cancelQuote(), already-cancelled quotes are skipped (not reverted)
+    ///         to avoid a single duplicate aborting the entire batch.
     function cancelQuotes(bytes32[] calldata quoteHashes) external {
         for (uint256 i = 0; i < quoteHashes.length; i++) {
             uint256 state = quoteState[msg.sender][quoteHashes[i]];
-            if (state & CANCEL_BIT != 0) continue; // skip already cancelled
+            if (state & CANCEL_BIT != 0) {
+                emit QuoteCancelSkipped(msg.sender, quoteHashes[i]);
+                continue;
+            }
             quoteState[msg.sender][quoteHashes[i]] = state | CANCEL_BIT;
             emit QuoteCancelled(msg.sender, quoteHashes[i]);
         }
@@ -272,14 +297,14 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         bytes calldata signature,
         uint256 amount,
         uint256 collateral
-    ) external returns (uint256 vaultId) {
+    ) external nonReentrant returns (uint256 vaultId) {
         if (quote.oToken == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
 
         // 1. Recover MM from EIP-712 signature
         bytes32 digest = hashQuote(quote);
-        address mm = ECDSA.recover(digest, signature);
-        if (mm == address(0)) revert InvalidSignature();
+        (address mm, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signature);
+        if (err != ECDSA.RecoverError.NoError || mm == address(0)) revert InvalidSignature();
         if (!whitelistedMMs[mm]) revert MMNotWhitelisted();
 
         // 2. Validate quote liveness
@@ -356,6 +381,7 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
         for (uint256 i = 0; i < owners.length; i++) {
             try ctrl.settleVault(owners[i], vaultIds[i]) {}
             catch (bytes memory reason) {
+                _revertOnPanic(reason);
                 emit VaultSettleFailed(owners[i], vaultIds[i], reason);
             }
         }
@@ -375,6 +401,7 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
 
             try this._redeemSingle(oTokens[i], amounts[i], msg.sender, ctrl) {
             } catch (bytes memory reason) {
+                _revertOnPanic(reason);
                 emit RedeemFailed(oTokens[i], amounts[i], reason);
             }
         }
@@ -497,6 +524,7 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
 
             try this._physicalRedeemSingle(oTokens[i], users[i], amounts[i], maxCollateralSpents[i]) {
             } catch (bytes memory reason) {
+                _revertOnPanic(reason);
                 emit PhysicalRedeemFailed(oTokens[i], users[i], amounts[i], reason);
             }
         }
@@ -551,5 +579,16 @@ contract BatchSettler is ReentrancyGuard, IFlashLoanSimpleReceiver {
 
         bytes memory params = abi.encode(oToken, user, amount, maxCollateralSpent);
         IPool(aavePool).flashLoanSimple(address(this), contraAsset, contraAmount, params, 0);
+    }
+
+    /// @dev Re-reverts if `reason` is a Panic(uint256). Panics indicate bugs, not expected failures.
+    function _revertOnPanic(bytes memory reason) private pure {
+        if (reason.length >= 4) {
+            bytes4 selector;
+            assembly { selector := mload(add(reason, 32)) }
+            if (selector == _PANIC_SELECTOR) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
+        }
     }
 }
