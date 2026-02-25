@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import "forge-std/Test.sol";
 import "../src/core/Oracle.sol";
 import "../src/core/AddressBook.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract MockChainlinkFeed {
     int256 public price;
@@ -35,8 +36,17 @@ contract OracleTest is Test {
 
     function setUp() public {
         vm.warp(1700000000);
-        addressBook = new AddressBook();
-        oracle = new Oracle(address(addressBook));
+
+        addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (address(this)))
+        )));
+
+        oracle = Oracle(address(new ERC1967Proxy(
+            address(new Oracle()),
+            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+        )));
+
         ethFeed = new MockChainlinkFeed(2087e8); // $2087 in 8 decimals
 
         oracle.setPriceFeed(weth, address(ethFeed));

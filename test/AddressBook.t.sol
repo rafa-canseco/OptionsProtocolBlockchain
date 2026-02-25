@@ -3,6 +3,7 @@ pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
 import "../src/core/AddressBook.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract AddressBookTest is Test {
     AddressBook public addressBook;
@@ -10,7 +11,10 @@ contract AddressBookTest is Test {
     address public notOwner = address(0xBEEF);
 
     function setUp() public {
-        addressBook = new AddressBook();
+        addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (owner))
+        )));
     }
 
     function test_ownerIsDeployer() public view {
@@ -55,7 +59,7 @@ contract AddressBookTest is Test {
 
     function test_revertNonOwner() public {
         vm.prank(notOwner);
-        vm.expectRevert();
+        vm.expectRevert(AddressBook.OnlyOwner.selector);
         addressBook.setController(address(0x1));
     }
 

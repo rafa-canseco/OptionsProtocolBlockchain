@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import "../src/core/MarginPool.sol";
 import "../src/core/AddressBook.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract MockERC20 is ERC20 {
     constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
@@ -27,9 +28,17 @@ contract MarginPoolTest is Test {
     address public user = address(0xBEEF);
 
     function setUp() public {
-        addressBook = new AddressBook();
+        addressBook = AddressBook(address(new ERC1967Proxy(
+            address(new AddressBook()),
+            abi.encodeCall(AddressBook.initialize, (address(this)))
+        )));
         addressBook.setController(controller);
-        pool = new MarginPool(address(addressBook));
+
+        pool = MarginPool(address(new ERC1967Proxy(
+            address(new MarginPool()),
+            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+        )));
+
         usdc = new MockERC20("USDC", "USDC");
 
         // Give user some USDC and approve pool
