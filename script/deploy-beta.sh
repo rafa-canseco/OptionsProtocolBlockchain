@@ -99,7 +99,6 @@ deployment = {
         'Oracle': addrs.get('Oracle', ''),
         'Whitelist': addrs.get('Whitelist', ''),
         'BatchSettler': addrs.get('BatchSettler', ''),
-        'PriceSheet': addrs.get('PriceSheet', ''),
     },
     'config': {
         'protocolFeeBps': 400,
@@ -148,7 +147,6 @@ verify_contract "$(get_addr OTokenFactory)" "src/core/OTokenFactory.sol:OTokenFa
 verify_contract "$(get_addr Oracle)" "src/core/Oracle.sol:Oracle"
 verify_contract "$(get_addr Whitelist)" "src/core/Whitelist.sol:Whitelist"
 verify_contract "$(get_addr BatchSettler)" "src/core/BatchSettler.sol:BatchSettler"
-verify_contract "$(get_addr PriceSheet)" "src/core/PriceSheet.sol:PriceSheet"
 
 echo "[ok] Verification submitted"
 
@@ -158,7 +156,7 @@ ABI_DIR="$BLOCKCHAIN_DIR/abis"
 mkdir -p "$ABI_DIR"
 
 # Protocol contracts
-for contract in AddressBook Controller MarginPool OTokenFactory Oracle Whitelist BatchSettler PriceSheet OToken; do
+for contract in AddressBook Controller MarginPool OTokenFactory Oracle Whitelist BatchSettler OToken; do
     ABI_FILE="$BLOCKCHAIN_DIR/out/${contract}.sol/${contract}.json"
     if [ -f "$ABI_FILE" ]; then
         python3 -c "
