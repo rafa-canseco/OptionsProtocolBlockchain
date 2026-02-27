@@ -129,6 +129,28 @@ Settling an already-settled vault always reverts. The handler's
 `tryDoubleSettle` action attempts to re-settle; the
 `doubleSettleSucceeded` flag must remain false.
 
+### 16. physicalDeliveryExactAmount
+
+For every physical delivery executed by the handler, the user receives
+exactly the expected contra-asset amount. For puts: `amount * 1e10`
+WETH (the underlying). The handler records `expectedContraAmount` and
+`actualContraReceived` for each delivery and the invariant asserts
+they are equal. This validates the flash loan → redeem → swap →
+transfer pipeline delivers exact amounts with no rounding loss or
+leakage.
+
+### 17. noCallbackTampering
+
+The flash loan callback (`executeOperation`) cannot be called
+directly by an attacker. The handler's `tryCallbackTamper` action
+attempts two attack vectors:
+1. Random caller with fabricated params (redirecting funds to attacker)
+2. Correct Aave pool address but wrong initiator
+
+Both must revert. The `callbackTamperSucceeded` flag must remain
+false. This validates that the `msg.sender == aavePool` and
+`initiator == address(this)` guards prevent callback hijacking.
+
 ## Run Configuration
 
 Default profile: 256 runs, 500 calls per run.

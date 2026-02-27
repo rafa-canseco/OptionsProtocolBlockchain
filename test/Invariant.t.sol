@@ -492,11 +492,20 @@ contract FullLifecycleHandler is Test {
     uint256 nextQuoteId = 1;
     bytes32[] public executedQuoteHashes;
 
+    // Physical delivery tracking
+    struct Delivery {
+        address user;
+        uint256 expectedContraAmount; // exact amount user should receive
+        uint256 actualContraReceived; // actual delta in user's balance
+    }
+    Delivery[] public deliveries;
+
     // Violation flags
     bool public expiredMintSucceeded;
     bool public doubleSettleSucceeded;
     bool public oracleOverwriteSucceeded;
     bool public accessControlBypassed;
+    bool public callbackTamperSucceeded;
 
     constructor(
         AddressBook _ab,
@@ -670,10 +679,25 @@ contract FullLifecycleHandler is Test {
         uint256 poolBefore = usdc.balanceOf(address(pool));
         uint256 supplyBefore = OToken(oToken).totalSupply();
 
+        // Put ITM: user receives underlying (WETH)
+        // contraAmount = amount * 1e10 (WETH in 18 decimals)
+        address contraAsset = OToken(oToken).underlying();
+        uint256 expectedContra = amount * 1e10;
+        uint256 userContraBefore = IERC20(contraAsset).balanceOf(u);
+
         uint256 maxSpent = (amount * strikePrice) / 1e10;
 
         vm.prank(mm);
         settler.physicalRedeem(oToken, u, amount, maxSpent);
+
+        uint256 actualReceived =
+            IERC20(contraAsset).balanceOf(u) - userContraBefore;
+
+        deliveries.push(Delivery({
+            user: u,
+            expectedContraAmount: expectedContra,
+            actualContraReceived: actualReceived
+        }));
 
         totalPoolOutflow += poolBefore - usdc.balanceOf(address(pool));
         totalOTokensBurned += supplyBefore - OToken(oToken).totalSupply();
@@ -752,7 +776,38 @@ contract FullLifecycleHandler is Test {
         vm.stopPrank();
     }
 
+    // --- Negative: try calling executeOperation directly (callback tampering) ---
+    function tryCallbackTamper() external {
+        if (!isExpired) return;
+        if (settlementPrice >= strikePrice) return; // need ITM
+
+        address attacker = address(0xDEAD);
+        bytes memory fakeParams = abi.encode(
+            oToken, attacker, uint256(1e8), uint256(2000e6)
+        );
+
+        // Attempt 1: random caller (not aavePool)
+        vm.prank(attacker);
+        try settler.executeOperation(
+            address(weth), 1e18, 0, address(settler), fakeParams
+        ) {
+            callbackTamperSucceeded = true;
+        } catch {}
+
+        // Attempt 2: correct aavePool but wrong initiator
+        address aave = settler.aavePool();
+        vm.prank(aave);
+        try settler.executeOperation(
+            address(weth), 1e18, 0, attacker, fakeParams
+        ) {
+            callbackTamperSucceeded = true;
+        } catch {}
+    }
+
     // --- View helpers ---
+    function deliveryCount() external view returns (uint256) {
+        return deliveries.length;
+    }
     function vaultCount() external view returns (uint256) {
         return allVaultOwners.length;
     }
@@ -987,5 +1042,27 @@ contract FullLifecycleInvariantTest is Test {
     /// @notice INV-10: Settling an already-settled vault always reverts
     function invariant_noDoubleSettle() public view {
         assertFalse(handler.doubleSettleSucceeded());
+    }
+
+    /// @notice INV-11: Physical delivery sends exact contra-asset amount
+    /// For puts: user receives exactly amount * 1e10 WETH
+    function invariant_physicalDeliveryExactAmount() public view {
+        for (uint256 i = 0; i < handler.deliveryCount(); i++) {
+            (
+                ,
+                uint256 expected,
+                uint256 actual
+            ) = handler.deliveries(i);
+            assertEq(
+                actual,
+                expected,
+                "delivery amount mismatch"
+            );
+        }
+    }
+
+    /// @notice INV-12: Flash loan callback cannot be hijacked
+    function invariant_noCallbackTampering() public view {
+        assertFalse(handler.callbackTamperSucceeded());
     }
 }
