@@ -506,6 +506,7 @@ contract FullLifecycleHandler is Test {
     bool public oracleOverwriteSucceeded;
     bool public accessControlBypassed;
     bool public callbackTamperSucceeded;
+    bool public staleNonceQuoteFilled;
 
     constructor(
         AddressBook _ab,
@@ -804,6 +805,35 @@ contract FullLifecycleHandler is Test {
         } catch {}
     }
 
+    // --- Negative: makerNonce invalidation (circuit breaker) ---
+    function tryStaleNonceQuote(uint256 userIdx, uint256 amount) external {
+        if (isExpired) return;
+        userIdx = bound(userIdx, 0, NUM_USERS - 1);
+        amount = bound(amount, 1, 10e8);
+
+        address u = users[userIdx];
+        uint256 collateral = (amount * strikePrice) / 1e10;
+
+        // 1. Sign a valid quote at the current nonce
+        (BatchSettler.Quote memory q, bytes memory sig,) =
+            _signQuote(amount);
+
+        // 2. MM increments nonce (circuit breaker)
+        vm.prank(mm);
+        settler.incrementMakerNonce();
+
+        // 3. Try to fill the now-stale quote — must revert
+        vm.prank(u);
+        try settler.executeOrder(q, sig, amount, collateral) {
+            staleNonceQuoteFilled = true;
+        } catch {}
+
+        // 4. Restore nonce state: sign a fresh no-op quote so
+        //    the handler's other actions still work. The nonce
+        //    has been permanently incremented; _signQuote reads
+        //    the live nonce, so subsequent calls are fine.
+    }
+
     // --- View helpers ---
     function deliveryCount() external view returns (uint256) {
         return deliveries.length;
@@ -1064,5 +1094,10 @@ contract FullLifecycleInvariantTest is Test {
     /// @notice INV-12: Flash loan callback cannot be hijacked
     function invariant_noCallbackTampering() public view {
         assertFalse(handler.callbackTamperSucceeded());
+    }
+
+    /// @notice INV-13: makerNonce invalidation kills all prior quotes
+    function invariant_makerNonceInvalidation() public view {
+        assertFalse(handler.staleNonceQuoteFilled());
     }
 }

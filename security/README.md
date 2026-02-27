@@ -48,9 +48,9 @@ Out of scope: mock contracts (`src/mocks/`), test files, interfaces.
 | Unit | 8 files | 175 | 175 |
 | Fuzz | 1 file | 22 | 5,632 |
 | Invariant (original) | 1 file | 5 | 1,280 |
-| Invariant (new lifecycle) | 1 file | 12 | 3,072 |
+| Invariant (new lifecycle) | 1 file | 13 | 3,328 |
 | Upgrade | 1 file | 50 | 50 |
-| **Total** | **12 files** | **259** | — |
+| **Total** | **12 files** | **260** | — |
 
 ## Artifacts
 

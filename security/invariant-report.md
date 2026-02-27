@@ -151,6 +151,18 @@ Both must revert. The `callbackTamperSucceeded` flag must remain
 false. This validates that the `msg.sender == aavePool` and
 `initiator == address(this)` guards prevent callback hijacking.
 
+### 18. makerNonceInvalidation
+
+After `incrementMakerNonce()`, all previously-signed quotes become
+unfillable. The handler's `tryStaleNonceQuote` action:
+1. Signs a valid quote at the current nonce
+2. MM calls `incrementMakerNonce()` (circuit breaker)
+3. Attempts to fill the now-stale quote
+
+The fill must revert with `StaleNonce`. The `staleNonceQuoteFilled`
+flag must remain false. This validates the bulk cancellation mechanism
+that lets MMs invalidate all outstanding quotes in a single tx.
+
 ## Run Configuration
 
 Default profile: 256 runs, 500 calls per run.
