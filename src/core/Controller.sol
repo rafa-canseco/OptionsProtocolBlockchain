@@ -60,7 +60,6 @@ contract Controller is Initializable, UUPSUpgradeable {
     error InsufficientCollateral();
     error NoOtokensToRedeem();
     error OTokenNotWhitelisted();
-    error OptionExpired();
     error Unauthorized();
     error InvalidAddress();
 
@@ -140,8 +139,6 @@ contract Controller is Initializable, UUPSUpgradeable {
         if (!wl.isWhitelistedOToken(_oToken)) revert OTokenNotWhitelisted();
 
         OToken oToken = OToken(_oToken);
-
-        if (!betaMode && block.timestamp >= oToken.expiry()) revert OptionExpired();
 
         uint256 requiredCollateral = _getRequiredCollateral(oToken, _amount);
         if (vault.collateralAmount < requiredCollateral) revert InsufficientCollateral();

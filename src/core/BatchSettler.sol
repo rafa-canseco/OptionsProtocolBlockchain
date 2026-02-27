@@ -109,8 +109,6 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     event QuoteCancelSkipped(address indexed mm, bytes32 indexed quoteHash);
     event MakerNonceIncremented(address indexed mm, uint256 newNonce);
     event MMWhitelisted(address indexed mm, bool status);
-    event ProtocolFeeBpsUpdated(uint256 oldFeeBps, uint256 newFeeBps);
-    event SwapFeeTierUpdated(uint24 oldFeeTier, uint24 newFeeTier);
 
     // ===== Errors =====
 
@@ -193,7 +191,6 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     function setProtocolFeeBps(uint256 _feeBps) external onlyOwner {
         if (_feeBps > 2000) revert FeeTooHigh();
-        emit ProtocolFeeBpsUpdated(protocolFeeBps, _feeBps);
         protocolFeeBps = _feeBps;
     }
 
@@ -211,7 +208,6 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         if (_feeTier != 100 && _feeTier != 500 && _feeTier != 3000 && _feeTier != 10000) {
             revert InvalidFeeTier();
         }
-        emit SwapFeeTierUpdated(swapFeeTier, _feeTier);
         swapFeeTier = _feeTier;
     }
 
@@ -424,7 +420,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         address user,
         uint256 amount,
         uint256 maxCollateralSpent
-    ) public nonReentrant onlyOperator {
+    ) public onlyOperator nonReentrant {
         _executePhysicalRedeem(oToken, user, amount, maxCollateralSpent);
     }
 
