@@ -36,6 +36,7 @@ contract OTokenFactory is Initializable, UUPSUpgradeable {
 
     error OTokenAlreadyExists();
     error InvalidExpiry();
+    error AssetNotWhitelisted();
     error InvalidAddress();
     error InvalidStrikePrice();
     error Unauthorized();
