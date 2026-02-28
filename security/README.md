@@ -48,10 +48,10 @@ Out of scope: mock contracts (`src/mocks/`), test files, interfaces.
 | Unit | 8 files | 175 | 175 |
 | Fuzz | 1 file | 22 | 5,632 |
 | Invariant (original) | 1 file | 5 | 1,280 |
-| Invariant (new lifecycle) | 1 file | 13 | 3,328 |
+| Invariant (lifecycle PUT+CALL) | 1 file | 13 | 3,328 |
 | Upgrade | 1 file | 50 | 50 |
-| Fork (Base mainnet) | 1 file | 3 | 3 |
-| **Total** | **13 files** | **263** | — |
+| Fork (Base mainnet, PUT+CALL) | 1 file | 4 | 4 |
+| **Total** | **13 files** | **264** | — |
 
 ## Artifacts
 
@@ -77,8 +77,9 @@ forge test --match-path test/Invariant.t.sol -vv
 # Run with security profile (10K fuzz, 1K invariant depth 100)
 FOUNDRY_PROFILE=security forge test -vv
 
-# Fork test (physical delivery against real Aave + Uniswap on Base)
-NO_PROXY="*" forge test --match-contract ForkPhysicalRedeemTest \
+# Fork test (PUT+CALL physical delivery against real Aave + Uniswap on Base)
+# Pinned to block 42733000 for deterministic results
+forge test --match-contract ForkPhysicalRedeemTest \
   --fork-url $BASE_RPC_URL -vvv
 
 # Static analysis

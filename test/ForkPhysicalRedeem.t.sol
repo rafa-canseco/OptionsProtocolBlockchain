@@ -17,11 +17,9 @@ import "../src/core/BatchSettler.sol";
  * @title ForkPhysicalRedeemTest
  * @notice Fork test against Base mainnet — verifies the physical
  *         delivery pipeline (Aave flash loan + Uniswap V3 swap)
- *         works with real external contracts.
+ *         works with real external contracts for both PUT and CALL.
  *
- *         Scenario: ETH put option, strike $2000, ITM at $1800.
- *         User bought 1 put → after expiry, physical delivery
- *         gives user 1e18 WETH via flash loan + swap.
+ *         Pinned to block 42733000 for deterministic results.
  *
  *         Run: forge test --match-contract ForkPhysicalRedeemTest
  *              --fork-url $BASE_RPC_URL -vvv
@@ -33,6 +31,9 @@ contract ForkPhysicalRedeemTest is Test {
     address constant AAVE_POOL = 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5;
     address constant SWAP_ROUTER = 0x2626664c2603336E57B271c5C0b26F421741e481;
     address constant CHAINLINK_ETH_USD = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
+
+    // Pinned block for deterministic fork
+    uint256 constant FORK_BLOCK = 42733000;
 
     // Protocol
     AddressBook addressBook;
@@ -52,9 +53,9 @@ contract ForkPhysicalRedeemTest is Test {
 
     // Option params
     uint256 strikePrice = 2000e8;
-    uint256 settlementPrice = 1800e8;
     uint256 expiry;
-    address oToken;
+    address putOToken;
+    address callOToken;
 
     uint256 nextQuoteId = 1;
 
@@ -69,12 +70,15 @@ contract ForkPhysicalRedeemTest is Test {
     function setUp() public {
         if (block.chainid != 8453) return;
 
+        // Pin to specific block for determinism
+        vm.rollFork(FORK_BLOCK);
+
         admin = address(this);
         mm = vm.addr(mmKey);
 
         _deployProtocol();
         _configureSettler();
-        _createOption();
+        _createOptions();
         _fundActors();
     }
 
@@ -146,33 +150,43 @@ contract ForkPhysicalRedeemTest is Test {
 
         whitelist.whitelistUnderlying(WETH);
         whitelist.whitelistCollateral(USDC);
+        whitelist.whitelistCollateral(WETH);
         whitelist.whitelistProduct(WETH, USDC, USDC, true);
+        whitelist.whitelistProduct(WETH, USDC, WETH, false);
     }
 
-    function _createOption() private {
+    function _createOptions() private {
         uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
         expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
 
-        oToken = factory.createOToken(WETH, USDC, USDC, strikePrice, expiry, true);
-        whitelist.whitelistOToken(oToken);
+        putOToken = factory.createOToken(WETH, USDC, USDC, strikePrice, expiry, true);
+        callOToken = factory.createOToken(WETH, USDC, WETH, strikePrice, expiry, false);
+        whitelist.whitelistOToken(putOToken);
+        whitelist.whitelistOToken(callOToken);
     }
 
     function _fundActors() private {
-        deal(USDC, user, 10_000e6);
-        deal(USDC, mm, 10_000e6);
+        deal(USDC, user, 100_000e6);
+        deal(USDC, mm, 100_000e6);
+        deal(WETH, user, 100e18);
+        deal(WETH, mm, 100e18);
 
-        vm.prank(user);
+        vm.startPrank(user);
         IERC20(USDC).approve(address(pool), type(uint256).max);
+        IERC20(WETH).approve(address(pool), type(uint256).max);
+        vm.stopPrank();
 
         vm.startPrank(mm);
         IERC20(USDC).approve(address(settler), type(uint256).max);
-        IERC20(oToken).approve(address(settler), type(uint256).max);
+        IERC20(WETH).approve(address(settler), type(uint256).max);
+        IERC20(putOToken).approve(address(settler), type(uint256).max);
+        IERC20(callOToken).approve(address(settler), type(uint256).max);
         vm.stopPrank();
     }
 
-    function _signQuote() internal returns (BatchSettler.Quote memory q, bytes memory sig) {
+    function _signQuote(address _oToken) internal returns (BatchSettler.Quote memory q, bytes memory sig) {
         q = BatchSettler.Quote({
-            oToken: oToken,
+            oToken: _oToken,
             bidPrice: 50e6,
             deadline: block.timestamp + 1 hours,
             quoteId: nextQuoteId++,
@@ -184,51 +198,83 @@ contract ForkPhysicalRedeemTest is Test {
         sig = abi.encodePacked(r, s, v);
     }
 
-    function test_physicalDelivery_realAaveUniswap() public onlyFork {
+    // --- PUT physical delivery (collateral=USDC, user receives WETH) ---
+
+    function test_physicalDelivery_put_realAaveUniswap() public onlyFork {
         uint256 amount = 1e8;
-        uint256 collateral = (amount * strikePrice) / 1e10;
+        uint256 collateral = (amount * strikePrice) / 1e10; // 2000 USDC
 
-        // Step 1: Execute order (user buys put)
-        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote();
-
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(putOToken);
         vm.prank(user);
         uint256 vaultId = settler.executeOrder(q, sig, amount, collateral);
 
-        assertEq(IERC20(oToken).balanceOf(mm), amount, "MM should hold oTokens");
-        assertEq(IERC20(USDC).balanceOf(address(pool)), collateral, "Pool should hold collateral");
-
-        // Step 2: Expire ITM
+        // Expire ITM (put: price < strike)
         vm.warp(expiry + 1);
-        oracle.setExpiryPrice(WETH, expiry, settlementPrice);
+        oracle.setExpiryPrice(WETH, expiry, 1800e8);
 
-        // Step 3: Settle vault
         address[] memory owners = new address[](1);
         uint256[] memory ids = new uint256[](1);
         owners[0] = user;
         ids[0] = vaultId;
-
         vm.prank(mm);
         settler.batchSettleVaults(owners, ids);
-        assertTrue(controller.vaultSettled(user, vaultId), "Vault should be settled");
 
-        // Step 4: Physical redeem
         uint256 userWethBefore = IERC20(WETH).balanceOf(user);
-        uint256 expectedWeth = amount * 1e10;
+        uint256 expectedWeth = amount * 1e10; // 1e18
 
         vm.prank(mm);
-        settler.physicalRedeem(oToken, user, amount, collateral);
+        settler.physicalRedeem(putOToken, user, amount, collateral);
 
         uint256 wethReceived = IERC20(WETH).balanceOf(user) - userWethBefore;
+        assertEq(wethReceived, expectedWeth, "User must receive exact WETH");
+        assertEq(IERC20(USDC).balanceOf(address(settler)), 0, "Settler 0 USDC");
+        assertEq(IERC20(WETH).balanceOf(address(settler)), 0, "Settler 0 WETH");
 
-        // Step 5: User received exactly expected WETH
-        assertEq(wethReceived, expectedWeth, "User must receive exact WETH amount");
-
-        // Step 6: Settler holds 0 tokens
-        assertEq(IERC20(USDC).balanceOf(address(settler)), 0, "Settler must hold 0 USDC");
-        assertEq(IERC20(WETH).balanceOf(address(settler)), 0, "Settler must hold 0 WETH");
-
-        emit log_named_uint("WETH delivered to user", wethReceived);
+        emit log_named_uint("PUT: WETH delivered to user", wethReceived);
     }
+
+    // --- CALL physical delivery (collateral=WETH, user receives USDC) ---
+
+    function test_physicalDelivery_call_realAaveUniswap() public onlyFork {
+        uint256 amount = 1e8; // 1 call option
+        uint256 collateral = amount * 1e10; // 1e18 WETH
+
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(callOToken);
+        vm.prank(user);
+        uint256 vaultId = settler.executeOrder(q, sig, amount, collateral);
+
+        assertEq(IERC20(callOToken).balanceOf(mm), amount, "MM holds call oTokens");
+        assertEq(IERC20(WETH).balanceOf(address(pool)), collateral, "Pool holds WETH collateral");
+
+        // Expire ITM (call: price > strike)
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(WETH, expiry, 2200e8);
+
+        address[] memory owners = new address[](1);
+        uint256[] memory ids = new uint256[](1);
+        owners[0] = user;
+        ids[0] = vaultId;
+        vm.prank(mm);
+        settler.batchSettleVaults(owners, ids);
+        assertTrue(controller.vaultSettled(user, vaultId), "Vault settled");
+
+        // Physical delivery: user receives USDC (strikeAsset)
+        // contraAmount = (amount * strike) / 1e10 = 2000e6
+        uint256 userUsdcBefore = IERC20(USDC).balanceOf(user);
+        uint256 expectedUsdc = (amount * strikePrice) / 1e10;
+
+        vm.prank(mm);
+        settler.physicalRedeem(callOToken, user, amount, collateral);
+
+        uint256 usdcReceived = IERC20(USDC).balanceOf(user) - userUsdcBefore;
+        assertEq(usdcReceived, expectedUsdc, "User must receive exact USDC");
+        assertEq(IERC20(USDC).balanceOf(address(settler)), 0, "Settler 0 USDC");
+        assertEq(IERC20(WETH).balanceOf(address(settler)), 0, "Settler 0 WETH");
+
+        emit log_named_uint("CALL: USDC delivered to user", usdcReceived);
+    }
+
+    // --- Chainlink price sanity ---
 
     function test_chainlinkLivePrice() public onlyFork {
         uint256 price = oracle.getPrice(WETH);
@@ -238,9 +284,11 @@ contract ForkPhysicalRedeemTest is Test {
         emit log_named_uint("Chainlink ETH/USD (8 dec)", price);
     }
 
+    // --- Flash loan callback rejection ---
+
     function test_flashLoanCallback_realAave_rejectsAttacker() public onlyFork {
         address attacker = address(0xDEAD);
-        bytes memory fakeParams = abi.encode(oToken, attacker, uint256(1e8), uint256(2000e6));
+        bytes memory fakeParams = abi.encode(putOToken, attacker, uint256(1e8), uint256(2000e6));
 
         vm.prank(attacker);
         vm.expectRevert(BatchSettler.FlashLoanUnauthorized.selector);

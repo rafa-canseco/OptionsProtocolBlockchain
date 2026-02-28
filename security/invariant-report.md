@@ -37,19 +37,25 @@ try/catch in the loop ensures graceful degradation.
 
 ## Full Lifecycle Invariants (FullLifecycleHandler)
 
-Scope: complete options lifecycle — order execution, expiry, vault
-settlement, cash redemption, physical delivery, plus negative tests.
+Scope: complete options lifecycle for both PUT and CALL options —
+order execution, expiry, vault settlement, cash redemption, physical
+delivery, plus negative tests. Each run randomly creates puts
+(collateral=USDC) and calls (collateral=WETH) to exercise both
+code paths through the protocol.
 
 Handler actions:
-- `executeOrder` — pre-expiry: sign EIP-712 quote, execute via BatchSettler
+- `executeOrder` — pre-expiry: randomly pick PUT or CALL, sign EIP-712 quote, execute via BatchSettler
 - `expire` — one-shot: warp to expiry+1, set oracle + chainlink prices
-- `settleVault` — post-expiry: settle via batchSettleVaults
-- `redeemTokens` — post-expiry: MM redeems via batchRedeem
-- `physicalRedeem` — post-expiry ITM: flash loan + swap delivery
-- `tryMintExpired` — negative: attempt mint after expiry
+- `settleVault` — post-expiry: settle via batchSettleVaults (handles both USDC and WETH outflows)
+- `redeemTokens` — post-expiry: MM redeems random put/call oTokens via batchRedeem
+- `physicalRedeemPut` — post-expiry ITM put: flash loan WETH + swap USDC→WETH delivery
+- `physicalRedeemCall` — post-expiry ITM call: flash loan USDC + swap WETH→USDC delivery
+- `tryMintExpired` — negative: attempt mint after expiry (both token types)
 - `tryDoubleSettle` — negative: attempt re-settle
 - `tryOverwriteOracle` — negative: attempt oracle price overwrite
 - `tryUnauthorizedCall` — negative: test 6 privileged functions
+- `tryCallbackTamper` — negative: attempt flash loan callback hijacking
+- `tryStaleNonceQuote` — negative: attempt fill after nonce increment
 
 ### 6. noExpiredMint
 
@@ -63,13 +69,17 @@ OptionExpired()` to `mintOtoken`.
 
 ### 7. collateralConservation
 
-MarginPool's USDC balance equals `totalPoolInflow - totalPoolOutflow`
-tracked by the handler. Every token entering or leaving the pool is
-accounted for.
+MarginPool's USDC and WETH balances each equal
+`totalPoolInflow - totalPoolOutflow` tracked by the handler. Both
+collateral types are verified independently.
 
-Inflows: collateral deposits during `executeOrder`.
-Outflows: collateral returned during `settleVault`, payouts during
-`redeemTokens` and `physicalRedeem`.
+USDC inflows: PUT collateral deposits during `executeOrder`.
+USDC outflows: collateral returned during PUT `settleVault`, payouts
+during PUT `redeemTokens` and `physicalRedeemPut`.
+
+WETH inflows: CALL collateral deposits during `executeOrder`.
+WETH outflows: collateral returned during CALL `settleVault`, payouts
+during CALL `redeemTokens` and `physicalRedeemCall`.
 
 ### 8. premiumConservation
 
@@ -104,11 +114,13 @@ All must revert. The `accessControlBypassed` flag must remain false.
 
 ### 12. itmSettleReturnsZero
 
-For ITM-settled vaults (expiry price < strike for puts), the vault's
-`collateralAmount` exactly equals the payout obligation. The writer
-receives 0 collateral back. This validates the payout math:
-`payout = amount * strike / 1e10` consumes 100% of deposited
-collateral for puts.
+For ITM-settled vaults, the vault's `collateralAmount` exactly equals
+the payout obligation. The writer receives 0 collateral back. This
+validates the payout math for both option types:
+- PUT ITM (expiryPrice < strike): `payout = amount * strike / 1e10`
+  consumes 100% of deposited USDC collateral
+- CALL ITM (expiryPrice > strike): `payout = amount * 1e10` consumes
+  100% of deposited WETH collateral
 
 ### 13. quoteFillNeverExceedsMax
 
@@ -118,10 +130,12 @@ BatchSettler's fill tracking correctly prevents over-fill.
 
 ### 14. vaultOTokenConsistency
 
-`sum(vault.shortAmount)` for all tracked vaults equals
-`oToken.totalSupply() + totalOTokensBurned`. Every minted oToken is
-accounted for — either still circulating or burned via
-redeem/settlement.
+For each option type separately:
+`sum(vault.shortAmount)` for all put (or call) vaults equals
+`oToken.totalSupply() + totalOTokensBurned` for that token type.
+Every minted oToken is accounted for — either still circulating or
+burned via redeem/settlement. Put and call tokens are tracked
+independently to ensure cross-type accounting is correct.
 
 ### 15. noDoubleSettle
 
@@ -132,12 +146,16 @@ Settling an already-settled vault always reverts. The handler's
 ### 16. physicalDeliveryExactAmount
 
 For every physical delivery executed by the handler, the user receives
-exactly the expected contra-asset amount. For puts: `amount * 1e10`
-WETH (the underlying). The handler records `expectedContraAmount` and
-`actualContraReceived` for each delivery and the invariant asserts
-they are equal. This validates the flash loan → redeem → swap →
-transfer pipeline delivers exact amounts with no rounding loss or
-leakage.
+exactly the expected contra-asset amount:
+- PUT: user receives `amount * 1e10` WETH (the underlying) via
+  flash loan WETH → redeem USDC → swap USDC→WETH → repay
+- CALL: user receives `(amount * strike) / 1e10` USDC (the strike
+  asset) via flash loan USDC → redeem WETH → swap WETH→USDC → repay
+
+The handler records `expectedContraAmount` and `actualContraReceived`
+for each delivery and the invariant asserts they are equal. This
+validates the flash loan → redeem → swap → transfer pipeline delivers
+exact amounts with no rounding loss or leakage for both directions.
 
 ### 17. noCallbackTampering
 

@@ -488,7 +488,8 @@ struct LifecycleContracts {
 }
 
 struct LifecycleConfig {
-    address oToken;
+    address putOToken;
+    address callOToken;
     uint256 expiry;
     uint256 strikePrice;
     uint256 mmKey;
@@ -513,7 +514,8 @@ contract FullLifecycleHandler is Test {
     address public admin;
     address public treasury;
 
-    address public oToken;
+    address public putOToken;
+    address public callOToken;
     uint256 public expiry;
     uint256 public strikePrice;
 
@@ -526,17 +528,21 @@ contract FullLifecycleHandler is Test {
     bool public isExpired;
     uint256 public settlementPrice;
 
-    // Accounting
-    uint256 public totalPoolInflow;
-    uint256 public totalPoolOutflow;
+    // Accounting (tracked per asset)
+    uint256 public totalPoolInflowUsdc;
+    uint256 public totalPoolOutflowUsdc;
+    uint256 public totalPoolInflowWeth;
+    uint256 public totalPoolOutflowWeth;
     uint256 public totalGrossPremium;
     uint256 public totalNetPremium;
     uint256 public totalFees;
-    uint256 public totalOTokensBurned;
+    uint256 public totalPutOTokensBurned;
+    uint256 public totalCallOTokensBurned;
 
     // Vault tracking (parallel arrays)
     address[] public allVaultOwners;
     uint256[] public allVaultIds;
+    bool[] public allVaultIsPut;
 
     // Quote tracking
     uint256 nextQuoteId = 1;
@@ -568,7 +574,8 @@ contract FullLifecycleHandler is Test {
         usdc = c.usdc;
         weth = c.weth;
         priceFeed = c.priceFeed;
-        oToken = cfg.oToken;
+        putOToken = cfg.putOToken;
+        callOToken = cfg.callOToken;
         expiry = cfg.expiry;
         strikePrice = cfg.strikePrice;
         mmKey = cfg.mmKey;
@@ -580,19 +587,22 @@ contract FullLifecycleHandler is Test {
             address u = address(uint160(0xC000 + i));
             users.push(u);
             usdc.mint(u, 100_000_000e6);
+            weth.mint(u, 100_000e18);
             vm.startPrank(u);
             usdc.approve(address(pool), type(uint256).max);
-            IERC20(cfg.oToken).approve(address(settler), type(uint256).max);
+            weth.approve(address(pool), type(uint256).max);
+            IERC20(cfg.putOToken).approve(address(settler), type(uint256).max);
+            IERC20(cfg.callOToken).approve(address(settler), type(uint256).max);
             vm.stopPrank();
         }
     }
 
-    function _signQuote()
+    function _signQuote(address _oToken)
         internal
         returns (BatchSettler.Quote memory q, bytes memory sig, bytes32 digest)
     {
         q = BatchSettler.Quote({
-            oToken: oToken,
+            oToken: _oToken,
             bidPrice: BID_PRICE,
             deadline: block.timestamp + 1 hours,
             quoteId: nextQuoteId++,
@@ -604,22 +614,28 @@ contract FullLifecycleHandler is Test {
         sig = abi.encodePacked(r, s, v);
     }
 
-    // --- Pre-expiry: execute order ---
-    function executeOrder(uint256 userIdx, uint256 amount) external {
+    // --- Pre-expiry: execute order (randomly picks put or call) ---
+    function executeOrder(uint256 userIdx, uint256 amount, uint256 optionSeed) external {
         if (isExpired) return;
         userIdx = bound(userIdx, 0, NUM_USERS - 1);
         amount = bound(amount, 1, 10e8);
 
+        bool isPut = (optionSeed % 2 == 0);
+        address token = isPut ? putOToken : callOToken;
         address u = users[userIdx];
-        uint256 collateral = (amount * strikePrice) / 1e10;
 
-        (BatchSettler.Quote memory q, bytes memory sig, bytes32 digest) = _signQuote();
+        // Put: USDC collateral = amount * strike / 1e10
+        // Call: WETH collateral = amount * 1e10
+        uint256 collateral = isPut ? (amount * strikePrice) / 1e10 : amount * 1e10;
+
+        (BatchSettler.Quote memory q, bytes memory sig, bytes32 digest) = _signQuote(token);
 
         vm.prank(u);
         uint256 vaultId = settler.executeOrder(q, sig, amount, collateral);
 
         allVaultOwners.push(u);
         allVaultIds.push(vaultId);
+        allVaultIsPut.push(isPut);
 
         uint256 premium = (amount * BID_PRICE) / 1e8;
         uint256 feeBps = settler.protocolFeeBps();
@@ -630,7 +646,11 @@ contract FullLifecycleHandler is Test {
         totalGrossPremium += premium;
         totalNetPremium += (premium - fee);
         totalFees += fee;
-        totalPoolInflow += collateral;
+        if (isPut) {
+            totalPoolInflowUsdc += collateral;
+        } else {
+            totalPoolInflowWeth += collateral;
+        }
         executedQuoteHashes.push(digest);
     }
 
@@ -659,7 +679,8 @@ contract FullLifecycleHandler is Test {
         uint256 vid = allVaultIds[vaultIdx];
         if (controller.vaultSettled(vOwner, vid)) return;
 
-        uint256 poolBefore = usdc.balanceOf(address(pool));
+        uint256 usdcBefore = usdc.balanceOf(address(pool));
+        uint256 wethBefore = weth.balanceOf(address(pool));
 
         address[] memory owners = new address[](1);
         uint256[] memory ids = new uint256[](1);
@@ -669,74 +690,110 @@ contract FullLifecycleHandler is Test {
         vm.prank(mm);
         settler.batchSettleVaults(owners, ids);
 
-        totalPoolOutflow += poolBefore - usdc.balanceOf(address(pool));
+        totalPoolOutflowUsdc += usdcBefore - usdc.balanceOf(address(pool));
+        totalPoolOutflowWeth += wethBefore - weth.balanceOf(address(pool));
     }
 
-    // --- Post-expiry: redeem oTokens (MM redeems) ---
-    function redeemTokens(uint256 amount) external {
+    // --- Post-expiry: redeem oTokens (MM redeems both types) ---
+    function redeemTokens(uint256 amount, uint256 tokenSeed) external {
         if (!isExpired) return;
-        uint256 bal = IERC20(oToken).balanceOf(mm);
-        if (bal == 0) return;
+
+        // Pick put or call based on seed, fallback to whichever has balance
+        bool pickPut = (tokenSeed % 2 == 0);
+        address token;
+        if (pickPut && IERC20(putOToken).balanceOf(mm) > 0) {
+            token = putOToken;
+        } else if (IERC20(callOToken).balanceOf(mm) > 0) {
+            token = callOToken;
+        } else if (IERC20(putOToken).balanceOf(mm) > 0) {
+            token = putOToken;
+        } else {
+            return;
+        }
+
+        uint256 bal = IERC20(token).balanceOf(mm);
         amount = bound(amount, 1, bal);
 
-        uint256 poolBefore = usdc.balanceOf(address(pool));
-        uint256 supplyBefore = OToken(oToken).totalSupply();
+        uint256 usdcBefore = usdc.balanceOf(address(pool));
+        uint256 wethBefore = weth.balanceOf(address(pool));
+        uint256 supplyBefore = OToken(token).totalSupply();
 
         address[] memory tokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
-        tokens[0] = oToken;
+        tokens[0] = token;
         amounts[0] = amount;
 
         vm.prank(mm);
         settler.batchRedeem(tokens, amounts);
 
-        totalPoolOutflow += poolBefore - usdc.balanceOf(address(pool));
-        totalOTokensBurned += supplyBefore - OToken(oToken).totalSupply();
+        totalPoolOutflowUsdc += usdcBefore - usdc.balanceOf(address(pool));
+        totalPoolOutflowWeth += wethBefore - weth.balanceOf(address(pool));
+        if (token == putOToken) {
+            totalPutOTokensBurned += supplyBefore - OToken(token).totalSupply();
+        } else {
+            totalCallOTokensBurned += supplyBefore - OToken(token).totalSupply();
+        }
     }
 
-    // --- Post-expiry, ITM: physical delivery via flash loan + swap ---
-    function physicalRedeem(uint256 userIdx, uint256 amount) external {
+    // --- Post-expiry, ITM: physical delivery (put or call) ---
+    function physicalRedeemPut(uint256 userIdx, uint256 amount) external {
         if (!isExpired) return;
-        if (settlementPrice >= strikePrice) return; // OTM, skip
+        if (settlementPrice >= strikePrice) return; // Put OTM
+        _physicalRedeem(putOToken, true, userIdx, amount);
+    }
 
+    function physicalRedeemCall(uint256 userIdx, uint256 amount) external {
+        if (!isExpired) return;
+        if (settlementPrice <= strikePrice) return; // Call OTM
+        _physicalRedeem(callOToken, false, userIdx, amount);
+    }
+
+    function _physicalRedeem(address token, bool isPut, uint256 userIdx, uint256 amount) private {
         userIdx = bound(userIdx, 0, NUM_USERS - 1);
         address u = users[userIdx];
 
-        uint256 mmBal = IERC20(oToken).balanceOf(mm);
+        uint256 mmBal = IERC20(token).balanceOf(mm);
         if (mmBal == 0) return;
         amount = bound(amount, 1, mmBal);
 
-        uint256 poolBefore = usdc.balanceOf(address(pool));
-        uint256 supplyBefore = OToken(oToken).totalSupply();
+        uint256 usdcBefore = usdc.balanceOf(address(pool));
+        uint256 wethBefore = weth.balanceOf(address(pool));
+        uint256 supplyBefore = OToken(token).totalSupply();
 
-        // Put ITM: user receives underlying (WETH)
-        // contraAmount = amount * 1e10 (WETH in 18 decimals)
-        address contraAsset = OToken(oToken).underlying();
-        uint256 expectedContra = amount * 1e10;
+        // Put: user receives WETH (underlying), contra = amount * 1e10
+        // Call: user receives USDC (strikeAsset), contra = (amount * strike) / 1e10
+        address contraAsset = isPut ? address(weth) : address(usdc);
+        uint256 expectedContra = isPut ? amount * 1e10 : (amount * strikePrice) / 1e10;
         uint256 userContraBefore = IERC20(contraAsset).balanceOf(u);
 
-        uint256 maxSpent = (amount * strikePrice) / 1e10;
+        // maxCollateralSpent: put=USDC collateral, call=WETH collateral
+        uint256 maxSpent = isPut ? (amount * strikePrice) / 1e10 : amount * 1e10;
 
         vm.prank(mm);
-        settler.physicalRedeem(oToken, u, amount, maxSpent);
+        settler.physicalRedeem(token, u, amount, maxSpent);
 
         uint256 actualReceived = IERC20(contraAsset).balanceOf(u) - userContraBefore;
-
         deliveries.push(Delivery({user: u, expectedContraAmount: expectedContra, actualContraReceived: actualReceived}));
 
-        totalPoolOutflow += poolBefore - usdc.balanceOf(address(pool));
-        totalOTokensBurned += supplyBefore - OToken(oToken).totalSupply();
+        totalPoolOutflowUsdc += usdcBefore - usdc.balanceOf(address(pool));
+        totalPoolOutflowWeth += wethBefore - weth.balanceOf(address(pool));
+        if (isPut) {
+            totalPutOTokensBurned += supplyBefore - OToken(token).totalSupply();
+        } else {
+            totalCallOTokensBurned += supplyBefore - OToken(token).totalSupply();
+        }
     }
 
     // --- Negative: try mint after expiry (should revert) ---
-    function tryMintExpired(uint256 userIdx) external {
+    function tryMintExpired(uint256 userIdx, uint256 tokenSeed) external {
         if (!isExpired) return;
         userIdx = bound(userIdx, 0, NUM_USERS - 1);
         address u = users[userIdx];
         if (controller.vaultCount(u) == 0) return;
 
+        address token = (tokenSeed % 2 == 0) ? putOToken : callOToken;
         vm.prank(u);
-        try controller.mintOtoken(u, 1, oToken, 1, u) {
+        try controller.mintOtoken(u, 1, token, 1, u) {
             expiredMintSucceeded = true;
         } catch {}
     }
@@ -802,12 +859,25 @@ contract FullLifecycleHandler is Test {
     }
 
     // --- Negative: try calling executeOperation directly (callback tampering) ---
-    function tryCallbackTamper() external {
+    function tryCallbackTamper(
+        uint256 /* tokenSeed */
+    )
+        external
+    {
         if (!isExpired) return;
-        if (settlementPrice >= strikePrice) return; // need ITM
+
+        // Test with put if ITM, else call if ITM, else skip
+        address token;
+        if (settlementPrice < strikePrice) {
+            token = putOToken;
+        } else if (settlementPrice > strikePrice) {
+            token = callOToken;
+        } else {
+            return; // ATM, no ITM token
+        }
 
         address attacker = address(0xDEAD);
-        bytes memory fakeParams = abi.encode(oToken, attacker, uint256(1e8), uint256(2000e6));
+        bytes memory fakeParams = abi.encode(token, attacker, uint256(1e8), uint256(2000e6));
 
         // Attempt 1: random caller (not aavePool)
         vm.prank(attacker);
@@ -824,16 +894,18 @@ contract FullLifecycleHandler is Test {
     }
 
     // --- Negative: makerNonce invalidation (circuit breaker) ---
-    function tryStaleNonceQuote(uint256 userIdx, uint256 amount) external {
+    function tryStaleNonceQuote(uint256 userIdx, uint256 amount, uint256 tokenSeed) external {
         if (isExpired) return;
         userIdx = bound(userIdx, 0, NUM_USERS - 1);
         amount = bound(amount, 1, 10e8);
 
+        bool isPut = (tokenSeed % 2 == 0);
+        address token = isPut ? putOToken : callOToken;
         address u = users[userIdx];
-        uint256 collateral = (amount * strikePrice) / 1e10;
+        uint256 collateral = isPut ? (amount * strikePrice) / 1e10 : amount * 1e10;
 
         // 1. Sign a valid quote at the current nonce
-        (BatchSettler.Quote memory q, bytes memory sig,) = _signQuote();
+        (BatchSettler.Quote memory q, bytes memory sig,) = _signQuote(token);
 
         // 2. MM increments nonce (circuit breaker)
         vm.prank(mm);
@@ -844,11 +916,6 @@ contract FullLifecycleHandler is Test {
         try settler.executeOrder(q, sig, amount, collateral) {
             staleNonceQuoteFilled = true;
         } catch {}
-
-        // 4. Restore nonce state: sign a fresh no-op quote so
-        //    the handler's other actions still work. The nonce
-        //    has been permanently incremented; _signQuote reads
-        //    the live nonce, so subsequent calls are fine.
     }
 
     // --- View helpers ---
@@ -890,7 +957,8 @@ contract FullLifecycleInvariantTest is Test {
     address mm;
     address treasury = address(0xFEE);
 
-    address oToken;
+    address putOToken;
+    address callOToken;
     uint256 expiry;
     uint256 strikePrice = 2000e8;
 
@@ -901,7 +969,7 @@ contract FullLifecycleInvariantTest is Test {
         _deployMocks();
         _deployProtocol();
         _configureProtocol();
-        _createOptionAndHandler();
+        _createOptionsAndHandler();
     }
 
     function _deployMocks() private {
@@ -982,20 +1050,27 @@ contract FullLifecycleInvariantTest is Test {
 
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
+        whitelist.whitelistCollateral(address(weth));
         whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);
+        whitelist.whitelistProduct(address(weth), address(usdc), address(weth), false);
     }
 
-    function _createOptionAndHandler() private {
+    function _createOptionsAndHandler() private {
         uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
         expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
 
-        oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
-        whitelist.whitelistOToken(oToken);
+        putOToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        callOToken = factory.createOToken(address(weth), address(usdc), address(weth), strikePrice, expiry, false);
+        whitelist.whitelistOToken(putOToken);
+        whitelist.whitelistOToken(callOToken);
 
         usdc.mint(mm, 100_000_000e6);
+        weth.mint(mm, 100_000e18);
         vm.startPrank(mm);
         usdc.approve(address(settler), type(uint256).max);
-        IERC20(oToken).approve(address(settler), type(uint256).max);
+        weth.approve(address(settler), type(uint256).max);
+        IERC20(putOToken).approve(address(settler), type(uint256).max);
+        IERC20(callOToken).approve(address(settler), type(uint256).max);
         vm.stopPrank();
 
         handler = new FullLifecycleHandler(
@@ -1011,7 +1086,8 @@ contract FullLifecycleInvariantTest is Test {
                 priceFeed: priceFeed
             }),
             LifecycleConfig({
-                oToken: oToken,
+                putOToken: putOToken,
+                callOToken: callOToken,
                 expiry: expiry,
                 strikePrice: strikePrice,
                 mmKey: mmKey,
@@ -1028,10 +1104,12 @@ contract FullLifecycleInvariantTest is Test {
         assertFalse(handler.expiredMintSucceeded());
     }
 
-    /// @notice INV-2: Pool balance = total deposited - total outflows
+    /// @notice INV-2: Pool balance = total deposited - total outflows (both assets)
     function invariant_collateralConservation() public view {
-        uint256 expected = handler.totalPoolInflow() - handler.totalPoolOutflow();
-        assertEq(usdc.balanceOf(address(pool)), expected);
+        uint256 expectedUsdc = handler.totalPoolInflowUsdc() - handler.totalPoolOutflowUsdc();
+        assertEq(usdc.balanceOf(address(pool)), expectedUsdc, "USDC pool mismatch");
+        uint256 expectedWeth = handler.totalPoolInflowWeth() - handler.totalPoolOutflowWeth();
+        assertEq(weth.balanceOf(address(pool)), expectedWeth, "WETH pool mismatch");
     }
 
     /// @notice INV-3: gross premium = net premium + fee (no dust)
@@ -1055,18 +1133,26 @@ contract FullLifecycleInvariantTest is Test {
         assertFalse(handler.accessControlBypassed());
     }
 
-    /// @notice INV-7: ITM settled vaults return 0 collateral to writer
+    /// @notice INV-7: ITM settled vaults have collateral = full payout
     function invariant_itmSettleReturnsZero() public view {
         if (!handler.isExpired()) return;
-        if (handler.settlementPrice() >= strikePrice) return;
 
         for (uint256 i = 0; i < handler.vaultCount(); i++) {
             address vOwner = handler.allVaultOwners(i);
             uint256 vid = handler.allVaultIds(i);
             if (!controller.vaultSettled(vOwner, vid)) continue;
 
+            bool isPut = handler.allVaultIsPut(i);
+            uint256 price = handler.settlementPrice();
+
+            // Only check ITM vaults
+            if (isPut && price >= strikePrice) continue;
+            if (!isPut && price <= strikePrice) continue;
+
             MarginVault.Vault memory v = controller.getVault(vOwner, vid);
-            uint256 payout = (v.shortAmount * strikePrice) / 1e10;
+            // Put ITM payout = amount * strike / 1e10 (full USDC collateral)
+            // Call ITM payout = amount * 1e10 (full WETH collateral)
+            uint256 payout = isPut ? (v.shortAmount * strikePrice) / 1e10 : v.shortAmount * 1e10;
             assertEq(v.collateralAmount, payout);
         }
     }
@@ -1080,14 +1166,24 @@ contract FullLifecycleInvariantTest is Test {
         }
     }
 
-    /// @notice INV-9: sum(vault.shortAmount) = totalSupply + totalBurned
+    /// @notice INV-9: sum(vault.shortAmount) = totalSupply + totalBurned (per oToken)
     function invariant_vaultOTokenConsistency() public view {
-        uint256 totalShort = 0;
+        uint256 totalPutShort = 0;
+        uint256 totalCallShort = 0;
         for (uint256 i = 0; i < handler.vaultCount(); i++) {
             MarginVault.Vault memory v = controller.getVault(handler.allVaultOwners(i), handler.allVaultIds(i));
-            totalShort += v.shortAmount;
+            if (handler.allVaultIsPut(i)) {
+                totalPutShort += v.shortAmount;
+            } else {
+                totalCallShort += v.shortAmount;
+            }
         }
-        assertEq(totalShort, OToken(oToken).totalSupply() + handler.totalOTokensBurned());
+        assertEq(
+            totalPutShort, OToken(putOToken).totalSupply() + handler.totalPutOTokensBurned(), "put oToken mismatch"
+        );
+        assertEq(
+            totalCallShort, OToken(callOToken).totalSupply() + handler.totalCallOTokensBurned(), "call oToken mismatch"
+        );
     }
 
     /// @notice INV-10: Settling an already-settled vault always reverts
