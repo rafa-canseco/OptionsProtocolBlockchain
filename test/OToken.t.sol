@@ -10,7 +10,7 @@ contract OTokenTest is Test {
     address public weth = address(0x1111);
     address public usdc = address(0x2222);
     uint256 public strikePrice = 2000e8; // $2000 in 8 decimals
-    uint256 public expiry = 1740124800;  // some future 08:00 UTC timestamp
+    uint256 public expiry = 1740124800; // some future 08:00 UTC timestamp
     address public controller = address(0xC0DE);
 
     function setUp() public {

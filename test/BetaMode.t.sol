@@ -18,12 +18,7 @@ import "../src/mocks/MockSwapRouter.sol";
 
 contract BetaModeTest is Test {
     event BetaModeSet(bool enabled);
-    event PhysicalDelivery(
-        address indexed oToken,
-        address indexed user,
-        uint256 contraAmount,
-        uint256 collateralUsed
-    );
+    event PhysicalDelivery(address indexed oToken, address indexed user, uint256 contraAmount, uint256 collateralUsed);
 
     AddressBook public addressBook;
     Controller public controller;
@@ -66,34 +61,56 @@ contract BetaModeTest is Test {
         mockRouter = new MockSwapRouter(address(ethFeed), address(weth), address(usdc));
 
         // Deploy protocol (behind UUPS proxies)
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (address(this)))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
-        )));
-        whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
-        )));
-        settler = BatchSettler(address(new ERC1967Proxy(
-            address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
-        )));
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()),
+                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+                )
+            )
+        );
 
         // Wire AddressBook
         addressBook.setController(address(controller));
@@ -148,7 +165,8 @@ contract BetaModeTest is Test {
     }
 
     function _signQuote(address oToken, uint256 bidPrice, uint256 deadline, uint256 maxAmount)
-        internal returns (BatchSettler.Quote memory quote, bytes memory sig)
+        internal
+        returns (BatchSettler.Quote memory quote, bytes memory sig)
     {
         quote = BatchSettler.Quote({
             oToken: oToken,
@@ -164,17 +182,13 @@ contract BetaModeTest is Test {
     }
 
     function _createPut(uint256 strike) internal returns (address) {
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strike, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strike, expiry, true);
         whitelist.whitelistOToken(oToken);
         return oToken;
     }
 
     function _createCall(uint256 strike) internal returns (address) {
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(weth), strike, expiry, false
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(weth), strike, expiry, false);
         whitelist.whitelistOToken(oToken);
         return oToken;
     }

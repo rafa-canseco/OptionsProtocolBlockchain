@@ -66,22 +66,14 @@ contract OTokenFactory is Initializable, UUPSUpgradeable {
         if (_expiry <= block.timestamp) revert InvalidExpiry();
         if (_expiry % (24 hours) != 8 hours) revert InvalidExpiry();
 
-        bytes32 paramsHash = _getParamsHash(
-            _underlying, _strikeAsset, _collateralAsset, _strikePrice, _expiry, _isPut
-        );
+        bytes32 paramsHash = _getParamsHash(_underlying, _strikeAsset, _collateralAsset, _strikePrice, _expiry, _isPut);
 
         if (getOToken[paramsHash] != address(0)) revert OTokenAlreadyExists();
 
         OToken oToken = new OToken{salt: paramsHash}();
 
         oToken.init(
-            _underlying,
-            _strikeAsset,
-            _collateralAsset,
-            _strikePrice,
-            _expiry,
-            _isPut,
-            addressBook.controller()
+            _underlying, _strikeAsset, _collateralAsset, _strikePrice, _expiry, _isPut, addressBook.controller()
         );
 
         address oTokenAddress = address(oToken);
@@ -89,9 +81,7 @@ contract OTokenFactory is Initializable, UUPSUpgradeable {
         isOToken[oTokenAddress] = true;
         getOToken[paramsHash] = oTokenAddress;
 
-        emit OTokenCreated(
-            oTokenAddress, _underlying, _strikeAsset, _collateralAsset, _strikePrice, _expiry, _isPut
-        );
+        emit OTokenCreated(oTokenAddress, _underlying, _strikeAsset, _collateralAsset, _strikePrice, _expiry, _isPut);
 
         return oTokenAddress;
     }
@@ -108,18 +98,10 @@ contract OTokenFactory is Initializable, UUPSUpgradeable {
         uint256 _expiry,
         bool _isPut
     ) external view returns (address) {
-        bytes32 paramsHash = _getParamsHash(
-            _underlying, _strikeAsset, _collateralAsset, _strikePrice, _expiry, _isPut
-        );
+        bytes32 paramsHash = _getParamsHash(_underlying, _strikeAsset, _collateralAsset, _strikePrice, _expiry, _isPut);
 
-        bytes32 hash = keccak256(
-            abi.encodePacked(
-                bytes1(0xff),
-                address(this),
-                paramsHash,
-                keccak256(type(OToken).creationCode)
-            )
-        );
+        bytes32 hash =
+            keccak256(abi.encodePacked(bytes1(0xff), address(this), paramsHash, keccak256(type(OToken).creationCode)));
 
         return address(uint160(uint256(hash)));
     }
@@ -132,9 +114,7 @@ contract OTokenFactory is Initializable, UUPSUpgradeable {
         uint256 _expiry,
         bool _isPut
     ) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encodePacked(_underlying, _strikeAsset, _collateralAsset, _strikePrice, _expiry, _isPut)
-        );
+        return keccak256(abi.encodePacked(_underlying, _strikeAsset, _collateralAsset, _strikePrice, _expiry, _isPut));
     }
 
     function _authorizeUpgrade(address) internal override {

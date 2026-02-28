@@ -14,7 +14,7 @@ contract OToken is ERC20 {
     address public strikeAsset;
     address public collateralAsset;
     uint256 public strikePrice; // scaled to 8 decimals (e.g., $2000 = 200000000000)
-    uint256 public expiry;      // unix timestamp, must be 08:00 UTC
+    uint256 public expiry; // unix timestamp, must be 08:00 UTC
     bool public isPut;
 
     address public controller;

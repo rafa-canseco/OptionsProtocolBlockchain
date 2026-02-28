@@ -63,31 +63,24 @@ contract Whitelist is Initializable, UUPSUpgradeable {
         emit UnderlyingWhitelisted(_asset);
     }
 
-    function whitelistProduct(
-        address _underlying,
-        address _strikeAsset,
-        address _collateralAsset,
-        bool _isPut
-    ) external onlyOwner {
+    function whitelistProduct(address _underlying, address _strikeAsset, address _collateralAsset, bool _isPut)
+        external
+        onlyOwner
+    {
         if (_underlying == address(0) || _strikeAsset == address(0) || _collateralAsset == address(0)) {
             revert InvalidAddress();
         }
-        bytes32 productHash = keccak256(
-            abi.encodePacked(_underlying, _strikeAsset, _collateralAsset, _isPut)
-        );
+        bytes32 productHash = keccak256(abi.encodePacked(_underlying, _strikeAsset, _collateralAsset, _isPut));
         isWhitelistedProduct[productHash] = true;
         emit ProductWhitelisted(_underlying, _strikeAsset, _collateralAsset, _isPut);
     }
 
-    function isProductWhitelisted(
-        address _underlying,
-        address _strikeAsset,
-        address _collateralAsset,
-        bool _isPut
-    ) external view returns (bool) {
-        bytes32 productHash = keccak256(
-            abi.encodePacked(_underlying, _strikeAsset, _collateralAsset, _isPut)
-        );
+    function isProductWhitelisted(address _underlying, address _strikeAsset, address _collateralAsset, bool _isPut)
+        external
+        view
+        returns (bool)
+    {
+        bytes32 productHash = keccak256(abi.encodePacked(_underlying, _strikeAsset, _collateralAsset, _isPut));
         return isWhitelistedProduct[productHash];
     }
 

@@ -53,30 +53,48 @@ contract ControllerTest is Test {
         usdc = new MockERC20("USD Coin", "USDC", 6);
 
         // Deploy protocol (behind UUPS proxies)
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (address(this)))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
-        )));
-        whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
-        )));
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()),
+                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
 
         // Wire everything together via AddressBook
         addressBook.setController(address(controller));
@@ -89,7 +107,7 @@ contract ControllerTest is Test {
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
         whitelist.whitelistCollateral(address(weth));
-        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);  // PUT
+        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true); // PUT
         whitelist.whitelistProduct(address(weth), address(usdc), address(weth), false); // CALL
 
         // Set expiry
@@ -108,17 +126,13 @@ contract ControllerTest is Test {
     // --- Helper ---
 
     function _createPut() internal returns (address) {
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
         return oToken;
     }
 
     function _createCall() internal returns (address) {
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(weth), strikePrice, expiry, false
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(weth), strikePrice, expiry, false);
         whitelist.whitelistOToken(oToken);
         return oToken;
     }
@@ -355,9 +369,7 @@ contract ControllerTest is Test {
     }
 
     function test_cannotMintUnwhitelistedOToken() public {
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
 
         vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
@@ -411,5 +423,71 @@ contract ControllerTest is Test {
         controller.settleVault(user, vaultId);
 
         assertEq(usdc.balanceOf(user), 100_000e6 - 1e6); // deposited 1 USDC, got 0 back
+    }
+
+    // --- Expiry Guard (mintOtoken) ---
+
+    function test_cannotMintAfterExpiry() public {
+        address oToken = _createPut();
+        uint256 collateral = (1e8 * strikePrice) / 1e10;
+
+        vm.startPrank(user);
+        controller.openVault(user);
+        controller.depositCollateral(user, 1, address(usdc), collateral);
+        vm.stopPrank();
+
+        vm.warp(expiry + 1);
+
+        vm.prank(user);
+        vm.expectRevert(Controller.OptionExpired.selector);
+        controller.mintOtoken(user, 1, oToken, 1e8, user);
+    }
+
+    function test_cannotMintAtExactExpiry() public {
+        address oToken = _createPut();
+        uint256 collateral = (1e8 * strikePrice) / 1e10;
+
+        vm.startPrank(user);
+        controller.openVault(user);
+        controller.depositCollateral(user, 1, address(usdc), collateral);
+        vm.stopPrank();
+
+        vm.warp(expiry);
+
+        vm.prank(user);
+        vm.expectRevert(Controller.OptionExpired.selector);
+        controller.mintOtoken(user, 1, oToken, 1e8, user);
+    }
+
+    function test_canMintOneSecondBeforeExpiry() public {
+        address oToken = _createPut();
+        uint256 collateral = (1e8 * strikePrice) / 1e10;
+
+        vm.startPrank(user);
+        controller.openVault(user);
+        controller.depositCollateral(user, 1, address(usdc), collateral);
+        vm.warp(expiry - 1);
+        controller.mintOtoken(user, 1, oToken, 1e8, user);
+        vm.stopPrank();
+
+        assertEq(OToken(oToken).balanceOf(user), 1e8);
+    }
+
+    function test_betaMode_allowsMintAfterExpiry() public {
+        address oToken = _createPut();
+        uint256 collateral = (1e8 * strikePrice) / 1e10;
+
+        controller.setBetaMode(true);
+
+        vm.startPrank(user);
+        controller.openVault(user);
+        controller.depositCollateral(user, 1, address(usdc), collateral);
+        vm.stopPrank();
+
+        vm.warp(expiry + 1);
+
+        vm.prank(user);
+        controller.mintOtoken(user, 1, oToken, 1e8, user);
+        assertEq(OToken(oToken).balanceOf(user), 1e8);
     }
 }

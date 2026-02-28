@@ -35,47 +35,65 @@ contract Deploy is Script {
         vm.startBroadcast(deployerKey);
 
         // 1. Deploy AddressBook (central registry)
-        AddressBook addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (deployer))
-        )));
+        AddressBook addressBook = AddressBook(
+            address(new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (deployer))))
+        );
         console.log("AddressBook:", address(addressBook));
 
         // 2. Deploy core contracts
-        Controller controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), deployer))
-        )));
+        Controller controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()), abi.encodeCall(Controller.initialize, (address(addressBook), deployer))
+                )
+            )
+        );
         console.log("Controller:", address(controller));
 
-        MarginPool pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
+        MarginPool pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
         console.log("MarginPool:", address(pool));
 
-        OTokenFactory factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
+        OTokenFactory factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
         console.log("OTokenFactory:", address(factory));
 
-        Oracle oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), deployer))
-        )));
+        Oracle oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), deployer))
+                )
+            )
+        );
         console.log("Oracle:", address(oracle));
 
-        Whitelist whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), deployer))
-        )));
+        Whitelist whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()), abi.encodeCall(Whitelist.initialize, (address(addressBook), deployer))
+                )
+            )
+        );
         console.log("Whitelist:", address(whitelist));
 
-        BatchSettler settler = BatchSettler(address(new ERC1967Proxy(
-            address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), operator, deployer))
-        )));
+        BatchSettler settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), operator, deployer))
+                )
+            )
+        );
         console.log("BatchSettler:", address(settler));
 
         // 3. Wire AddressBook
@@ -93,8 +111,8 @@ contract Deploy is Script {
         whitelist.whitelistUnderlying(weth);
         whitelist.whitelistCollateral(usdc);
         whitelist.whitelistCollateral(weth);
-        whitelist.whitelistProduct(weth, usdc, usdc, true);   // ETH PUT (USDC collateral)
-        whitelist.whitelistProduct(weth, usdc, weth, false);   // ETH CALL (WETH collateral)
+        whitelist.whitelistProduct(weth, usdc, usdc, true); // ETH PUT (USDC collateral)
+        whitelist.whitelistProduct(weth, usdc, weth, false); // ETH CALL (WETH collateral)
 
         // 6. Set Chainlink price feed for WETH
         oracle.setPriceFeed(weth, chainlinkEthUsd);

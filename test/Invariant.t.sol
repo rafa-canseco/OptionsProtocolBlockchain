@@ -136,30 +136,48 @@ contract InvariantTest is Test {
         usdc = new MockERC20("USDC", "USDC", 6);
         weth = new MockERC20("WETH", "WETH", 18);
 
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (address(this)))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
-        )));
-        whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
-        )));
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()),
+                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -174,15 +192,11 @@ contract InvariantTest is Test {
         uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
         expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
 
-        oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
-        handler = new ProtocolHandler(
-            addressBook, controller, pool, factory, oracle, whitelist,
-            usdc, weth, oToken, expiry
-        );
+        handler =
+            new ProtocolHandler(addressBook, controller, pool, factory, oracle, whitelist, usdc, weth, oToken, expiry);
 
         // Only target the handler — Foundry will call its functions randomly
         targetContract(address(handler));
@@ -190,18 +204,12 @@ contract InvariantTest is Test {
 
     /// @notice INVARIANT: Pool USDC balance always equals total deposited collateral
     function invariant_poolBalanceMatchesDeposits() public view {
-        assertEq(
-            usdc.balanceOf(address(pool)),
-            handler.totalDeposited()
-        );
+        assertEq(usdc.balanceOf(address(pool)), handler.totalDeposited());
     }
 
     /// @notice INVARIANT: Total oToken supply equals total minted
     function invariant_oTokenSupplyMatchesMinted() public view {
-        assertEq(
-            OToken(oToken).totalSupply(),
-            handler.totalMinted()
-        );
+        assertEq(OToken(oToken).totalSupply(), handler.totalMinted());
     }
 
     /// @notice INVARIANT: Pool balance is never negative (always >= 0 by definition,
@@ -281,10 +289,10 @@ contract BatchRedeemHandler is Test {
         }
 
         vm.prank(mm);
-        try settler.batchRedeem(selected, amounts) {
-            // Success — batch processed without reverting
-        } catch {
+        try settler.batchRedeem(selected, amounts) {}
+        catch (bytes memory reason) {
             batchRedeemReverted = true;
+            emit log_named_bytes("batchRedeem revert reason", reason);
         }
     }
 }
@@ -335,34 +343,56 @@ contract BatchRedeemInvariantTest is Test {
         usdc = new MockERC20("USDC", "USDC", 6);
         weth = new MockERC20("WETH", "WETH", 18);
 
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (address(this)))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
-        )));
-        whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
-        )));
-        settler = BatchSettler(address(new ERC1967Proxy(
-            address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
-        )));
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()),
+                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+                )
+            )
+        );
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -391,9 +421,7 @@ contract BatchRedeemInvariantTest is Test {
         uint256[5] memory strikes = [uint256(1800e8), 1900e8, 2000e8, 2100e8, 2200e8];
 
         for (uint256 i = 0; i < NUM_TOKENS; i++) {
-            oTokens[i] = factory.createOToken(
-                address(weth), address(usdc), address(usdc), strikes[i], expiry, true
-            );
+            oTokens[i] = factory.createOToken(address(weth), address(usdc), address(usdc), strikes[i], expiry, true);
             whitelist.whitelistOToken(oTokens[i]);
 
             users[i] = address(uint160(0xB000 + i));
@@ -404,7 +432,8 @@ contract BatchRedeemInvariantTest is Test {
             IERC20(oTokens[i]).approve(address(settler), type(uint256).max);
             vm.stopPrank();
 
-            (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oTokens[i], 50e6, block.timestamp + 1 hours, 100e8);
+            (BatchSettler.Quote memory q, bytes memory sig) =
+                _signQuote(oTokens[i], 50e6, block.timestamp + 1 hours, 100e8);
             vm.prank(users[i]);
             settler.executeOrder(q, sig, 1e8, collateral);
         }
@@ -446,6 +475,27 @@ contract BatchRedeemInvariantTest is Test {
 // Full Lifecycle Handler — drives open → execute → settle → redeem → physical
 // =============================================================================
 
+struct LifecycleContracts {
+    AddressBook addressBook;
+    Controller controller;
+    MarginPool pool;
+    Oracle oracle;
+    Whitelist whitelist;
+    BatchSettler settler;
+    MockERC20 usdc;
+    MockERC20 weth;
+    MockChainlinkFeed priceFeed;
+}
+
+struct LifecycleConfig {
+    address oToken;
+    uint256 expiry;
+    uint256 strikePrice;
+    uint256 mmKey;
+    address admin;
+    address treasury;
+}
+
 contract FullLifecycleHandler is Test {
     AddressBook public addressBook;
     Controller public controller;
@@ -460,7 +510,7 @@ contract FullLifecycleHandler is Test {
 
     uint256 public mmKey;
     address public mm;
-    address public admin; // test contract, owns protocol
+    address public admin;
     address public treasury;
 
     address public oToken;
@@ -495,8 +545,8 @@ contract FullLifecycleHandler is Test {
     // Physical delivery tracking
     struct Delivery {
         address user;
-        uint256 expectedContraAmount; // exact amount user should receive
-        uint256 actualContraReceived; // actual delta in user's balance
+        uint256 expectedContraAmount;
+        uint256 actualContraReceived;
     }
     Delivery[] public deliveries;
 
@@ -508,39 +558,23 @@ contract FullLifecycleHandler is Test {
     bool public callbackTamperSucceeded;
     bool public staleNonceQuoteFilled;
 
-    constructor(
-        AddressBook _ab,
-        Controller _ctrl,
-        MarginPool _pool,
-        Oracle _oracle,
-        Whitelist _wl,
-        BatchSettler _settler,
-        MockERC20 _usdc,
-        MockERC20 _weth,
-        MockChainlinkFeed _feed,
-        address _oToken,
-        uint256 _expiry,
-        uint256 _strikePrice,
-        uint256 _mmKey,
-        address _admin,
-        address _treasury
-    ) {
-        addressBook = _ab;
-        controller = _ctrl;
-        pool = _pool;
-        oracle = _oracle;
-        whitelist = _wl;
-        settler = _settler;
-        usdc = _usdc;
-        weth = _weth;
-        priceFeed = _feed;
-        oToken = _oToken;
-        expiry = _expiry;
-        strikePrice = _strikePrice;
-        mmKey = _mmKey;
-        mm = vm.addr(_mmKey);
-        admin = _admin;
-        treasury = _treasury;
+    constructor(LifecycleContracts memory c, LifecycleConfig memory cfg) {
+        addressBook = c.addressBook;
+        controller = c.controller;
+        pool = c.pool;
+        oracle = c.oracle;
+        whitelist = c.whitelist;
+        settler = c.settler;
+        usdc = c.usdc;
+        weth = c.weth;
+        priceFeed = c.priceFeed;
+        oToken = cfg.oToken;
+        expiry = cfg.expiry;
+        strikePrice = cfg.strikePrice;
+        mmKey = cfg.mmKey;
+        mm = vm.addr(cfg.mmKey);
+        admin = cfg.admin;
+        treasury = cfg.treasury;
 
         for (uint256 i = 0; i < NUM_USERS; i++) {
             address u = address(uint160(0xC000 + i));
@@ -548,18 +582,14 @@ contract FullLifecycleHandler is Test {
             usdc.mint(u, 100_000_000e6);
             vm.startPrank(u);
             usdc.approve(address(pool), type(uint256).max);
-            IERC20(oToken).approve(address(settler), type(uint256).max);
+            IERC20(cfg.oToken).approve(address(settler), type(uint256).max);
             vm.stopPrank();
         }
     }
 
-    function _signQuote(uint256 amount)
+    function _signQuote()
         internal
-        returns (
-            BatchSettler.Quote memory q,
-            bytes memory sig,
-            bytes32 digest
-        )
+        returns (BatchSettler.Quote memory q, bytes memory sig, bytes32 digest)
     {
         q = BatchSettler.Quote({
             oToken: oToken,
@@ -583,8 +613,7 @@ contract FullLifecycleHandler is Test {
         address u = users[userIdx];
         uint256 collateral = (amount * strikePrice) / 1e10;
 
-        (BatchSettler.Quote memory q, bytes memory sig, bytes32 digest) =
-            _signQuote(amount);
+        (BatchSettler.Quote memory q, bytes memory sig, bytes32 digest) = _signQuote();
 
         vm.prank(u);
         uint256 vaultId = settler.executeOrder(q, sig, amount, collateral);
@@ -691,14 +720,9 @@ contract FullLifecycleHandler is Test {
         vm.prank(mm);
         settler.physicalRedeem(oToken, u, amount, maxSpent);
 
-        uint256 actualReceived =
-            IERC20(contraAsset).balanceOf(u) - userContraBefore;
+        uint256 actualReceived = IERC20(contraAsset).balanceOf(u) - userContraBefore;
 
-        deliveries.push(Delivery({
-            user: u,
-            expectedContraAmount: expectedContra,
-            actualContraReceived: actualReceived
-        }));
+        deliveries.push(Delivery({user: u, expectedContraAmount: expectedContra, actualContraReceived: actualReceived}));
 
         totalPoolOutflow += poolBefore - usdc.balanceOf(address(pool));
         totalOTokensBurned += supplyBefore - OToken(oToken).totalSupply();
@@ -783,24 +807,18 @@ contract FullLifecycleHandler is Test {
         if (settlementPrice >= strikePrice) return; // need ITM
 
         address attacker = address(0xDEAD);
-        bytes memory fakeParams = abi.encode(
-            oToken, attacker, uint256(1e8), uint256(2000e6)
-        );
+        bytes memory fakeParams = abi.encode(oToken, attacker, uint256(1e8), uint256(2000e6));
 
         // Attempt 1: random caller (not aavePool)
         vm.prank(attacker);
-        try settler.executeOperation(
-            address(weth), 1e18, 0, address(settler), fakeParams
-        ) {
+        try settler.executeOperation(address(weth), 1e18, 0, address(settler), fakeParams) {
             callbackTamperSucceeded = true;
         } catch {}
 
         // Attempt 2: correct aavePool but wrong initiator
         address aave = settler.aavePool();
         vm.prank(aave);
-        try settler.executeOperation(
-            address(weth), 1e18, 0, attacker, fakeParams
-        ) {
+        try settler.executeOperation(address(weth), 1e18, 0, attacker, fakeParams) {
             callbackTamperSucceeded = true;
         } catch {}
     }
@@ -815,8 +833,7 @@ contract FullLifecycleHandler is Test {
         uint256 collateral = (amount * strikePrice) / 1e10;
 
         // 1. Sign a valid quote at the current nonce
-        (BatchSettler.Quote memory q, bytes memory sig,) =
-            _signQuote(amount);
+        (BatchSettler.Quote memory q, bytes memory sig,) = _signQuote();
 
         // 2. MM increments nonce (circuit breaker)
         vm.prank(mm);
@@ -838,9 +855,11 @@ contract FullLifecycleHandler is Test {
     function deliveryCount() external view returns (uint256) {
         return deliveries.length;
     }
+
     function vaultCount() external view returns (uint256) {
         return allVaultOwners.length;
     }
+
     function quoteCount() external view returns (uint256) {
         return executedQuoteHashes.length;
     }
@@ -879,55 +898,71 @@ contract FullLifecycleInvariantTest is Test {
         vm.warp(1700000000);
         mm = vm.addr(mmKey);
 
+        _deployMocks();
+        _deployProtocol();
+        _configureProtocol();
+        _createOptionAndHandler();
+    }
+
+    function _deployMocks() private {
         usdc = new MockERC20("USDC", "USDC", 6);
         weth = new MockERC20("WETH", "WETH", 18);
-
         priceFeed = new MockChainlinkFeed(2000e8);
         aavePool = new MockAavePool();
-        swapRouter = new MockSwapRouter(
-            address(priceFeed), address(weth), address(usdc)
-        );
+        swapRouter = new MockSwapRouter(address(priceFeed), address(weth), address(usdc));
+    }
 
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (address(this)))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(
-                Controller.initialize,
-                (address(addressBook), address(this))
+    function _deployProtocol() private {
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
             )
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(
-                Oracle.initialize,
-                (address(addressBook), address(this))
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
             )
-        )));
-        whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(
-                Whitelist.initialize,
-                (address(addressBook), address(this))
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
             )
-        )));
-        settler = BatchSettler(address(new ERC1967Proxy(
-            address(new BatchSettler()),
-            abi.encodeCall(
-                BatchSettler.initialize,
-                (address(addressBook), mm, address(this))
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
             )
-        )));
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()),
+                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+                )
+            )
+        );
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -935,7 +970,9 @@ contract FullLifecycleInvariantTest is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
+    }
 
+    function _configureProtocol() private {
         settler.setWhitelistedMM(mm, true);
         settler.setTreasury(treasury);
         settler.setProtocolFeeBps(400);
@@ -945,24 +982,14 @@ contract FullLifecycleInvariantTest is Test {
 
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
-        whitelist.whitelistProduct(
-            address(weth), address(usdc), address(usdc), true
-        );
+        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);
+    }
 
-        uint256 today8am =
-            (block.timestamp / 1 days) * 1 days + 8 hours;
-        expiry = today8am > block.timestamp
-            ? today8am
-            : today8am + 1 days;
+    function _createOptionAndHandler() private {
+        uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
+        expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
 
-        oToken = factory.createOToken(
-            address(weth),
-            address(usdc),
-            address(usdc),
-            strikePrice,
-            expiry,
-            true
-        );
+        oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
         usdc.mint(mm, 100_000_000e6);
@@ -972,21 +999,25 @@ contract FullLifecycleInvariantTest is Test {
         vm.stopPrank();
 
         handler = new FullLifecycleHandler(
-            addressBook,
-            controller,
-            pool,
-            oracle,
-            whitelist,
-            settler,
-            usdc,
-            weth,
-            priceFeed,
-            oToken,
-            expiry,
-            strikePrice,
-            mmKey,
-            address(this),
-            treasury
+            LifecycleContracts({
+                addressBook: addressBook,
+                controller: controller,
+                pool: pool,
+                oracle: oracle,
+                whitelist: whitelist,
+                settler: settler,
+                usdc: usdc,
+                weth: weth,
+                priceFeed: priceFeed
+            }),
+            LifecycleConfig({
+                oToken: oToken,
+                expiry: expiry,
+                strikePrice: strikePrice,
+                mmKey: mmKey,
+                admin: address(this),
+                treasury: treasury
+            })
         );
 
         targetContract(address(handler));
@@ -999,17 +1030,13 @@ contract FullLifecycleInvariantTest is Test {
 
     /// @notice INV-2: Pool balance = total deposited - total outflows
     function invariant_collateralConservation() public view {
-        uint256 expected =
-            handler.totalPoolInflow() - handler.totalPoolOutflow();
+        uint256 expected = handler.totalPoolInflow() - handler.totalPoolOutflow();
         assertEq(usdc.balanceOf(address(pool)), expected);
     }
 
     /// @notice INV-3: gross premium = net premium + fee (no dust)
     function invariant_premiumConservation() public view {
-        assertEq(
-            handler.totalGrossPremium(),
-            handler.totalNetPremium() + handler.totalFees()
-        );
+        assertEq(handler.totalGrossPremium(), handler.totalNetPremium() + handler.totalFees());
     }
 
     /// @notice INV-4: Once set, expiry price cannot be overwritten
@@ -1057,16 +1084,10 @@ contract FullLifecycleInvariantTest is Test {
     function invariant_vaultOTokenConsistency() public view {
         uint256 totalShort = 0;
         for (uint256 i = 0; i < handler.vaultCount(); i++) {
-            MarginVault.Vault memory v = controller.getVault(
-                handler.allVaultOwners(i),
-                handler.allVaultIds(i)
-            );
+            MarginVault.Vault memory v = controller.getVault(handler.allVaultOwners(i), handler.allVaultIds(i));
             totalShort += v.shortAmount;
         }
-        assertEq(
-            totalShort,
-            OToken(oToken).totalSupply() + handler.totalOTokensBurned()
-        );
+        assertEq(totalShort, OToken(oToken).totalSupply() + handler.totalOTokensBurned());
     }
 
     /// @notice INV-10: Settling an already-settled vault always reverts
@@ -1078,16 +1099,8 @@ contract FullLifecycleInvariantTest is Test {
     /// For puts: user receives exactly amount * 1e10 WETH
     function invariant_physicalDeliveryExactAmount() public view {
         for (uint256 i = 0; i < handler.deliveryCount(); i++) {
-            (
-                ,
-                uint256 expected,
-                uint256 actual
-            ) = handler.deliveries(i);
-            assertEq(
-                actual,
-                expected,
-                "delivery amount mismatch"
-            );
+            (, uint256 expected, uint256 actual) = handler.deliveries(i);
+            assertEq(actual, expected, "delivery amount mismatch");
         }
     }
 

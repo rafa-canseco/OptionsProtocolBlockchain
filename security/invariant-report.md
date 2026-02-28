@@ -1,6 +1,6 @@
 # Invariant Report — b1nary Options Protocol
 
-15 invariant properties tested via Foundry stateful fuzzing.
+18 invariant properties tested via Foundry stateful fuzzing.
 
 ## Original Invariants (ProtocolHandler)
 
@@ -92,13 +92,13 @@ repaid, swap output forwarded).
 
 ### 11. accessControlExhaustive
 
-6 privileged functions tested from a random attacker address:
-- `Controller.openVault`
-- `Controller.depositCollateral`
-- `Controller.mintOtoken`
-- `Controller.settleVault`
-- `BatchSettler.executeOrder`
-- `BatchSettler.batchSettleVaults`
+6 owner-only functions tested from a random attacker address:
+- `Controller.setBetaMode`
+- `Controller.transferOwnership`
+- `BatchSettler.setOperator`
+- `BatchSettler.setProtocolFeeBps`
+- `Oracle.setPriceFeed`
+- `Whitelist.whitelistCollateral`
 
 All must revert. The `accessControlBypassed` flag must remain false.
 
