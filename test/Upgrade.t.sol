@@ -16,25 +16,45 @@ import "../src/mocks/MockChainlinkFeed.sol";
 
 // V2 stubs for upgrade testing — add a version() getter to prove upgrade worked
 contract AddressBookV2 is AddressBook {
-    function version() external pure returns (uint256) { return 2; }
+    function version() external pure returns (uint256) {
+        return 2;
+    }
 }
+
 contract ControllerV2 is Controller {
-    function version() external pure returns (uint256) { return 2; }
+    function version() external pure returns (uint256) {
+        return 2;
+    }
 }
+
 contract MarginPoolV2 is MarginPool {
-    function version() external pure returns (uint256) { return 2; }
+    function version() external pure returns (uint256) {
+        return 2;
+    }
 }
+
 contract OTokenFactoryV2 is OTokenFactory {
-    function version() external pure returns (uint256) { return 2; }
+    function version() external pure returns (uint256) {
+        return 2;
+    }
 }
+
 contract OracleV2 is Oracle {
-    function version() external pure returns (uint256) { return 2; }
+    function version() external pure returns (uint256) {
+        return 2;
+    }
 }
+
 contract WhitelistV2 is Whitelist {
-    function version() external pure returns (uint256) { return 2; }
+    function version() external pure returns (uint256) {
+        return 2;
+    }
 }
+
 contract BatchSettlerV2 is BatchSettler {
-    function version() external pure returns (uint256) { return 2; }
+    function version() external pure returns (uint256) {
+        return 2;
+    }
 }
 
 // V2 stub with reinitializer(2) for reinitializer upgrade test
@@ -45,7 +65,9 @@ contract AddressBookV2Reinit is AddressBook {
         v2Value = _val;
     }
 
-    function version() external pure returns (uint256) { return 2; }
+    function version() external pure returns (uint256) {
+        return 2;
+    }
 }
 
 contract UpgradeTest is Test {
@@ -70,34 +92,52 @@ contract UpgradeTest is Test {
         feed = new MockChainlinkFeed(2500e8);
 
         // Deploy all contracts behind proxies
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (owner))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), owner))
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), owner))
-        )));
-        whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), owner))
-        )));
-        settler = BatchSettler(address(new ERC1967Proxy(
-            address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), operator, owner))
-        )));
+        addressBook = AddressBook(
+            address(new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (owner))))
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()), abi.encodeCall(Controller.initialize, (address(addressBook), owner))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), owner))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()), abi.encodeCall(Whitelist.initialize, (address(addressBook), owner))
+                )
+            )
+        );
+        settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), operator, owner))
+                )
+            )
+        );
 
         // Wire AddressBook
         addressBook.setController(address(controller));
@@ -415,13 +455,15 @@ contract UpgradeTest is Test {
     // ===== BatchSettler domain separator proxy correctness (Important #7) =====
 
     function test_domainSeparator_usesProxyAddress() public {
-        bytes32 expected = keccak256(abi.encode(
-            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-            keccak256("b1nary"),
-            keccak256("1"),
-            block.chainid,
-            address(settler) // proxy address, not implementation
-        ));
+        bytes32 expected = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("b1nary"),
+                keccak256("1"),
+                block.chainid,
+                address(settler) // proxy address, not implementation
+            )
+        );
         assertEq(settler.DOMAIN_SEPARATOR(), expected);
     }
 
@@ -553,10 +595,7 @@ contract UpgradeTest is Test {
         AddressBookV2Reinit v2Impl = new AddressBookV2Reinit();
 
         // Upgrade and call reinitializer(2) in one step
-        addressBook.upgradeToAndCall(
-            address(v2Impl),
-            abi.encodeCall(AddressBookV2Reinit.initializeV2, (42))
-        );
+        addressBook.upgradeToAndCall(address(v2Impl), abi.encodeCall(AddressBookV2Reinit.initializeV2, (42)));
 
         assertEq(AddressBookV2Reinit(address(addressBook)).v2Value(), 42);
         assertEq(AddressBookV2Reinit(address(addressBook)).version(), 2);
