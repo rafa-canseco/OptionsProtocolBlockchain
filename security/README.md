@@ -50,14 +50,15 @@ Out of scope: mock contracts (`src/mocks/`), test files, interfaces.
 | Invariant (original) | 1 file | 5 | 1,280 |
 | Invariant (new lifecycle) | 1 file | 13 | 3,328 |
 | Upgrade | 1 file | 50 | 50 |
-| **Total** | **12 files** | **260** | — |
+| Fork (Base mainnet) | 1 file | 3 | 3 |
+| **Total** | **13 files** | **263** | — |
 
 ## Artifacts
 
 | File | Description |
 |------|-------------|
 | `static-analysis-report.md` | Slither + Aderyn findings, triage, fixes |
-| `invariant-report.md` | All 15 invariant properties with rationale |
+| `invariant-report.md` | All 18 invariant properties with rationale |
 | `threat-model.md` | Trust assumptions, attack surfaces, known limitations |
 | `aderyn-report.md` | Raw Aderyn output |
 
@@ -75,6 +76,10 @@ forge test --match-path test/Invariant.t.sol -vv
 
 # Run with security profile (10K fuzz, 1K invariant depth 100)
 FOUNDRY_PROFILE=security forge test -vv
+
+# Fork test (physical delivery against real Aave + Uniswap on Base)
+NO_PROXY="*" forge test --match-contract ForkPhysicalRedeemTest \
+  --fork-url $BASE_RPC_URL -vvv
 
 # Static analysis
 slither . --config-file slither.config.json
