@@ -191,24 +191,6 @@
   },
   {
     "type": "function",
-    "name": "resetExpiryPrice",
-    "inputs": [
-      {
-        "name": "_asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "_expiry",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "setExpiryPrice",
     "inputs": [
       {
@@ -278,25 +260,6 @@
     ],
     "outputs": [],
     "stateMutability": "payable"
-  },
-  {
-    "type": "event",
-    "name": "ExpiryPriceReset",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "expiry",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
   },
   {
     "type": "event",
@@ -437,11 +400,6 @@
   {
     "type": "error",
     "name": "InvalidPrice",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NotBetaMode",
     "inputs": []
   },
   {

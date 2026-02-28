@@ -253,13 +253,11 @@ contract UpgradeTest is Test {
     }
 
     function test_upgradeController_preservesState() public {
-        controller.setBetaMode(true);
-        assertTrue(controller.betaMode());
+        assertEq(controller.owner(), owner);
 
         ControllerV2 v2Impl = new ControllerV2();
         controller.upgradeToAndCall(address(v2Impl), "");
 
-        assertTrue(controller.betaMode());
         assertEq(controller.owner(), owner);
         assertEq(ControllerV2(address(controller)).version(), 2);
     }
@@ -482,12 +480,12 @@ contract UpgradeTest is Test {
 
         // Old owner can no longer call owner-only functions
         vm.expectRevert(Controller.OnlyOwner.selector);
-        controller.setBetaMode(true);
+        controller.transferOwnership(address(0x5678));
 
         // New owner can
         vm.prank(newOwner);
-        controller.setBetaMode(true);
-        assertTrue(controller.betaMode());
+        controller.transferOwnership(owner);
+        assertEq(controller.owner(), owner);
     }
 
     function test_transferOwnership_Oracle() public {

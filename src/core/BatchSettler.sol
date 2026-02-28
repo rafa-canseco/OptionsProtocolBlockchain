@@ -533,7 +533,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
         OToken ot = OToken(oToken);
         Controller ctrl = Controller(addressBook.controller());
-        if (!ctrl.betaMode() && block.timestamp < ot.expiry()) revert OptionNotExpired();
+        if (block.timestamp < ot.expiry()) revert OptionNotExpired();
 
         Oracle oracle = Oracle(addressBook.oracle());
         (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(ot.underlying(), ot.expiry());

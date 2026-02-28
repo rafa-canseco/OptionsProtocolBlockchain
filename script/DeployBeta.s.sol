@@ -19,7 +19,7 @@ import "../src/mocks/MockSwapRouter.sol";
  * @title DeployBeta
  * @notice Deploys the full beta stack to Base Sepolia (UUPS proxied).
  *         Includes mock tokens (LUSD/LETH), mock infrastructure (Aave/SwapRouter),
- *         all 7 protocol contracts behind proxies, and enables betaMode.
+ *         all 7 protocol contracts behind proxies.
  *
  *         Usage:
  *         forge script script/DeployBeta.s.sol:DeployBeta \
@@ -127,9 +127,6 @@ contract DeployBeta is Script {
         settler.setSwapFeeTier(500);
         settler.setTreasury(deployer);
         settler.setProtocolFeeBps(400); // 4%
-
-        // Enable betaMode
-        controller.setBetaMode(true);
 
         // Mint initial tokens to deployer
         lusd.mint(deployer, 1_000_000e6);
