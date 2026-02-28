@@ -51,8 +51,10 @@ contract ForkPhysicalRedeemTest is Test {
     address admin;
     address treasury = address(0xFEE);
 
-    // Option params
-    uint256 strikePrice = 2000e8;
+    // Option params — PUT needs strike > market, CALL needs strike < market
+    // At block 42733000 ETH ≈ $1925 on Uniswap
+    uint256 putStrike = 2000e8;
+    uint256 callStrike = 1800e8;
     uint256 expiry;
     address putOToken;
     address callOToken;
@@ -159,8 +161,8 @@ contract ForkPhysicalRedeemTest is Test {
         uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
         expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
 
-        putOToken = factory.createOToken(WETH, USDC, USDC, strikePrice, expiry, true);
-        callOToken = factory.createOToken(WETH, USDC, WETH, strikePrice, expiry, false);
+        putOToken = factory.createOToken(WETH, USDC, USDC, putStrike, expiry, true);
+        callOToken = factory.createOToken(WETH, USDC, WETH, callStrike, expiry, false);
         whitelist.whitelistOToken(putOToken);
         whitelist.whitelistOToken(callOToken);
     }
@@ -202,7 +204,7 @@ contract ForkPhysicalRedeemTest is Test {
 
     function test_physicalDelivery_put_realAaveUniswap() public onlyFork {
         uint256 amount = 1e8;
-        uint256 collateral = (amount * strikePrice) / 1e10; // 2000 USDC
+        uint256 collateral = (amount * putStrike) / 1e10; // 2000 USDC
 
         (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(putOToken);
         vm.prank(user);
@@ -259,9 +261,9 @@ contract ForkPhysicalRedeemTest is Test {
         assertTrue(controller.vaultSettled(user, vaultId), "Vault settled");
 
         // Physical delivery: user receives USDC (strikeAsset)
-        // contraAmount = (amount * strike) / 1e10 = 2000e6
+        // contraAmount = (amount * callStrike) / 1e10 = 1800e6
         uint256 userUsdcBefore = IERC20(USDC).balanceOf(user);
-        uint256 expectedUsdc = (amount * strikePrice) / 1e10;
+        uint256 expectedUsdc = (amount * callStrike) / 1e10;
 
         vm.prank(mm);
         settler.physicalRedeem(callOToken, user, amount, collateral);
