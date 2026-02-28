@@ -181,7 +181,7 @@ contract EmergencyTest is Test {
     }
 
     function test_partialPause_allowsSettle() public {
-        (address oToken, uint256 vaultId) = _openAndFundVault();
+        (, uint256 vaultId) = _openAndFundVault();
 
         vm.prank(pauser);
         controller.setSystemPartiallyPaused(true);
@@ -253,7 +253,7 @@ contract EmergencyTest is Test {
     }
 
     function test_fullPause_blocksSettle() public {
-        (address oToken, uint256 vaultId) = _openAndFundVault();
+        (, uint256 vaultId) = _openAndFundVault();
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
@@ -359,12 +359,12 @@ contract EmergencyTest is Test {
         _openAndFundVault();
 
         vm.prank(user);
-        vm.expectRevert(Controller.SystemIsFullyPaused.selector);
+        vm.expectRevert(Controller.SystemNotFullyPaused.selector);
         controller.emergencyWithdrawVault(1);
     }
 
     function test_emergencyWithdraw_revertsForSettledVault() public {
-        (address oToken, uint256 vaultId) = _openAndFundVault();
+        (, uint256 vaultId) = _openAndFundVault();
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
@@ -511,7 +511,7 @@ contract EmergencyTest is Test {
     }
 
     function test_bothPauses_settleReverts() public {
-        (address oToken, uint256 vaultId) = _openAndFundVault();
+        (, uint256 vaultId) = _openAndFundVault();
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
@@ -523,5 +523,95 @@ contract EmergencyTest is Test {
         vm.prank(user);
         vm.expectRevert(Controller.SystemIsFullyPaused.selector);
         controller.settleVault(user, vaultId);
+    }
+
+    // ==========================================
+    // Emergency Withdraw — partial pause only
+    // ==========================================
+
+    function test_emergencyWithdraw_revertsUnderPartialPauseOnly() public {
+        _openAndFundVault();
+
+        vm.prank(pauser);
+        controller.setSystemPartiallyPaused(true);
+
+        vm.prank(user);
+        vm.expectRevert(Controller.SystemNotFullyPaused.selector);
+        controller.emergencyWithdrawVault(1);
+    }
+
+    // ==========================================
+    // Settled vault guards
+    // ==========================================
+
+    function test_depositIntoSettledVault_reverts() public {
+        (, uint256 vaultId) = _openAndFundVault();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+
+        vm.prank(user);
+        controller.settleVault(user, vaultId);
+
+        vm.prank(user);
+        vm.expectRevert(Controller.VaultAlreadySettledError.selector);
+        controller.depositCollateral(user, vaultId, address(usdc), 1000e6);
+    }
+
+    function test_mintOnSettledVault_reverts() public {
+        (address oToken, uint256 vaultId) = _openAndFundVault();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+
+        vm.prank(user);
+        controller.settleVault(user, vaultId);
+
+        vm.prank(user);
+        vm.expectRevert(Controller.VaultAlreadySettledError.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+    }
+
+    function test_depositAfterEmergencyWithdraw_reverts() public {
+        _openAndFundVault();
+
+        controller.setSystemFullyPaused(true);
+
+        vm.prank(user);
+        controller.emergencyWithdrawVault(1);
+
+        controller.setSystemFullyPaused(false);
+
+        vm.prank(user);
+        vm.expectRevert(Controller.VaultAlreadySettledError.selector);
+        controller.depositCollateral(user, 1, address(usdc), 1000e6);
+    }
+
+    function test_mintAfterEmergencyWithdraw_reverts() public {
+        (address oToken,) = _openAndFundVault();
+
+        controller.setSystemFullyPaused(true);
+
+        vm.prank(user);
+        controller.emergencyWithdrawVault(1);
+
+        controller.setSystemFullyPaused(false);
+
+        vm.prank(user);
+        vm.expectRevert(Controller.VaultAlreadySettledError.selector);
+        controller.mintOtoken(user, 1, oToken, 1e8, user);
+    }
+
+    // ==========================================
+    // Pauser role rotation
+    // ==========================================
+
+    function test_setPartialPauser_toZeroRevokesRole() public {
+        controller.setPartialPauser(address(0));
+        assertEq(controller.partialPauser(), address(0));
+
+        vm.prank(pauser);
+        vm.expectRevert(Controller.OnlyPartialPauser.selector);
+        controller.setSystemPartiallyPaused(true);
     }
 }

@@ -11,10 +11,9 @@ contract AddressBookTest is Test {
     address public notOwner = address(0xBEEF);
 
     function setUp() public {
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (owner))
-        )));
+        addressBook = AddressBook(
+            address(new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (owner))))
+        );
     }
 
     function test_ownerIsDeployer() public view {

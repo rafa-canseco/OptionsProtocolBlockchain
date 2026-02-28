@@ -76,6 +76,7 @@ contract Controller is Initializable, UUPSUpgradeable {
     error SystemIsFullyPaused();
     error OnlyPartialPauser();
     error NoCollateral();
+    error SystemNotFullyPaused();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -132,6 +133,8 @@ contract Controller is Initializable, UUPSUpgradeable {
         notPartiallyPaused
         notFullyPaused
     {
+        if (vaultSettled[_owner][_vaultId]) revert VaultAlreadySettledError();
+
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
 
         if (vault.collateralAsset != address(0) && vault.collateralAsset != _asset) {
@@ -153,6 +156,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         notFullyPaused
     {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
+        if (vaultSettled[_owner][_vaultId]) revert VaultAlreadySettledError();
 
         if (vault.shortOtoken != address(0) && vault.shortOtoken != _oToken) {
             revert VaultAlreadyHasShort();
@@ -291,7 +295,7 @@ contract Controller is Initializable, UUPSUpgradeable {
     ///         oTokens minted against this vault lose their collateral
     ///         backing — this is the expected tradeoff in an emergency.
     function emergencyWithdrawVault(uint256 _vaultId) external {
-        if (!systemFullyPaused) revert SystemIsFullyPaused();
+        if (!systemFullyPaused) revert SystemNotFullyPaused();
 
         MarginVault.Vault storage vault = _getVault(msg.sender, _vaultId);
         if (vaultSettled[msg.sender][_vaultId]) {
@@ -321,5 +325,5 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[42] private __gap;
+    uint256[44] private __gap;
 }

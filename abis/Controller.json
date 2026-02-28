@@ -820,6 +820,11 @@
   },
   {
     "type": "error",
+    "name": "SystemNotFullyPaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "UUPSUnauthorizedCallContext",
     "inputs": []
   },
