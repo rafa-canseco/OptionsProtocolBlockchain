@@ -60,6 +60,7 @@ contract Controller is Initializable, UUPSUpgradeable {
     error InsufficientCollateral();
     error NoOtokensToRedeem();
     error OTokenNotWhitelisted();
+    error OptionExpired();
     error Unauthorized();
     error InvalidAddress();
 
@@ -102,12 +103,10 @@ contract Controller is Initializable, UUPSUpgradeable {
         return vaultId;
     }
 
-    function depositCollateral(
-        address _owner,
-        uint256 _vaultId,
-        address _asset,
-        uint256 _amount
-    ) external onlyAuthorized(_owner) {
+    function depositCollateral(address _owner, uint256 _vaultId, address _asset, uint256 _amount)
+        external
+        onlyAuthorized(_owner)
+    {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
 
         if (vault.collateralAsset != address(0) && vault.collateralAsset != _asset) {
@@ -122,13 +121,10 @@ contract Controller is Initializable, UUPSUpgradeable {
         emit CollateralDeposited(_owner, _vaultId, _asset, _amount);
     }
 
-    function mintOtoken(
-        address _owner,
-        uint256 _vaultId,
-        address _oToken,
-        uint256 _amount,
-        address _to
-    ) external onlyAuthorized(_owner) {
+    function mintOtoken(address _owner, uint256 _vaultId, address _oToken, uint256 _amount, address _to)
+        external
+        onlyAuthorized(_owner)
+    {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
 
         if (vault.shortOtoken != address(0) && vault.shortOtoken != _oToken) {
@@ -139,6 +135,8 @@ contract Controller is Initializable, UUPSUpgradeable {
         if (!wl.isWhitelistedOToken(_oToken)) revert OTokenNotWhitelisted();
 
         OToken oToken = OToken(_oToken);
+
+        if (!betaMode && block.timestamp >= oToken.expiry()) revert OptionExpired();
 
         uint256 requiredCollateral = _getRequiredCollateral(oToken, _amount);
         if (vault.collateralAmount < requiredCollateral) revert InsufficientCollateral();
@@ -168,9 +166,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         vaultSettled[_owner][_vaultId] = true;
 
         if (collateralToReturn > 0) {
-            MarginPool(addressBook.marginPool()).transferToUser(
-                vault.collateralAsset, _owner, collateralToReturn
-            );
+            MarginPool(addressBook.marginPool()).transferToUser(vault.collateralAsset, _owner, collateralToReturn);
         }
 
         emit VaultSettled(_owner, _vaultId, collateralToReturn);
@@ -200,21 +196,13 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     // --- View Functions ---
 
-    function getVault(address _owner, uint256 _vaultId)
-        external
-        view
-        returns (MarginVault.Vault memory)
-    {
+    function getVault(address _owner, uint256 _vaultId) external view returns (MarginVault.Vault memory) {
         return vaults[_owner][_vaultId];
     }
 
     // --- Internal ---
 
-    function _getVault(address _owner, uint256 _vaultId)
-        internal
-        view
-        returns (MarginVault.Vault storage)
-    {
+    function _getVault(address _owner, uint256 _vaultId) internal view returns (MarginVault.Vault storage) {
         if (_vaultId == 0 || _vaultId > vaultCount[_owner]) revert InvalidVault();
         return vaults[_owner][_vaultId];
     }
@@ -227,11 +215,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         }
     }
 
-    function _calculatePayout(OToken oToken, uint256 _amount, uint256 _expiryPrice)
-        internal
-        view
-        returns (uint256)
-    {
+    function _calculatePayout(OToken oToken, uint256 _amount, uint256 _expiryPrice) internal view returns (uint256) {
         uint256 strike = oToken.strikePrice();
 
         if (oToken.isPut()) {

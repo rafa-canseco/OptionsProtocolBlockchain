@@ -6,9 +6,17 @@ solc = "0.8.24"
 optimizer = true
 optimizer_runs = 200
 via_ir = true
+evm_version = "cancun"
 
 [profile.default.fuzz]
 runs = 256
+
+[profile.security.fuzz]
+runs = 10000
+
+[profile.security.invariant]
+runs = 1000
+depth = 100
 
 [rpc_endpoints]
 base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
