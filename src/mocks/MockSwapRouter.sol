@@ -35,14 +35,8 @@ contract MockSwapRouter is ISwapRouter {
         override
         returns (uint256 amountIn)
     {
-        require(
-            params.tokenOut == weth || params.tokenOut == usdc,
-            "MockSwapRouter: unsupported tokenOut"
-        );
-        require(
-            params.tokenIn == weth || params.tokenIn == usdc,
-            "MockSwapRouter: unsupported tokenIn"
-        );
+        require(params.tokenOut == weth || params.tokenOut == usdc, "MockSwapRouter: unsupported tokenOut");
+        require(params.tokenIn == weth || params.tokenIn == usdc, "MockSwapRouter: unsupported tokenIn");
 
         (, int256 rawPrice,,,) = priceFeed.latestRoundData();
         require(rawPrice > 0, "MockSwapRouter: invalid price");

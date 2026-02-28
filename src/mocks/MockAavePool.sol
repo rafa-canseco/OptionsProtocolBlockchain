@@ -23,7 +23,10 @@ contract MockAavePool is IPool {
         uint256 amount,
         bytes calldata params,
         uint16 /* referralCode */
-    ) external override {
+    )
+        external
+        override
+    {
         // Mint tokens from nothing (MockERC20 has public mint)
         MockERC20(asset).mint(address(this), amount);
 
@@ -34,9 +37,8 @@ contract MockAavePool is IPool {
         uint256 premium = (amount * FLASH_LOAN_FEE_BPS) / 10_000;
 
         // Call receiver's callback (initiator = msg.sender, matching real Aave V3)
-        bool success = IFlashLoanSimpleReceiver(receiverAddress).executeOperation(
-            asset, amount, premium, msg.sender, params
-        );
+        bool success =
+            IFlashLoanSimpleReceiver(receiverAddress).executeOperation(asset, amount, premium, msg.sender, params);
         require(success, "Flash loan callback failed");
 
         // Pull back amount + premium

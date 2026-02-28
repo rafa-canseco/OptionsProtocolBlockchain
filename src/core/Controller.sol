@@ -40,11 +40,26 @@ contract Controller is Initializable, UUPSUpgradeable {
     /// @notice Whether a vault has been settled
     mapping(address => mapping(uint256 => bool)) public vaultSettled;
 
+    /// @notice Whether new positions are blocked (settle/redeem still allowed)
+    bool public systemPartiallyPaused;
+
+    /// @notice Whether all operations are blocked
+    bool public systemFullyPaused;
+
+    /// @notice Address authorized to toggle partial pause
+    address public partialPauser;
+
     event VaultOpened(address indexed owner, uint256 vaultId);
     event CollateralDeposited(address indexed owner, uint256 vaultId, address asset, uint256 amount);
     event OTokenMinted(address indexed owner, uint256 vaultId, address oToken, uint256 amount);
     event VaultSettled(address indexed owner, uint256 vaultId, uint256 collateralReturned);
     event Redeemed(address indexed oToken, address indexed redeemer, uint256 otokenAmount, uint256 payout);
+    event SystemPartiallyPaused(address indexed caller);
+    event SystemFullyPaused(address indexed caller);
+    event SystemUnpaused(address indexed caller);
+    event EmergencyWithdraw(address indexed user, uint256 vaultId, address asset, uint256 amount);
+    event PartialPauserUpdated(address indexed oldPauser, address indexed newPauser);
+
     error OnlyOwner();
     error InvalidVault();
     error VaultAlreadyHasShort();
@@ -57,6 +72,11 @@ contract Controller is Initializable, UUPSUpgradeable {
     error OTokenNotWhitelisted();
     error Unauthorized();
     error InvalidAddress();
+    error SystemIsPartiallyPaused();
+    error SystemIsFullyPaused();
+    error OnlyPartialPauser();
+    error NoCollateral();
+    error SystemNotFullyPaused();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -67,6 +87,16 @@ contract Controller is Initializable, UUPSUpgradeable {
         if (msg.sender != _owner && msg.sender != addressBook.batchSettler()) {
             revert Unauthorized();
         }
+        _;
+    }
+
+    modifier notPartiallyPaused() {
+        if (systemPartiallyPaused) revert SystemIsPartiallyPaused();
+        _;
+    }
+
+    modifier notFullyPaused() {
+        if (systemFullyPaused) revert SystemIsFullyPaused();
         _;
     }
 
@@ -83,7 +113,13 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     // --- Vault Operations ---
 
-    function openVault(address _owner) external onlyAuthorized(_owner) returns (uint256) {
+    function openVault(address _owner)
+        external
+        onlyAuthorized(_owner)
+        notPartiallyPaused
+        notFullyPaused
+        returns (uint256)
+    {
         uint256 vaultId = vaultCount[_owner] + 1;
         vaultCount[_owner] = vaultId;
 
@@ -94,7 +130,11 @@ contract Controller is Initializable, UUPSUpgradeable {
     function depositCollateral(address _owner, uint256 _vaultId, address _asset, uint256 _amount)
         external
         onlyAuthorized(_owner)
+        notPartiallyPaused
+        notFullyPaused
     {
+        if (vaultSettled[_owner][_vaultId]) revert VaultAlreadySettledError();
+
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
 
         if (vault.collateralAsset != address(0) && vault.collateralAsset != _asset) {
@@ -112,8 +152,11 @@ contract Controller is Initializable, UUPSUpgradeable {
     function mintOtoken(address _owner, uint256 _vaultId, address _oToken, uint256 _amount, address _to)
         external
         onlyAuthorized(_owner)
+        notPartiallyPaused
+        notFullyPaused
     {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
+        if (vaultSettled[_owner][_vaultId]) revert VaultAlreadySettledError();
 
         if (vault.shortOtoken != address(0) && vault.shortOtoken != _oToken) {
             revert VaultAlreadyHasShort();
@@ -135,7 +178,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         emit OTokenMinted(_owner, _vaultId, _oToken, _amount);
     }
 
-    function settleVault(address _owner, uint256 _vaultId) external onlyAuthorized(_owner) {
+    function settleVault(address _owner, uint256 _vaultId) external onlyAuthorized(_owner) notFullyPaused {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
         if (vaultSettled[_owner][_vaultId]) revert VaultAlreadySettledError();
 
@@ -158,7 +201,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         emit VaultSettled(_owner, _vaultId, collateralToReturn);
     }
 
-    function redeem(address _oToken, uint256 _amount) external {
+    function redeem(address _oToken, uint256 _amount) external notFullyPaused {
         if (_amount == 0) revert NoOtokensToRedeem();
 
         OToken oToken = OToken(_oToken);
@@ -213,6 +256,63 @@ contract Controller is Initializable, UUPSUpgradeable {
         }
     }
 
+    // --- Pause Management ---
+
+    function setPartialPauser(address _pauser) external onlyOwner {
+        emit PartialPauserUpdated(partialPauser, _pauser);
+        partialPauser = _pauser;
+    }
+
+    function setSystemPartiallyPaused(bool _paused) external {
+        if (msg.sender != partialPauser && msg.sender != owner) {
+            revert OnlyPartialPauser();
+        }
+
+        systemPartiallyPaused = _paused;
+
+        if (_paused) {
+            emit SystemPartiallyPaused(msg.sender);
+        } else {
+            emit SystemUnpaused(msg.sender);
+        }
+    }
+
+    function setSystemFullyPaused(bool _paused) external onlyOwner {
+        systemFullyPaused = _paused;
+
+        if (_paused) {
+            emit SystemFullyPaused(msg.sender);
+        } else {
+            emit SystemUnpaused(msg.sender);
+        }
+    }
+
+    /// @notice Allows a vault owner to rescue their collateral when the
+    ///         system is fully paused (emergency circuit breaker).
+    /// @dev    Marks the vault as settled to prevent double-claims.
+    ///         vault.collateralAmount remains in storage (stale by design,
+    ///         consistent with settleVault which also does not zero it).
+    ///         oTokens minted against this vault lose their collateral
+    ///         backing — this is the expected tradeoff in an emergency.
+    function emergencyWithdrawVault(uint256 _vaultId) external {
+        if (!systemFullyPaused) revert SystemNotFullyPaused();
+
+        MarginVault.Vault storage vault = _getVault(msg.sender, _vaultId);
+        if (vaultSettled[msg.sender][_vaultId]) {
+            revert VaultAlreadySettledError();
+        }
+        if (vault.collateralAmount == 0) revert NoCollateral();
+
+        uint256 amount = vault.collateralAmount;
+        address asset = vault.collateralAsset;
+
+        vaultSettled[msg.sender][_vaultId] = true;
+
+        MarginPool(addressBook.marginPool()).transferToUser(asset, msg.sender, amount);
+
+        emit EmergencyWithdraw(msg.sender, _vaultId, asset, amount);
+    }
+
     // --- Ownership ---
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -225,5 +325,5 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[45] private __gap;
+    uint256[44] private __gap;
 }

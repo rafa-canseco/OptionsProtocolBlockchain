@@ -58,30 +58,48 @@ contract ControllerFuzzTest is Test {
         weth = new MockERC20("WETH", "WETH", 18);
         usdc = new MockERC20("USDC", "USDC", 6);
 
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (address(this)))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
-        )));
-        whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
-        )));
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()),
+                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -111,9 +129,7 @@ contract ControllerFuzzTest is Test {
         // Bound: 1 unit to 1M oTokens (avoid overflow in collateral calc)
         amount = bound(amount, 1, 1_000_000e8);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
         uint256 requiredCollateral = (amount * strikePrice) / 1e10;
@@ -135,9 +151,7 @@ contract ControllerFuzzTest is Test {
         // Ensure collateral is strictly less than required
         collateral = bound(collateral, 0, requiredCollateral - 1);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
         vm.startPrank(user);
@@ -153,9 +167,7 @@ contract ControllerFuzzTest is Test {
     function testFuzz_callMintWithSufficientCollateral(uint256 amount) public {
         amount = bound(amount, 1, 1_000_000e8);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(weth), strikePrice, expiry, false
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(weth), strikePrice, expiry, false);
         whitelist.whitelistOToken(oToken);
 
         uint256 requiredCollateral = amount * 1e10;
@@ -174,9 +186,7 @@ contract ControllerFuzzTest is Test {
         // Price between $1 and $100,000
         expiryPrice = bound(expiryPrice, 1e8, 100_000e8);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
         uint256 amount = 1e8;
@@ -215,9 +225,7 @@ contract ControllerFuzzTest is Test {
     function testFuzz_callSettlementPayout(uint256 expiryPrice) public {
         expiryPrice = bound(expiryPrice, 1e8, 100_000e8);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(weth), strikePrice, expiry, false
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(weth), strikePrice, expiry, false);
         whitelist.whitelistOToken(oToken);
 
         uint256 amount = 1e8;
@@ -271,14 +279,18 @@ contract OracleFuzzTest is Test {
     Oracle public oracle;
 
     function setUp() public {
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (address(this)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
-        )));
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
     }
 
     /// @notice Any non-zero price can be set for expiry
@@ -341,34 +353,56 @@ contract BatchSettlerFuzzTest is Test {
         weth = new MockERC20("WETH", "WETH", 18);
         usdc = new MockERC20("USDC", "USDC", 6);
 
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (address(this)))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
-        )));
-        whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
-        )));
-        settler = BatchSettler(address(new ERC1967Proxy(
-            address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
-        )));
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()),
+                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+                )
+            )
+        );
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -392,7 +426,8 @@ contract BatchSettlerFuzzTest is Test {
     }
 
     function _signQuote(address oToken, uint256 bidPrice, uint256 deadline, uint256 maxAmount)
-        internal returns (BatchSettler.Quote memory quote, bytes memory sig)
+        internal
+        returns (BatchSettler.Quote memory quote, bytes memory sig)
     {
         quote = BatchSettler.Quote({
             oToken: oToken,
@@ -411,12 +446,11 @@ contract BatchSettlerFuzzTest is Test {
     function testFuzz_multipleUsersExecuteOrders(uint8 rawCount) public {
         uint256 count = bound(uint256(rawCount), 1, 10);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
-        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 50e6, block.timestamp + 1 hours, count * 1e8);
+        (BatchSettler.Quote memory q, bytes memory sig) =
+            _signQuote(oToken, 50e6, block.timestamp + 1 hours, count * 1e8);
 
         for (uint256 i = 0; i < count; i++) {
             address userAddr = address(uint160(0xF000 + i));
@@ -437,9 +471,7 @@ contract BatchSettlerFuzzTest is Test {
     function testFuzz_premiumCalculation(uint256 bidPrice) public {
         bidPrice = bound(bidPrice, 1, 1_000e6); // $0.000001 to $1000 per oToken
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
         (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, bidPrice, block.timestamp + 1 hours, 100e8);
@@ -463,9 +495,7 @@ contract BatchSettlerFuzzTest is Test {
     function testFuzz_expiredQuoteAlwaysReverts(uint256 warpTime) public {
         warpTime = bound(warpTime, 1 hours + 1, 365 days);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
         (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 50e6, block.timestamp + 1 hours, 100e8);
@@ -493,12 +523,11 @@ contract BatchSettlerFuzzTest is Test {
         settler.setTreasury(treasury);
         settler.setProtocolFeeBps(feeBps);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
-        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, bidPrice, block.timestamp + 1 hours, 1000e8);
+        (BatchSettler.Quote memory q, bytes memory sig) =
+            _signQuote(oToken, bidPrice, block.timestamp + 1 hours, 1000e8);
 
         uint256 collateral = (amount * strikePrice) / 1e10;
 
@@ -536,18 +565,26 @@ contract MarginPoolFuzzTest is Test {
     function setUp() public {
         usdc = new MockERC20("USDC", "USDC", 6);
 
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (address(this)))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -605,12 +642,13 @@ contract FuzzMockAavePool {
         uint256 amount,
         bytes calldata params,
         uint16 /* referralCode */
-    ) external {
+    )
+        external
+    {
         IERC20(asset).safeTransfer(receiverAddress, amount);
         uint256 premium = (amount * FLASH_LOAN_FEE_BPS) / 10_000;
-        bool success = IFlashLoanSimpleReceiver(receiverAddress).executeOperation(
-            asset, amount, premium, receiverAddress, params
-        );
+        bool success =
+            IFlashLoanSimpleReceiver(receiverAddress).executeOperation(asset, amount, premium, receiverAddress, params);
         require(success, "Flash loan callback failed");
         IERC20(asset).safeTransferFrom(receiverAddress, address(this), amount + premium);
     }
@@ -696,34 +734,56 @@ contract PhysicalRedeemFuzzTest is Test {
         mockAave = new FuzzMockAavePool();
         mockRouter = new FuzzMockSwapRouter(1800e6, address(weth), address(usdc));
 
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (address(this)))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
-        )));
-        whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
-        )));
-        settler = BatchSettler(address(new ERC1967Proxy(
-            address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
-        )));
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()),
+                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+                )
+            )
+        );
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -768,7 +828,8 @@ contract PhysicalRedeemFuzzTest is Test {
     }
 
     function _signQuote(address oToken, uint256 bidPrice, uint256 deadline, uint256 maxAmount)
-        internal returns (BatchSettler.Quote memory quote, bytes memory sig)
+        internal
+        returns (BatchSettler.Quote memory quote, bytes memory sig)
     {
         quote = BatchSettler.Quote({
             oToken: oToken,
@@ -787,15 +848,14 @@ contract PhysicalRedeemFuzzTest is Test {
     function testFuzz_physicalRedeem_putITM_amount(uint256 amount) public {
         amount = bound(amount, 1, 1_000_000e8);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
         uint256 collateral = (amount * strikePrice) / 1e10;
 
         // Use bidPrice = 1e8 to avoid premium truncation for tiny amounts
-        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 1e8, block.timestamp + 1 hours, type(uint128).max);
+        (BatchSettler.Quote memory q, bytes memory sig) =
+            _signQuote(oToken, 1e8, block.timestamp + 1 hours, type(uint128).max);
 
         vm.prank(alice);
         settler.executeOrder(q, sig, amount, collateral);
@@ -833,14 +893,13 @@ contract PhysicalRedeemFuzzTest is Test {
     function testFuzz_physicalRedeem_callITM_amount(uint256 amount) public {
         amount = bound(amount, 1, 1_000_000e8);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(weth), strikePrice, expiry, false
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(weth), strikePrice, expiry, false);
         whitelist.whitelistOToken(oToken);
 
         uint256 collateral = amount * 1e10;
 
-        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 1e8, block.timestamp + 1 hours, type(uint128).max);
+        (BatchSettler.Quote memory q, bytes memory sig) =
+            _signQuote(oToken, 1e8, block.timestamp + 1 hours, type(uint128).max);
 
         vm.prank(alice);
         settler.executeOrder(q, sig, amount, collateral);
@@ -881,9 +940,7 @@ contract PhysicalRedeemFuzzTest is Test {
         // At expiryPrice ≈ strike, swap cost ≈ collateral + flash loan fee > collateral → reverts.
         expiryPrice = bound(expiryPrice, 1e8, strikePrice * 9990 / 10000);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
         uint256 amount = 1e8;
@@ -929,9 +986,7 @@ contract PhysicalRedeemFuzzTest is Test {
         // At expiryPrice ≈ strike, swap cost ≈ collateral + flash loan fee > collateral → reverts.
         expiryPrice = bound(expiryPrice, strikePrice * 10010 / 10000, 100_000e8);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(weth), strikePrice, expiry, false
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(weth), strikePrice, expiry, false);
         whitelist.whitelistOToken(oToken);
 
         uint256 amount = 1e8;
@@ -1004,34 +1059,56 @@ contract ProtocolFeeFuzzTest is Test {
         weth = new MockERC20("WETH", "WETH", 18);
         usdc = new MockERC20("USDC", "USDC", 6);
 
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (address(this)))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
-        )));
-        whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
-        )));
-        settler = BatchSettler(address(new ERC1967Proxy(
-            address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
-        )));
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()),
+                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+                )
+            )
+        );
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
@@ -1055,7 +1132,8 @@ contract ProtocolFeeFuzzTest is Test {
     }
 
     function _signQuote(address oToken, uint256 bidPrice, uint256 deadline, uint256 maxAmount)
-        internal returns (BatchSettler.Quote memory quote, bytes memory sig)
+        internal
+        returns (BatchSettler.Quote memory quote, bytes memory sig)
     {
         quote = BatchSettler.Quote({
             oToken: oToken,
@@ -1079,12 +1157,11 @@ contract ProtocolFeeFuzzTest is Test {
         settler.setTreasury(treasury);
         settler.setProtocolFeeBps(feeBps);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
-        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, bidPrice, block.timestamp + 1 hours, type(uint128).max);
+        (BatchSettler.Quote memory q, bytes memory sig) =
+            _signQuote(oToken, bidPrice, block.timestamp + 1 hours, type(uint128).max);
 
         uint256 collateral = (amount * strikePrice) / 1e10;
 
@@ -1123,9 +1200,7 @@ contract ProtocolFeeFuzzTest is Test {
         settler.setTreasury(treasury);
         // protocolFeeBps defaults to 0
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
         (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, bidPrice, block.timestamp + 1 hours, 100e8);
@@ -1154,9 +1229,7 @@ contract ProtocolFeeFuzzTest is Test {
         // treasury defaults to address(0), only set feeBps
         settler.setProtocolFeeBps(feeBps);
 
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc), strikePrice, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
         (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, bidPrice, block.timestamp + 1 hours, 100e8);

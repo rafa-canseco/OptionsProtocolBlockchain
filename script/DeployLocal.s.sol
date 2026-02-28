@@ -40,34 +40,52 @@ contract DeployLocal is Script {
         MockChainlinkFeed ethFeed = new MockChainlinkFeed(2500e8);
 
         // --- Deploy protocol (behind proxies) ---
-        AddressBook addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (deployer))
-        )));
-        Controller controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), deployer))
-        )));
-        MarginPool pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        OTokenFactory factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        Oracle oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), deployer))
-        )));
-        Whitelist whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), deployer))
-        )));
-        BatchSettler settler = BatchSettler(address(new ERC1967Proxy(
-            address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), deployer, deployer))
-        )));
+        AddressBook addressBook = AddressBook(
+            address(new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (deployer))))
+        );
+        Controller controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()), abi.encodeCall(Controller.initialize, (address(addressBook), deployer))
+                )
+            )
+        );
+        MarginPool pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        OTokenFactory factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        Oracle oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), deployer))
+                )
+            )
+        );
+        Whitelist whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()), abi.encodeCall(Whitelist.initialize, (address(addressBook), deployer))
+                )
+            )
+        );
+        BatchSettler settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), deployer, deployer))
+                )
+            )
+        );
 
         // --- Wire AddressBook ---
         addressBook.setController(address(controller));
@@ -84,7 +102,7 @@ contract DeployLocal is Script {
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
         whitelist.whitelistCollateral(address(weth));
-        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);  // PUT
+        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true); // PUT
         whitelist.whitelistProduct(address(weth), address(usdc), address(weth), false); // CALL
 
         // --- Set Chainlink feed ---
