@@ -40,16 +40,11 @@ contract Controller is Initializable, UUPSUpgradeable {
     /// @notice Whether a vault has been settled
     mapping(address => mapping(uint256 => bool)) public vaultSettled;
 
-    /// @notice When true, expiry time checks are bypassed (for testnet demos)
-    bool public betaMode;
-
     event VaultOpened(address indexed owner, uint256 vaultId);
     event CollateralDeposited(address indexed owner, uint256 vaultId, address asset, uint256 amount);
     event OTokenMinted(address indexed owner, uint256 vaultId, address oToken, uint256 amount);
     event VaultSettled(address indexed owner, uint256 vaultId, uint256 collateralReturned);
     event Redeemed(address indexed oToken, address indexed redeemer, uint256 otokenAmount, uint256 payout);
-    event BetaModeSet(bool enabled);
-
     error OnlyOwner();
     error InvalidVault();
     error VaultAlreadyHasShort();
@@ -86,12 +81,6 @@ contract Controller is Initializable, UUPSUpgradeable {
         owner = _owner;
     }
 
-    /// @notice Enable or disable beta mode (bypasses expiry time checks). Owner only.
-    function setBetaMode(bool _enabled) external onlyOwner {
-        betaMode = _enabled;
-        emit BetaModeSet(_enabled);
-    }
-
     // --- Vault Operations ---
 
     function openVault(address _owner) external onlyAuthorized(_owner) returns (uint256) {
@@ -102,12 +91,10 @@ contract Controller is Initializable, UUPSUpgradeable {
         return vaultId;
     }
 
-    function depositCollateral(
-        address _owner,
-        uint256 _vaultId,
-        address _asset,
-        uint256 _amount
-    ) external onlyAuthorized(_owner) {
+    function depositCollateral(address _owner, uint256 _vaultId, address _asset, uint256 _amount)
+        external
+        onlyAuthorized(_owner)
+    {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
 
         if (vault.collateralAsset != address(0) && vault.collateralAsset != _asset) {
@@ -122,13 +109,10 @@ contract Controller is Initializable, UUPSUpgradeable {
         emit CollateralDeposited(_owner, _vaultId, _asset, _amount);
     }
 
-    function mintOtoken(
-        address _owner,
-        uint256 _vaultId,
-        address _oToken,
-        uint256 _amount,
-        address _to
-    ) external onlyAuthorized(_owner) {
+    function mintOtoken(address _owner, uint256 _vaultId, address _oToken, uint256 _amount, address _to)
+        external
+        onlyAuthorized(_owner)
+    {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
 
         if (vault.shortOtoken != address(0) && vault.shortOtoken != _oToken) {
@@ -156,7 +140,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         if (vaultSettled[_owner][_vaultId]) revert VaultAlreadySettledError();
 
         OToken oToken = OToken(vault.shortOtoken);
-        if (!betaMode && block.timestamp < oToken.expiry()) revert OptionNotExpired();
+        if (block.timestamp < oToken.expiry()) revert OptionNotExpired();
 
         Oracle oracle = Oracle(addressBook.oracle());
         (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(oToken.underlying(), oToken.expiry());
@@ -168,9 +152,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         vaultSettled[_owner][_vaultId] = true;
 
         if (collateralToReturn > 0) {
-            MarginPool(addressBook.marginPool()).transferToUser(
-                vault.collateralAsset, _owner, collateralToReturn
-            );
+            MarginPool(addressBook.marginPool()).transferToUser(vault.collateralAsset, _owner, collateralToReturn);
         }
 
         emit VaultSettled(_owner, _vaultId, collateralToReturn);
@@ -180,7 +162,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         if (_amount == 0) revert NoOtokensToRedeem();
 
         OToken oToken = OToken(_oToken);
-        if (!betaMode && block.timestamp < oToken.expiry()) revert OptionNotExpired();
+        if (block.timestamp < oToken.expiry()) revert OptionNotExpired();
 
         Oracle oracle = Oracle(addressBook.oracle());
         (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(oToken.underlying(), oToken.expiry());
@@ -200,21 +182,13 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     // --- View Functions ---
 
-    function getVault(address _owner, uint256 _vaultId)
-        external
-        view
-        returns (MarginVault.Vault memory)
-    {
+    function getVault(address _owner, uint256 _vaultId) external view returns (MarginVault.Vault memory) {
         return vaults[_owner][_vaultId];
     }
 
     // --- Internal ---
 
-    function _getVault(address _owner, uint256 _vaultId)
-        internal
-        view
-        returns (MarginVault.Vault storage)
-    {
+    function _getVault(address _owner, uint256 _vaultId) internal view returns (MarginVault.Vault storage) {
         if (_vaultId == 0 || _vaultId > vaultCount[_owner]) revert InvalidVault();
         return vaults[_owner][_vaultId];
     }
@@ -227,11 +201,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         }
     }
 
-    function _calculatePayout(OToken oToken, uint256 _amount, uint256 _expiryPrice)
-        internal
-        view
-        returns (uint256)
-    {
+    function _calculatePayout(OToken oToken, uint256 _amount, uint256 _expiryPrice) internal view returns (uint256) {
         uint256 strike = oToken.strikePrice();
 
         if (oToken.isPut()) {
@@ -255,5 +225,5 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[44] private __gap;
+    uint256[45] private __gap;
 }

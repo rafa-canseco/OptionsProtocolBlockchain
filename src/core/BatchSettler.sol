@@ -45,11 +45,11 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     struct Quote {
         address oToken;
-        uint256 bidPrice;     // premium per oToken (1e8 scale, in strike asset units)
-        uint256 deadline;     // unix timestamp
-        uint256 quoteId;      // unique per MM, for fill tracking + cancellation
-        uint256 maxAmount;    // max oTokens fillable (8 decimals)
-        uint256 makerNonce;   // must match current makerNonce[signer]
+        uint256 bidPrice; // premium per oToken (1e8 scale, in strike asset units)
+        uint256 deadline; // unix timestamp
+        uint256 quoteId; // unique per MM, for fill tracking + cancellation
+        uint256 maxAmount; // max oTokens fillable (8 decimals)
+        uint256 makerNonce; // must match current makerNonce[signer]
     }
 
     bytes32 public constant QUOTE_TYPEHASH = keccak256(
@@ -98,12 +98,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     event VaultSettleFailed(address indexed vaultOwner, uint256 vaultId, bytes reason);
     event RedeemFailed(address indexed oToken, uint256 amount, bytes reason);
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
-    event PhysicalDelivery(
-        address indexed oToken,
-        address indexed user,
-        uint256 contraAmount,
-        uint256 collateralUsed
-    );
+    event PhysicalDelivery(address indexed oToken, address indexed user, uint256 contraAmount, uint256 collateralUsed);
     event PhysicalRedeemFailed(address indexed oToken, address indexed user, uint256 amount, bytes reason);
     event QuoteCancelled(address indexed mm, bytes32 indexed quoteHash);
     event QuoteCancelSkipped(address indexed mm, bytes32 indexed quoteHash);
@@ -165,15 +160,11 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     }
 
     function _buildDomainSeparator() private view returns (bytes32) {
-        return keccak256(abi.encode(
-            _DOMAIN_TYPEHASH, _NAME_HASH, _VERSION_HASH, block.chainid, address(this)
-        ));
+        return keccak256(abi.encode(_DOMAIN_TYPEHASH, _NAME_HASH, _VERSION_HASH, block.chainid, address(this)));
     }
 
     function _domainSeparator() private view returns (bytes32) {
-        return block.chainid == _cachedChainId
-            ? _cachedDomainSeparator
-            : _buildDomainSeparator();
+        return block.chainid == _cachedChainId ? _cachedDomainSeparator : _buildDomainSeparator();
     }
 
     // ===== Owner setters =====
@@ -225,15 +216,17 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     /// @notice Compute the EIP-712 digest for a Quote struct.
     function hashQuote(Quote calldata quote) public view returns (bytes32) {
-        bytes32 structHash = keccak256(abi.encode(
-            QUOTE_TYPEHASH,
-            quote.oToken,
-            quote.bidPrice,
-            quote.deadline,
-            quote.quoteId,
-            quote.maxAmount,
-            quote.makerNonce
-        ));
+        bytes32 structHash = keccak256(
+            abi.encode(
+                QUOTE_TYPEHASH,
+                quote.oToken,
+                quote.bidPrice,
+                quote.deadline,
+                quote.quoteId,
+                quote.maxAmount,
+                quote.makerNonce
+            )
+        );
         return keccak256(abi.encodePacked("\x19\x01", _domainSeparator(), structHash));
     }
 
@@ -286,12 +279,11 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     // ===== Order Execution =====
 
-    function executeOrder(
-        Quote calldata quote,
-        bytes calldata signature,
-        uint256 amount,
-        uint256 collateral
-    ) external nonReentrant returns (uint256 vaultId) {
+    function executeOrder(Quote calldata quote, bytes calldata signature, uint256 amount, uint256 collateral)
+        external
+        nonReentrant
+        returns (uint256 vaultId)
+    {
         if (quote.oToken == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
 
@@ -356,10 +348,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     // ===== Post-Expiry Settlement =====
 
-    function batchSettleVaults(
-        address[] calldata owners,
-        uint256[] calldata vaultIds
-    ) external onlyOperator {
+    function batchSettleVaults(address[] calldata owners, uint256[] calldata vaultIds) external onlyOperator {
         if (owners.length != vaultIds.length) revert LengthMismatch();
         if (owners.length == 0) revert EmptyArray();
 
@@ -384,20 +373,15 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         for (uint256 i = 0; i < oTokens.length; i++) {
             if (amounts[i] == 0) continue;
 
-            try this._redeemSingle(oTokens[i], amounts[i], msg.sender, ctrl) {
-            } catch (bytes memory reason) {
+            try this._redeemSingle(oTokens[i], amounts[i], msg.sender, ctrl) {}
+            catch (bytes memory reason) {
                 _revertOnPanic(reason);
                 emit RedeemFailed(oTokens[i], amounts[i], reason);
             }
         }
     }
 
-    function _redeemSingle(
-        address oToken,
-        uint256 amount,
-        address caller,
-        Controller ctrl
-    ) external {
+    function _redeemSingle(address oToken, uint256 amount, address caller, Controller ctrl) external {
         if (msg.sender != address(this)) revert InvalidAddress();
 
         IERC20(oToken).safeTransferFrom(caller, address(this), amount);
@@ -415,22 +399,19 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     // ===== Physical Delivery (flash loan + DEX swap) =====
 
-    function physicalRedeem(
-        address oToken,
-        address user,
-        uint256 amount,
-        uint256 maxCollateralSpent
-    ) public onlyOperator nonReentrant {
+    function physicalRedeem(address oToken, address user, uint256 amount, uint256 maxCollateralSpent)
+        public
+        onlyOperator
+        nonReentrant
+    {
         _executePhysicalRedeem(oToken, user, amount, maxCollateralSpent);
     }
 
-    function executeOperation(
-        address asset,
-        uint256 amount,
-        uint256 premium,
-        address initiator,
-        bytes calldata params
-    ) external override returns (bool) {
+    function executeOperation(address asset, uint256 amount, uint256 premium, address initiator, bytes calldata params)
+        external
+        override
+        returns (bool)
+    {
         if (msg.sender != aavePool) revert FlashLoanUnauthorized();
         if (initiator != address(this)) revert FlashLoanUnauthorized();
 
@@ -468,17 +449,18 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
         IERC20(collateralAsset).forceApprove(swapRouter, collateralReceived);
 
-        collateralUsed = ISwapRouter(swapRouter).exactOutputSingle(
-            ISwapRouter.ExactOutputSingleParams({
-                tokenIn: collateralAsset,
-                tokenOut: contraAsset,
-                fee: swapFeeTier,
-                recipient: address(this),
-                amountOut: repayAmount,
-                amountInMaximum: maxCollateralSpent,
-                sqrtPriceLimitX96: 0
-            })
-        );
+        collateralUsed = ISwapRouter(swapRouter)
+            .exactOutputSingle(
+                ISwapRouter.ExactOutputSingleParams({
+                    tokenIn: collateralAsset,
+                    tokenOut: contraAsset,
+                    fee: swapFeeTier,
+                    recipient: address(this),
+                    amountOut: repayAmount,
+                    amountInMaximum: maxCollateralSpent,
+                    sqrtPriceLimitX96: 0
+                })
+            );
 
         uint256 surplus = collateralReceived - collateralUsed;
         if (surplus > 0) {
@@ -494,37 +476,32 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         uint256[] calldata amounts,
         uint256[] calldata maxCollateralSpents
     ) external onlyOperator {
-        if (oTokens.length != users.length || users.length != amounts.length
-            || amounts.length != maxCollateralSpents.length) revert LengthMismatch();
+        if (
+            oTokens.length != users.length || users.length != amounts.length
+                || amounts.length != maxCollateralSpents.length
+        ) revert LengthMismatch();
         if (oTokens.length == 0) revert EmptyArray();
 
         for (uint256 i = 0; i < oTokens.length; i++) {
             if (amounts[i] == 0) continue;
 
-            try this._physicalRedeemSingle(oTokens[i], users[i], amounts[i], maxCollateralSpents[i]) {
-            } catch (bytes memory reason) {
+            try this._physicalRedeemSingle(oTokens[i], users[i], amounts[i], maxCollateralSpents[i]) {}
+            catch (bytes memory reason) {
                 _revertOnPanic(reason);
                 emit PhysicalRedeemFailed(oTokens[i], users[i], amounts[i], reason);
             }
         }
     }
 
-    function _physicalRedeemSingle(
-        address oToken,
-        address user,
-        uint256 amount,
-        uint256 maxCollateralSpent
-    ) external nonReentrant {
+    function _physicalRedeemSingle(address oToken, address user, uint256 amount, uint256 maxCollateralSpent)
+        external
+        nonReentrant
+    {
         if (msg.sender != address(this)) revert InvalidAddress();
         _executePhysicalRedeem(oToken, user, amount, maxCollateralSpent);
     }
 
-    function _executePhysicalRedeem(
-        address oToken,
-        address user,
-        uint256 amount,
-        uint256 maxCollateralSpent
-    ) private {
+    function _executePhysicalRedeem(address oToken, address user, uint256 amount, uint256 maxCollateralSpent) private {
         if (oToken == address(0)) revert InvalidAddress();
         if (user == address(0)) revert InvalidAddress();
         if (aavePool == address(0)) revert AavePoolNotSet();
@@ -533,7 +510,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
         OToken ot = OToken(oToken);
         Controller ctrl = Controller(addressBook.controller());
-        if (!ctrl.betaMode() && block.timestamp < ot.expiry()) revert OptionNotExpired();
+        if (block.timestamp < ot.expiry()) revert OptionNotExpired();
 
         Oracle oracle = Oracle(addressBook.oracle());
         (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(ot.underlying(), ot.expiry());

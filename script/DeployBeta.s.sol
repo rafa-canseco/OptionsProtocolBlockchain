@@ -19,7 +19,7 @@ import "../src/mocks/MockSwapRouter.sol";
  * @title DeployBeta
  * @notice Deploys the full beta stack to Base Sepolia (UUPS proxied).
  *         Includes mock tokens (LUSD/LETH), mock infrastructure (Aave/SwapRouter),
- *         all 7 protocol contracts behind proxies, and enables betaMode.
+ *         all 7 protocol contracts behind proxies.
  *
  *         Usage:
  *         forge script script/DeployBeta.s.sol:DeployBeta \
@@ -68,34 +68,52 @@ contract DeployBeta is Script {
     }
 
     function _deployProtocol(address deployer) internal {
-        addressBook = AddressBook(address(new ERC1967Proxy(
-            address(new AddressBook()),
-            abi.encodeCall(AddressBook.initialize, (deployer))
-        )));
-        controller = Controller(address(new ERC1967Proxy(
-            address(new Controller()),
-            abi.encodeCall(Controller.initialize, (address(addressBook), deployer))
-        )));
-        pool = MarginPool(address(new ERC1967Proxy(
-            address(new MarginPool()),
-            abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-        )));
-        factory = OTokenFactory(address(new ERC1967Proxy(
-            address(new OTokenFactory()),
-            abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-        )));
-        oracle = Oracle(address(new ERC1967Proxy(
-            address(new Oracle()),
-            abi.encodeCall(Oracle.initialize, (address(addressBook), deployer))
-        )));
-        whitelist = Whitelist(address(new ERC1967Proxy(
-            address(new Whitelist()),
-            abi.encodeCall(Whitelist.initialize, (address(addressBook), deployer))
-        )));
-        settler = BatchSettler(address(new ERC1967Proxy(
-            address(new BatchSettler()),
-            abi.encodeCall(BatchSettler.initialize, (address(addressBook), deployer, deployer))
-        )));
+        addressBook = AddressBook(
+            address(new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (deployer))))
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()), abi.encodeCall(Controller.initialize, (address(addressBook), deployer))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), deployer))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()), abi.encodeCall(Whitelist.initialize, (address(addressBook), deployer))
+                )
+            )
+        );
+        settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), deployer, deployer))
+                )
+            )
+        );
     }
 
     function _wireAddressBook() internal {
@@ -115,7 +133,7 @@ contract DeployBeta is Script {
         whitelist.whitelistUnderlying(address(leth));
         whitelist.whitelistCollateral(address(lusd));
         whitelist.whitelistCollateral(address(leth));
-        whitelist.whitelistProduct(address(leth), address(lusd), address(lusd), true);  // PUT
+        whitelist.whitelistProduct(address(leth), address(lusd), address(lusd), true); // PUT
         whitelist.whitelistProduct(address(leth), address(lusd), address(leth), false); // CALL
 
         // Oracle price feed
@@ -127,9 +145,6 @@ contract DeployBeta is Script {
         settler.setSwapFeeTier(500);
         settler.setTreasury(deployer);
         settler.setProtocolFeeBps(400); // 4%
-
-        // Enable betaMode
-        controller.setBetaMode(true);
 
         // Mint initial tokens to deployer
         lusd.mint(deployer, 1_000_000e6);

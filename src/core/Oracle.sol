@@ -4,7 +4,6 @@ pragma solidity 0.8.24;
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import "./AddressBook.sol";
-import "./Controller.sol";
 
 /**
  * @title Oracle
@@ -28,15 +27,12 @@ contract Oracle is Initializable, UUPSUpgradeable {
 
     event PriceFeedSet(address indexed asset, address indexed feed);
     event ExpiryPriceSet(address indexed asset, uint256 indexed expiry, uint256 price);
-    event ExpiryPriceReset(address indexed asset, uint256 indexed expiry);
-
     error OnlyOwner();
     error PriceAlreadySet();
     error PriceNotSet();
     error FeedNotSet();
     error InvalidPrice();
     error InvalidAddress();
-    error NotBetaMode();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -69,19 +65,6 @@ contract Oracle is Initializable, UUPSUpgradeable {
         expiryPriceSet[_asset][_expiry] = true;
 
         emit ExpiryPriceSet(_asset, _expiry, _price);
-    }
-
-    function resetExpiryPrice(address _asset, uint256 _expiry) external onlyOwner {
-        if (_asset == address(0)) revert InvalidAddress();
-
-        Controller ctrl = Controller(addressBook.controller());
-        if (!ctrl.betaMode()) revert NotBetaMode();
-        if (!expiryPriceSet[_asset][_expiry]) revert PriceNotSet();
-
-        expiryPrice[_asset][_expiry] = 0;
-        expiryPriceSet[_asset][_expiry] = false;
-
-        emit ExpiryPriceReset(_asset, _expiry);
     }
 
     function getExpiryPrice(address _asset, uint256 _expiry) external view returns (uint256, bool) {

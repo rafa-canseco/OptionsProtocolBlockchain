@@ -3,7 +3,6 @@
   "chainId": 84532,
   "rpcUrl": "https://lb.drpc.live/base-sepolia/AoDDk50qb0tXkCHdlvBJuAu4OZKUGXYR8J9tThukG97E",
   "deployer": "unknown",
-  "betaMode": true,
   "contracts": {
     "LETH": "0x45f3B57231bB03Ba7213a50FBe03f1B3De71412B",
     "LUSD": "0x7fC7F74e5ED3a4ff03eDc310919779DD59D9C17A",
