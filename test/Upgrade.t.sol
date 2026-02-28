@@ -295,10 +295,20 @@ contract UpgradeTest is Test {
     function test_upgradeController_preservesState() public {
         assertEq(controller.owner(), owner);
 
+        // Set pause state before upgrade
+        address testPauser = address(0x9999);
+        controller.setPartialPauser(testPauser);
+        controller.setSystemFullyPaused(true);
+        vm.prank(testPauser);
+        controller.setSystemPartiallyPaused(true);
+
         ControllerV2 v2Impl = new ControllerV2();
         controller.upgradeToAndCall(address(v2Impl), "");
 
         assertEq(controller.owner(), owner);
+        assertTrue(controller.systemPartiallyPaused());
+        assertTrue(controller.systemFullyPaused());
+        assertEq(controller.partialPauser(), testPauser);
         assertEq(ControllerV2(address(controller)).version(), 2);
     }
 
