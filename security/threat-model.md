@@ -49,9 +49,15 @@ contract upgrade.
 - `setExpiryPrice` is owner-only
 - Once set, price cannot be overwritten (`PriceAlreadySet` error)
 - Invariant #9 (`oracleImmutability`) validates this
+- **Price deviation bounds check:** If a Chainlink feed exists and
+  `priceDeviationThresholdBps > 0`, submitted prices are validated
+  against the live Chainlink price. Deviations beyond the threshold
+  revert with `PriceDeviationTooHigh(submitted, chainlink, deviationBps)`.
+  Catches fat fingers, wrong decimals, and compromised key submissions.
 
-**Residual risk:** Owner compromise allows one-time incorrect price
-setting. Mitigation: multisig for mainnet.
+**Residual risk:** If Chainlink feed returns stale data, the bounds
+check compares against stale price (could be inaccurate). Gracefully
+skipped if feed returns non-positive answer. Multisig for mainnet.
 
 ### 3. Flash Loan Callback Hijacking
 

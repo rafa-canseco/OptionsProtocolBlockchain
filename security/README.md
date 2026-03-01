@@ -16,10 +16,10 @@ for collateral payout).
 | MarginPool | 58 | UUPS | Holds collateral (USDC/WETH) |
 | OToken | 106 | — | ERC20 per option series (non-upgradeable) |
 | OTokenFactory | 126 | UUPS | CREATE2 deployment of OToken instances |
-| Oracle | 104 | UUPS | Expiry price storage + Chainlink live price |
+| Oracle | 138 | UUPS | Expiry price storage + Chainlink live price + deviation bounds |
 | Whitelist | 106 | UUPS | Asset/product/oToken/MM allow lists |
 | BatchSettler | 564 | UUPS | Order execution, batch settlement, physical delivery |
-| **Total** | **1,497** | | |
+| **Total** | **1,531** | | |
 
 Out of scope: mock contracts (`src/mocks/`), test files, interfaces.
 
@@ -37,7 +37,7 @@ Out of scope: mock contracts (`src/mocks/`), test files, interfaces.
 | AddressBook owner | Deployer multisig | Register/update all protocol addresses, upgrade contracts |
 | Controller owner | Deployer multisig | setPartialPauser, setSystemFullyPaused, transferOwnership, upgrade |
 | Partial pauser | Set by Controller owner | Toggle partial pause (blocks new positions, exits remain open) |
-| Oracle owner | Deployer multisig | Set price feeds, set/reset expiry prices |
+| Oracle owner | Deployer multisig | Set price feeds, set/reset expiry prices, set deviation threshold |
 | BatchSettler owner | Deployer multisig | Set operator, fee BPS, treasury, swap fee tier, Aave/Uniswap addresses, upgrade |
 | BatchSettler operator | Backend bot | Execute orders, batch settle, batch redeem, physical redeem |
 | Whitelist owner | Deployer multisig | Whitelist assets, products, oTokens, MMs |
@@ -46,15 +46,15 @@ Out of scope: mock contracts (`src/mocks/`), test files, interfaces.
 
 | Category | Files | Tests | Runs |
 |----------|-------|-------|------|
-| Unit | 9 files | 186 | 186 |
+| Unit | 9 files | 196 | 196 |
 | Fuzz | 1 file | 23 | 5,888 |
 | Invariant (original) | 1 file | 4 | 1,024 |
 | Invariant (lifecycle PUT+CALL) | 1 file | 13 | 3,328 |
 | Invariant (batch redeem) | 1 file | 1 | 256 |
 | Invariant (pause/emergency) | 1 file | 6 | 1,536 |
 | Upgrade | 1 file | 50 | 50 |
-| Fork (Base mainnet, PUT+CALL) | 1 file | 4 | 4 |
-| **Total** | **14 files** | **283** | — |
+| Fork (Base mainnet, PUT+CALL+surplus) | 1 file | 5 | 5 |
+| **Total** | **14 files** | **301** | — |
 
 ## Artifacts
 
