@@ -322,6 +322,19 @@ contract ControllerTest is Test {
         vm.stopPrank();
     }
 
+    function test_cannotRedeemBeforeExpiry() public {
+        address oToken = _createPut();
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        vm.stopPrank();
+
+        vm.prank(user);
+        vm.expectRevert(Controller.OptionNotExpired.selector);
+        controller.redeem(oToken, 1e8);
+    }
+
     function test_cannotSettleBeforeExpiry() public {
         address oToken = _createPut();
         vm.startPrank(user);
@@ -396,6 +409,60 @@ contract ControllerTest is Test {
         assertEq(OToken(oToken).balanceOf(user), 0);
     }
 
+    // --- Expiry Guard ---
+
+    function test_cannotMintAtExpiry() public {
+        address oToken = _createPut();
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        vm.stopPrank();
+
+        vm.warp(expiry);
+        vm.prank(user);
+        vm.expectRevert(Controller.OptionExpired.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+    }
+
+    function test_cannotMintAfterExpiry() public {
+        address oToken = _createPut();
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        vm.stopPrank();
+
+        vm.warp(expiry + 1);
+        vm.prank(user);
+        vm.expectRevert(Controller.OptionExpired.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+    }
+
+    function test_cannotMintAtExactExpiry() public {
+        address oToken = _createPut();
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        vm.stopPrank();
+
+        vm.warp(expiry);
+        vm.prank(user);
+        vm.expectRevert(Controller.OptionExpired.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+    }
+
+    function test_canMintOneSecondBeforeExpiry() public {
+        address oToken = _createPut();
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        vm.stopPrank();
+
+        vm.warp(expiry - 1);
+        vm.prank(user);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        assertEq(OToken(oToken).balanceOf(user), 1e8);
+    }
+
     // --- Micro-options ---
 
     function test_microOption_1USDC() public {
@@ -425,69 +492,5 @@ contract ControllerTest is Test {
         assertEq(usdc.balanceOf(user), 100_000e6 - 1e6); // deposited 1 USDC, got 0 back
     }
 
-    // --- Expiry Guard (mintOtoken) ---
 
-    function test_cannotMintAfterExpiry() public {
-        address oToken = _createPut();
-        uint256 collateral = (1e8 * strikePrice) / 1e10;
-
-        vm.startPrank(user);
-        controller.openVault(user);
-        controller.depositCollateral(user, 1, address(usdc), collateral);
-        vm.stopPrank();
-
-        vm.warp(expiry + 1);
-
-        vm.prank(user);
-        vm.expectRevert(Controller.OptionExpired.selector);
-        controller.mintOtoken(user, 1, oToken, 1e8, user);
-    }
-
-    function test_cannotMintAtExactExpiry() public {
-        address oToken = _createPut();
-        uint256 collateral = (1e8 * strikePrice) / 1e10;
-
-        vm.startPrank(user);
-        controller.openVault(user);
-        controller.depositCollateral(user, 1, address(usdc), collateral);
-        vm.stopPrank();
-
-        vm.warp(expiry);
-
-        vm.prank(user);
-        vm.expectRevert(Controller.OptionExpired.selector);
-        controller.mintOtoken(user, 1, oToken, 1e8, user);
-    }
-
-    function test_canMintOneSecondBeforeExpiry() public {
-        address oToken = _createPut();
-        uint256 collateral = (1e8 * strikePrice) / 1e10;
-
-        vm.startPrank(user);
-        controller.openVault(user);
-        controller.depositCollateral(user, 1, address(usdc), collateral);
-        vm.warp(expiry - 1);
-        controller.mintOtoken(user, 1, oToken, 1e8, user);
-        vm.stopPrank();
-
-        assertEq(OToken(oToken).balanceOf(user), 1e8);
-    }
-
-    function test_betaMode_allowsMintAfterExpiry() public {
-        address oToken = _createPut();
-        uint256 collateral = (1e8 * strikePrice) / 1e10;
-
-        controller.setBetaMode(true);
-
-        vm.startPrank(user);
-        controller.openVault(user);
-        controller.depositCollateral(user, 1, address(usdc), collateral);
-        vm.stopPrank();
-
-        vm.warp(expiry + 1);
-
-        vm.prank(user);
-        controller.mintOtoken(user, 1, oToken, 1e8, user);
-        assertEq(OToken(oToken).balanceOf(user), 1e8);
-    }
 }

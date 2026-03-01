@@ -85,7 +85,6 @@ deployment = {
     'chainId': 84532,
     'rpcUrl': '$BASE_SEPOLIA_RPC_URL',
     'deployer': '$DEPLOYER_ADDR',
-    'betaMode': True,
     'contracts': {
         'LETH': addrs.get('LETH', ''),
         'LUSD': addrs.get('LUSD', ''),
@@ -189,7 +188,6 @@ echo ""
 echo "=== Beta Deployment Summary ==="
 echo "  Chain:                 Base Sepolia (84532)"
 echo "  Deployer:              $DEPLOYER_ADDR"
-echo "  betaMode:              enabled"
 echo "  Protocol fee:          400 bps (4%)"
 echo "  deployments-beta.json: $BLOCKCHAIN_DIR/deployments-beta.json"
 echo "  ABIs:                  $ABI_DIR/"

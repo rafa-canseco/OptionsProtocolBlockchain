@@ -1,171 +1,122 @@
-# Static Analysis Report — B1N-83
+# Static Analysis Report — b1nary Options Protocol
 
-**Date:** 2026-02-27
-**Tools:** Slither v0.10.x (101 detectors), Aderyn v0.1.9 (63 detectors)
+**Date:** 2026-02-28
+**Tools:** Slither v0.11.5 (101 detectors), Aderyn v0.1.9 (63 detectors)
 **Scope:** All 8 core contracts in `src/core/`
-**Contracts analyzed:** AddressBook, BatchSettler, Controller, MarginPool, OToken, OTokenFactory, Oracle, Whitelist
+**Delta from:** B1N-83 (initial audit), after B1N-99 + B1N-101
 
----
+## Result: Zero new critical/high findings
 
-## Summary
+Changes from B1N-83:
+- betaMode findings removed (function deleted in B1N-99)
+- New `setPartialPauser` missing-zero-check (low, intentional)
+- New `emergencyWithdrawVault` reentrancy-events (informational)
+- New `Controller.mintOtoken` timestamp (expected — expiry check)
 
-| Severity | Found | Fixed | False Positive | Documented |
-|----------|-------|-------|----------------|------------|
-| High | 3 | 0 | 3 | 0 |
-| Medium | 5 | 0 | 3 | 2 |
-| Low | 5 | 2 | 0 | 3 |
-| Informational | 3 categories | 0 | 3 | 0 |
+## High Severity (3 — All False Positives)
 
-**Zero critical/high findings remaining.** All high-severity detections are false positives with clear justification.
+### H-1: arbitrary-send-erc20 (3 instances)
 
----
+Slither flags `safeTransferFrom` with non-`msg.sender` `from`.
 
-## High Severity
+| Location | Justification |
+|----------|---------------|
+| `BatchSettler._redeemSingle` | operator-only; `from` = caller |
+| `BatchSettler._redeemAndSwap` | operator-only; `from` = operator |
+| `MarginPool.transferToPool` | controller-only; `from` = vault owner |
 
-### H-1: arbitrary-send-erc20 (FALSE POSITIVE)
+**Verdict:** All false positives. Access control prevents arbitrary
+callers.
 
-**Detector:** `arbitrary-send-erc20`
-**Locations:**
-- `BatchSettler._redeemSingle()` — `IERC20(oToken).safeTransferFrom(caller, ...)`
-- `BatchSettler._redeemAndSwap()` — `IERC20(oToken).safeTransferFrom(operator, ...)`
-- `MarginPool.transferToPool()` — `IERC20(_asset).safeTransferFrom(_from, ...)`
+## Medium Severity (4 — 3 FP, 1 documented)
 
-**Verdict:** False positive. All three are access-controlled:
-- `_redeemSingle`: `caller` is always `msg.sender` from `batchRedeem()` (L387)
-- `_redeemAndSwap`: `operator` is a storage variable, called within `nonReentrant` + flash loan callback with `initiator == address(this)` check
-- `transferToPool`: has `onlyController` modifier; Controller passes `msg.sender` (L120)
+### M-1: reentrancy-balance (FP)
 
-Slither cannot trace data flow across function boundaries. No action needed.
+`_redeemAndSwap` balance delta pattern. `ctrl.redeem` is
+non-reentrant. False positive.
 
----
+### M-2: uninitialized-state (FP)
 
-## Medium Severity
+`Controller.vaults` mapping. Solidity mappings implicitly initialized.
 
-### M-1: reentrancy-balance (FALSE POSITIVE)
+### M-3: incorrect-equality (documented)
 
-**Detector:** `reentrancy-balance`
-**Location:** `BatchSettler._redeemAndSwap()` (L451-489)
+`collateralReceived == 0` in `_redeemAndSwap`. Intentional — OTM
+options return 0 collateral, skip swap.
 
-Reads `collateralBefore` balance, calls `ctrl.redeem()` (external), then checks received amount.
+### M-4: reentrancy-no-eth (FP)
 
-**Verdict:** False positive. The entire physical redeem flow is guarded by `nonReentrant`. The `executeOperation` callback validates `msg.sender == aavePool` and `initiator == address(this)`. No reentrancy path exists.
+`OTokenFactory.createOToken` state after `init()`. `init()` has
+initializer guard, no re-init possible.
 
-### M-2: uninitialized-state (FALSE POSITIVE)
+## Low Severity (7 — no action needed)
 
-**Detector:** `uninitialized-state`
-**Location:** `Controller.vaults` (L38)
+### L-1: unused-return (2 instances)
 
-**Verdict:** False positive. `vaults` is a mapping — Solidity mappings are implicitly initialized. Access is gated by `_getVault()` which checks `_vaultId > 0 && _vaultId <= vaultCount[_owner]`.
+ECDSA padding byte + Chainlink non-answer fields. Expected.
 
-### M-3: incorrect-equality (DOCUMENTED)
+### L-2: events-maths (2 instances)
 
-**Detector:** `incorrect-equality`
-**Location:** `BatchSettler._redeemAndSwap()` — `collateralReceived == 0` (L467)
+`setProtocolFeeBps`/`setSwapFeeTier` missing events. Events were
+added in B1N-83 on main but not carried to dev. Will be resolved on
+merge.
 
-**Verdict:** Intentional design. If redeem returns zero collateral, the option is OTM and physical delivery should not proceed. Strict equality is correct here — any non-zero amount means collateral was received. The `RedeemReturnedZero` error provides a clear revert reason.
+### L-3: events-access (1 instance)
 
-### M-4: reentrancy-no-eth (FALSE POSITIVE)
+`OToken.init` controller write. Factory emits `OTokenCreated`.
 
-**Detector:** `reentrancy-no-eth`
-**Location:** `OTokenFactory.createOToken()` — writes `getOToken[paramsHash]` after `oToken.init()` (L91)
+### L-4: missing-zero-check (5 instances, 1 new)
 
-**Verdict:** False positive. The `init()` call targets a freshly deployed contract (via CREATE2) that uses the `initializer` modifier — it can only be called once. No reentrancy path exists.
+4 × OToken.init params (factory validates). 1 × **NEW:**
+`Controller.setPartialPauser` — intentional, `address(0)` revokes
+the role.
 
-### M-5: Oracle Chainlink staleness (DOCUMENTED — NOT A SLITHER FINDING)
+### L-5: naming-convention
 
-**Location:** `Oracle.getPrice()` (L91-99)
+Underscore prefix is project convention. Consistent.
 
-The function calls `latestRoundData()` but only uses `answer`, ignoring `updatedAt` and `answeredInRound`. This means stale prices could be returned if the Chainlink feed stops updating.
+### L-6: calls-loop (3 instances)
 
-**Mitigation:** `getPrice()` is only used for live price display (frontend/backend bots). Settlement uses `expiryPrice` which is set explicitly by the operator. Impact is limited to showing stale live prices, not affecting settlement correctness. For mainnet, consider adding a staleness threshold parameter if `getPrice` is ever used in settlement paths.
+Batch operations by design. Try/catch on each item.
 
----
+### L-7: nonReentrant ordering
 
-## Low Severity
+`physicalRedeem` modifier order. No security impact.
 
-### L-1: unused-return (NO ACTION)
+## Informational (5)
 
-**Locations:**
-- `BatchSettler.executeOrder()` — ignores third return from `ECDSA.tryRecover()` (padding byte, not needed)
-- `Oracle.getPrice()` — ignores Chainlink staleness fields (see M-5 above)
+### I-1: unused-state (__gap arrays)
 
-### L-2: events-maths (FIXED)
+UUPS storage gaps. Required by upgrade pattern.
 
-**Locations:**
-- `BatchSettler.setProtocolFeeBps()` — missing event for fee change
-- `BatchSettler.setSwapFeeTier()` — missing event for tier change
+### I-2: immutable-states (OToken._creator)
 
-**Fix:** Added `ProtocolFeeBpsUpdated` and `SwapFeeTierUpdated` events with old/new values.
+~2,100 gas savings, not worth audit risk.
 
-### L-3: events-access (NO ACTION)
+### I-3: reentrancy-events (8 instances, includes new emergencyWithdrawVault)
 
-**Location:** `OToken.init()` — no event for controller assignment
+Events after external calls. State mutations happen before calls;
+events are cosmetic.
 
-**Verdict:** OToken is deployed once per series via OTokenFactory. The controller is set at init and never changes. The factory emits `OTokenCreated` which includes the oToken address. Low value to add another event.
+### I-4: timestamp (6 instances, includes new mintOtoken expiry check)
 
-### L-4: missing-zero-check (NO ACTION)
+Block timestamp for deadlines/expiries. Expected for options protocol.
 
-**Location:** `OToken.init()` — parameters `_underlying`, `_strikeAsset` not zero-checked
+### I-5: cyclomatic-complexity (1 instance)
 
-**Verdict:** OToken is only created by OTokenFactory, which validates all parameters before deployment. Direct init calls are prevented by the `initializer` modifier after first call.
+`_executePhysicalRedeem` = 12. Inherent to PUT+CALL physical delivery.
 
----
+## Aderyn-Specific (4 High, 9 Low)
 
-## Informational
+All Aderyn "High" findings are false positives matching Slither H-1
+through M-2 above. See triage there. Aderyn Low findings match
+Slither L-1 through L-7.
 
-### I-1: naming-convention (NO ACTION)
+## Fixes Applied (B1N-100)
 
-All contracts use underscore-prefixed parameters (`_asset`, `_owner`, etc.). This is a deliberate project convention and consistent across all contracts.
+1. **Restored expiry check** in `Controller.mintOtoken` —
+   `if (block.timestamp >= oToken.expiry()) revert OptionExpired()`
+   regression from B1N-99 betaMode removal.
 
-### I-2: unused-state — `__gap` arrays (NO ACTION)
-
-All upgradeable contracts have `uint256[N] private __gap` arrays. These are intentional UUPS upgrade storage gaps per OpenZeppelin best practices.
-
-### I-3: immutable-states (NO ACTION)
-
-`OToken._creator` could be declared `immutable`. OToken is non-upgradeable and deployed per series, so gas savings are minimal (~2,100 gas on reads). Not worth changing deployed contract pattern.
-
----
-
-## Upgradeability Check
-
-Ran `slither-check-upgradeability` on Controller. Result: 1 informational finding — "needs to be initialized by Controller.initialize()". This is expected UUPS behavior. No upgradeability issues detected.
-
----
-
-## Aderyn Results
-
-Ran Aderyn v0.1.9 (63 detectors). Full report saved to `report.md`.
-
-### Aderyn Highs (all triaged)
-
-| # | Finding | Verdict |
-|---|---------|---------|
-| H-1 | Arbitrary `from` in transferFrom (6 instances) | FALSE POSITIVE — same as Slither H-1, all access-controlled |
-| H-2 | Unprotected initializer (OToken.init) | FALSE POSITIVE — protected by `OnlyCreator` + `AlreadyInitialized` guards (L52-54). Aderyn doesn't recognize custom init patterns. |
-| H-3 | Uninitialized state (BatchSettler.batchNonce) | FALSE POSITIVE — uint256 defaults to 0, which is correct initial value |
-| H-4 | Contract locks Ether (MockSwapRouter) | N/A — mock contract, not deployed to production |
-
-### Aderyn Lows (actionable fixes applied)
-
-| # | Finding | Action |
-|---|---------|--------|
-| L-1 | Centralization risk (31 owner functions) | DOCUMENTED — inherent to protocol design. Owner is multisig pre-mainnet. |
-| L-2 | Missing address(0) checks (OToken.init) | NO ACTION — factory validates params before deployment |
-| L-3 | public → external (5 functions) | NO ACTION — `physicalRedeem` is public intentionally (called by batchPhysicalRedeem). OToken name/symbol/decimals are ERC20 overrides. |
-| L-4 | Magic literals (1e10, 10000) | NO ACTION — decimal scaling constants are clearer as literals in this codebase |
-| L-5 | Missing indexed event fields (17 events) | NO ACTION — indexing adds gas cost. Core events (OrderExecuted, VaultSettled) already index the right fields. |
-| L-6 | nonReentrant modifier should come first | **FIXED** — reordered `physicalRedeem` modifiers to `nonReentrant onlyOperator` |
-| L-7 | Empty block (_authorizeUpgrade) | NO ACTION — standard UUPS pattern, authorization is via onlyOwner modifier |
-| L-8 | Large literals → scientific notation | NO ACTION — 10000 as BPS denominator is conventional |
-| L-9 | Unused custom error (AssetNotWhitelisted) | **FIXED** — removed from OTokenFactory |
-
----
-
-## Fixes Applied
-
-1. **BatchSettler**: Added `ProtocolFeeBpsUpdated` and `SwapFeeTierUpdated` events (Slither L-2)
-2. **BatchSettler**: Reordered `physicalRedeem` modifiers — `nonReentrant` before `onlyOperator` (Aderyn L-6)
-3. **OTokenFactory**: Removed unused `AssetNotWhitelisted` error (Aderyn L-9)
-
-All 242 tests pass after fixes.
+2. **Updated access control invariant** — `setBetaMode` replaced with
+   `setPartialPauser` in `tryUnauthorizedCall`.

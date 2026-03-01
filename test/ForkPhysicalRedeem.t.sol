@@ -276,6 +276,45 @@ contract ForkPhysicalRedeemTest is Test {
         emit log_named_uint("CALL: USDC delivered to user", usdcReceived);
     }
 
+    // --- Surplus goes to operator (MM), not user ---
+
+    function test_physicalDelivery_put_surplusGoesToOperator() public onlyFork {
+        uint256 amount = 1e8;
+        uint256 collateral = (amount * putStrike) / 1e10; // 2000 USDC
+
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(putOToken);
+        vm.prank(user);
+        uint256 vaultId = settler.executeOrder(q, sig, amount, collateral);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(WETH, expiry, 1800e8);
+
+        address[] memory owners = new address[](1);
+        uint256[] memory ids = new uint256[](1);
+        owners[0] = user;
+        ids[0] = vaultId;
+        vm.prank(mm);
+        settler.batchSettleVaults(owners, ids);
+
+        // Track balances before physical redeem
+        uint256 mmUsdcBefore = IERC20(USDC).balanceOf(mm);
+        uint256 userUsdcBefore = IERC20(USDC).balanceOf(user);
+
+        vm.prank(mm);
+        settler.physicalRedeem(putOToken, user, amount, collateral);
+
+        // User receives only WETH (the contra-asset), no USDC surplus
+        uint256 userUsdcAfter = IERC20(USDC).balanceOf(user);
+        assertEq(userUsdcAfter, userUsdcBefore, "User USDC unchanged");
+
+        // MM receives surplus USDC (collateral not consumed by swap)
+        uint256 mmUsdcAfter = IERC20(USDC).balanceOf(mm);
+        uint256 surplus = mmUsdcAfter - mmUsdcBefore;
+        assertGt(surplus, 0, "MM must receive surplus");
+
+        emit log_named_uint("PUT surplus USDC to MM", surplus);
+    }
+
     // --- Chainlink price sanity ---
 
     function test_chainlinkLivePrice() public onlyFork {

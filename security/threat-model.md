@@ -10,6 +10,7 @@
 | Contract owners | Full | Each contract owner can upgrade (UUPS), change settings, transfer ownership. Same key as AddressBook owner pre-mainnet. |
 | Oracle owner | Full | Sets expiry prices used for settlement. Incorrect price = incorrect payouts. Must be automated bot with manual override. |
 | BatchSettler operator | Elevated | Executes orders and settlements. Cannot steal funds (premiums go to users, collateral to pool). Can grief by not executing. |
+| Partial pauser | Elevated | Can toggle partial pause (blocks new positions). Cannot fully pause or emergency withdraw. Set by Controller owner. |
 
 ### Partially Trusted
 
@@ -47,11 +48,16 @@ contract upgrade.
 **Mitigations:**
 - `setExpiryPrice` is owner-only
 - Once set, price cannot be overwritten (`PriceAlreadySet` error)
-- `resetExpiryPrice` only works in betaMode (testnet)
 - Invariant #9 (`oracleImmutability`) validates this
+- **Price deviation bounds check:** If a Chainlink feed exists and
+  `priceDeviationThresholdBps > 0`, submitted prices are validated
+  against the live Chainlink price. Deviations beyond the threshold
+  revert with `PriceDeviationTooHigh(submitted, chainlink, deviationBps)`.
+  Catches fat fingers, wrong decimals, and compromised key submissions.
 
-**Residual risk:** Owner compromise allows one-time incorrect price
-setting. Mitigation: multisig for mainnet.
+**Residual risk:** If Chainlink feed returns stale data, the bounds
+check compares against stale price (could be inaccurate). Gracefully
+skipped if feed returns non-positive answer. Multisig for mainnet.
 
 ### 3. Flash Loan Callback Hijacking
 
@@ -102,13 +108,14 @@ create unbacked obligations.
 
 **Mitigations:**
 - `Controller.mintOtoken` checks
-  `block.timestamp >= oToken.expiry()` (added during this audit)
+  `block.timestamp >= oToken.expiry()` (added during B1N-83 audit,
+  restored in B1N-100 after regression from betaMode removal)
 - `OTokenFactory.createOToken` prevents creating tokens with past
   expiry
 - Invariant #6 (`noExpiredMint`) validates this
 
 **Bug found during audit:** Controller was missing the expiry check.
-Fixed.
+Fixed in B1N-83. Regression caught and re-fixed in B1N-100.
 
 ### 7. Upgrade Hijacking
 
@@ -137,6 +144,54 @@ than the MM intended.
 
 **Residual risk:** None identified.
 
+### 9. Pause System Abuse
+
+**Vector:** Attacker exploits pause state transitions or emergency
+withdraw to steal collateral or grief users.
+
+**Sub-vectors:**
+
+**9a. Unauthorized pause toggle:**
+- `setSystemPartiallyPaused` requires `partialPauser` role or owner
+- `setSystemFullyPaused` requires owner only
+- Invariant #11 (`accessControlExhaustive`) covers this
+
+**9b. Emergency withdraw theft:**
+- `emergencyWithdrawVault` is permissionless BUT scoped to caller's
+  own vaults only (`_getVault(msg.sender, _vaultId)`)
+- Only available when `systemFullyPaused == true`
+- Marks vault as settled — prevents double-claim
+- Invariants #16-19 validate all constraints
+
+**9c. Pause griefing:**
+- Partial pauser can block new positions but cannot block exits
+  (settle, redeem still work)
+- Full pause blocks everything but enables emergency withdraw
+- Design: partial pause for market stress, full pause for critical
+  bugs
+
+**Residual risk:** Owner or partial pauser can grief by pausing at
+inconvenient times. Mitigation: multisig for mainnet, partial pauser
+should be a bot with clear trigger conditions.
+
+### 10. Emergency Withdraw Collateral Drain
+
+**Vector:** Emergency withdraw leaves unbacked oTokens in
+circulation after collateral is returned to vault owner.
+
+**Mitigations:**
+- This is **expected behavior** during emergency — collateral backing
+  is intentionally returned to vault owners
+- Vault is marked as settled, preventing deposits or mints on it
+- `vault.collateralAmount` is NOT zeroed (consistent with
+  `settleVault` design — stale storage indicates historical state)
+- Only available during full pause (protocol is already in crisis)
+
+**Residual risk:** oToken holders lose their claim on the collateral.
+This is the explicit trade-off of emergency withdraw — vault owners
+recover capital at the expense of oToken holders. Documented as
+intentional.
+
 ## Known Limitations
 
 ### Chainlink Staleness
@@ -151,23 +206,18 @@ staleness check must be added.
 
 ### Centralization
 
-31 owner-only functions across all contracts. Pre-mainnet, the owner
-is a single EOA. For mainnet, all ownership must transfer to a
-multisig (e.g., Safe) with a timelock for critical operations
-(upgrades, fee changes).
-
-### betaMode Bypass
-
-When `betaMode == true`, time-based checks are bypassed (expiry
-checks in Controller, Oracle price reset). This is intentional for
-testnet demos but must be disabled before mainnet. `betaMode` is
-owner-only and defaults to `false`.
+33 owner-only functions across all contracts (31 original + 2 new
+pause functions). Pre-mainnet, the owner is a single EOA. For
+mainnet, all ownership must transfer to a multisig (e.g., Safe) with
+a timelock for critical operations (upgrades, fee changes, full
+pause).
 
 ### No Partial Collateral Withdrawal
 
 Once collateral is deposited into a vault, it cannot be withdrawn
-until settlement. There is no `withdrawCollateral` function. This is
-by design (fully collateralized model) but limits capital efficiency.
+until settlement (or emergency withdraw during full pause). There is
+no `withdrawCollateral` function. This is by design (fully
+collateralized model) but limits capital efficiency.
 
 ### Token Assumptions
 

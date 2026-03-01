@@ -831,7 +831,7 @@ contract FullLifecycleHandler is Test {
 
         vm.startPrank(attacker);
         if (fnIdx == 0) {
-            try controller.setBetaMode(true) {
+            try controller.setPartialPauser(attacker) {
                 accessControlBypassed = true;
             } catch {}
         } else if (fnIdx == 1) {
@@ -1208,5 +1208,419 @@ contract FullLifecycleInvariantTest is Test {
     /// @notice INV-13: makerNonce invalidation kills all prior quotes
     function invariant_makerNonceInvalidation() public view {
         assertFalse(handler.staleNonceQuoteFilled());
+    }
+}
+
+// =============================================================================
+// Pause/Emergency Handler — drives pause toggles + emergency withdraw sequences
+// =============================================================================
+
+contract PauseEmergencyHandler is Test {
+    Controller public controller;
+    MarginPool public pool;
+    MockERC20 public usdc;
+    MockERC20 public weth;
+
+    address public admin;
+    address public pauser;
+
+    address[] public vaultOwners;
+    uint256[] public vaultIds;
+    bool[] public vaultIsPut;
+    uint256 constant NUM_USERS = 3;
+
+    // Violation flags
+    bool public entrySucceededWhilePartiallyPaused;
+    bool public anyOpSucceededWhileFullyPaused;
+    bool public emergencyWithdrawSucceededWhenNotFullyPaused;
+    bool public emergencyWithdrawByNonOwnerSucceeded;
+    bool public emergencyWithdrawOnSettledSucceeded;
+    bool public doubleEmergencyWithdrawSucceeded;
+
+    // Tracking
+    uint256 public emergencyWithdrawCount;
+
+    address public oToken;
+
+    constructor(
+        Controller _controller,
+        MarginPool _pool,
+        MockERC20 _usdc,
+        MockERC20 _weth,
+        address _admin,
+        address _pauser,
+        address _oToken
+    ) {
+        controller = _controller;
+        pool = _pool;
+        usdc = _usdc;
+        weth = _weth;
+        admin = _admin;
+        pauser = _pauser;
+        oToken = _oToken;
+
+        for (uint256 i = 0; i < NUM_USERS; i++) {
+            vaultOwners.push(address(uint160(0xE000 + i)));
+        }
+    }
+
+    function registerVault(address owner, uint256 vaultId, bool isPut) external {
+        vaultOwners.push(owner);
+        vaultIds.push(vaultId);
+        vaultIsPut.push(isPut);
+    }
+
+    function vaultCount() external view returns (uint256) {
+        return vaultIds.length;
+    }
+
+    // --- Action: toggle partial pause ---
+    function togglePartialPause(bool pause) external {
+        vm.prank(pauser);
+        controller.setSystemPartiallyPaused(pause);
+    }
+
+    // --- Action: toggle full pause ---
+    function toggleFullPause(bool pause) external {
+        vm.prank(admin);
+        controller.setSystemFullyPaused(pause);
+    }
+
+    // --- Probe: try entry ops while partially paused ---
+    function tryEntryWhilePartiallyPaused(uint256 vaultIdx, uint256 opIdx) external {
+        if (!controller.systemPartiallyPaused()) return;
+        if (vaultIds.length == 0) return;
+        vaultIdx = bound(vaultIdx, 0, vaultIds.length - 1);
+        opIdx = bound(opIdx, 0, 2);
+
+        address owner = vaultOwners[vaultIdx];
+        uint256 vid = vaultIds[vaultIdx];
+
+        vm.startPrank(owner);
+        if (opIdx == 0) {
+            try controller.depositCollateral(owner, vid, address(usdc), 1e6) {
+                entrySucceededWhilePartiallyPaused = true;
+            } catch {}
+        } else if (opIdx == 1) {
+            try controller.openVault(owner) {
+                entrySucceededWhilePartiallyPaused = true;
+            } catch {}
+        } else {
+            try controller.mintOtoken(owner, vid, oToken, 1, owner) {
+                entrySucceededWhilePartiallyPaused = true;
+            } catch {}
+        }
+        vm.stopPrank();
+    }
+
+    // --- Probe: try any op while fully paused ---
+    function tryOpsWhileFullyPaused(uint256 vaultIdx, uint256 opIdx) external {
+        if (!controller.systemFullyPaused()) return;
+        if (vaultIds.length == 0) return;
+        vaultIdx = bound(vaultIdx, 0, vaultIds.length - 1);
+        opIdx = bound(opIdx, 0, 4);
+
+        address owner = vaultOwners[vaultIdx];
+        uint256 vid = vaultIds[vaultIdx];
+
+        vm.startPrank(owner);
+        if (opIdx == 0) {
+            try controller.openVault(owner) {
+                anyOpSucceededWhileFullyPaused = true;
+            } catch {}
+        } else if (opIdx == 1) {
+            try controller.depositCollateral(owner, vid, address(usdc), 1e6) {
+                anyOpSucceededWhileFullyPaused = true;
+            } catch {}
+        } else if (opIdx == 2) {
+            try controller.mintOtoken(owner, vid, oToken, 1, owner) {
+                anyOpSucceededWhileFullyPaused = true;
+            } catch {}
+        } else if (opIdx == 3) {
+            try controller.settleVault(owner, vid) {
+                anyOpSucceededWhileFullyPaused = true;
+            } catch {}
+        } else {
+            try controller.redeem(oToken, 1) {
+                anyOpSucceededWhileFullyPaused = true;
+            } catch {}
+        }
+        vm.stopPrank();
+    }
+
+    // --- Probe: emergency withdraw when NOT fully paused ---
+    function tryEmergencyWithdrawWhenNotPaused(uint256 vaultIdx) external {
+        if (controller.systemFullyPaused()) return;
+        if (vaultIds.length == 0) return;
+        vaultIdx = bound(vaultIdx, 0, vaultIds.length - 1);
+
+        address owner = vaultOwners[vaultIdx];
+        uint256 vid = vaultIds[vaultIdx];
+
+        vm.prank(owner);
+        try controller.emergencyWithdrawVault(vid) {
+            emergencyWithdrawSucceededWhenNotFullyPaused = true;
+        } catch (bytes memory) {}
+    }
+
+    // --- Probe: emergency withdraw by non-owner ---
+    function tryEmergencyWithdrawByNonOwner(uint256 vaultIdx) external {
+        if (!controller.systemFullyPaused()) return;
+        if (vaultIds.length == 0) return;
+        vaultIdx = bound(vaultIdx, 0, vaultIds.length - 1);
+
+        uint256 vid = vaultIds[vaultIdx];
+        address attacker = address(0xDEAD);
+
+        vm.prank(attacker);
+        try controller.emergencyWithdrawVault(vid) {
+            emergencyWithdrawByNonOwnerSucceeded = true;
+        } catch (bytes memory) {}
+    }
+
+    // --- Probe: emergency withdraw on already-settled vault ---
+    function tryEmergencyWithdrawOnSettled(uint256 vaultIdx) external {
+        if (!controller.systemFullyPaused()) return;
+        if (vaultIds.length == 0) return;
+        vaultIdx = bound(vaultIdx, 0, vaultIds.length - 1);
+
+        address owner = vaultOwners[vaultIdx];
+        uint256 vid = vaultIds[vaultIdx];
+
+        if (!controller.vaultSettled(owner, vid)) return;
+
+        vm.prank(owner);
+        try controller.emergencyWithdrawVault(vid) {
+            emergencyWithdrawOnSettledSucceeded = true;
+        } catch (bytes memory) {}
+    }
+
+    // --- Action: valid emergency withdraw + double-claim check ---
+    function doEmergencyWithdrawAndRetry(uint256 vaultIdx) external {
+        if (!controller.systemFullyPaused()) return;
+        if (vaultIds.length == 0) return;
+        vaultIdx = bound(vaultIdx, 0, vaultIds.length - 1);
+
+        address owner = vaultOwners[vaultIdx];
+        uint256 vid = vaultIds[vaultIdx];
+
+        if (controller.vaultSettled(owner, vid)) return;
+
+        // First withdraw (should succeed if vault has collateral)
+        vm.prank(owner);
+        try controller.emergencyWithdrawVault(vid) {
+            emergencyWithdrawCount++;
+
+            // Immediately retry — must fail (double-claim)
+            vm.prank(owner);
+            try controller.emergencyWithdrawVault(vid) {
+                doubleEmergencyWithdrawSucceeded = true;
+            } catch (bytes memory) {}
+        } catch (bytes memory reason) {
+            emit log_named_bytes("first emergency withdraw failed", reason);
+        }
+    }
+}
+
+// =============================================================================
+// Pause/Emergency Invariant Test
+// =============================================================================
+
+contract PauseEmergencyInvariantTest is Test {
+    AddressBook addressBook;
+    Controller controller;
+    MarginPool pool;
+    OTokenFactory factory;
+    Oracle oracle;
+    Whitelist whitelist;
+    BatchSettler settler;
+
+    MockERC20 usdc;
+    MockERC20 weth;
+    MockChainlinkFeed priceFeed;
+    MockAavePool aavePool;
+    MockSwapRouter swapRouter;
+
+    PauseEmergencyHandler handler;
+
+    uint256 nextQuoteId = 1;
+    address admin;
+    address pauser = address(0xDA05);
+    uint256 mmKey = 0xBEEF;
+    address mm;
+    address treasury = address(0xFEE);
+
+    uint256 expiry;
+    address putOToken;
+
+    function setUp() public {
+        vm.warp(1700000000);
+        admin = address(this);
+        mm = vm.addr(mmKey);
+
+        _deployMocks();
+        _deployProtocol();
+        _configureProtocol();
+        _createVaultsAndHandler();
+    }
+
+    function _deployMocks() private {
+        usdc = new MockERC20("USDC", "USDC", 6);
+        weth = new MockERC20("WETH", "WETH", 18);
+        priceFeed = new MockChainlinkFeed(2000e8);
+        aavePool = new MockAavePool();
+        swapRouter = new MockSwapRouter(address(priceFeed), address(weth), address(usdc));
+    }
+
+    function _deployProtocol() private {
+        addressBook = AddressBook(
+            address(new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (admin))))
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()), abi.encodeCall(Controller.initialize, (address(addressBook), admin))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), admin))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()), abi.encodeCall(Whitelist.initialize, (address(addressBook), admin))
+                )
+            )
+        );
+        settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, admin))
+                )
+            )
+        );
+
+        addressBook.setController(address(controller));
+        addressBook.setMarginPool(address(pool));
+        addressBook.setOTokenFactory(address(factory));
+        addressBook.setOracle(address(oracle));
+        addressBook.setWhitelist(address(whitelist));
+        addressBook.setBatchSettler(address(settler));
+    }
+
+    function _configureProtocol() private {
+        settler.setWhitelistedMM(mm, true);
+        settler.setTreasury(treasury);
+        settler.setProtocolFeeBps(400);
+        settler.setAavePool(address(aavePool));
+        settler.setSwapRouter(address(swapRouter));
+        settler.setSwapFeeTier(3000);
+
+        whitelist.whitelistUnderlying(address(weth));
+        whitelist.whitelistCollateral(address(usdc));
+        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);
+
+        controller.setPartialPauser(pauser);
+    }
+
+    function _signQuote(address oToken, uint256 bidPrice, uint256 deadline, uint256 maxAmount)
+        private
+        returns (BatchSettler.Quote memory q, bytes memory sig)
+    {
+        q = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: bidPrice,
+            deadline: deadline,
+            quoteId: nextQuoteId++,
+            maxAmount: maxAmount,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(q);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        sig = abi.encodePacked(r, s, v);
+    }
+
+    function _createVaultsAndHandler() private {
+        uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
+        expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
+
+        putOToken = factory.createOToken(address(weth), address(usdc), address(usdc), 2000e8, expiry, true);
+        whitelist.whitelistOToken(putOToken);
+
+        usdc.mint(mm, 10_000_000e6);
+        vm.prank(mm);
+        usdc.approve(address(settler), type(uint256).max);
+
+        handler = new PauseEmergencyHandler(controller, pool, usdc, weth, admin, pauser, putOToken);
+
+        // Create 3 vaults with collateral via executeOrder
+        for (uint256 i = 0; i < 3; i++) {
+            address user = address(uint160(0xE000 + i));
+            uint256 collateral = 2000e6;
+            usdc.mint(user, collateral);
+            vm.startPrank(user);
+            usdc.approve(address(pool), type(uint256).max);
+            IERC20(putOToken).approve(address(settler), type(uint256).max);
+            vm.stopPrank();
+
+            (BatchSettler.Quote memory q, bytes memory sig) =
+                _signQuote(putOToken, 50e6, block.timestamp + 1 hours, 100e8);
+            vm.prank(user);
+            settler.executeOrder(q, sig, 1e8, collateral);
+
+            handler.registerVault(user, 1, true);
+        }
+
+        targetContract(address(handler));
+    }
+
+    /// @notice INV-14: Partial pause blocks entry ops (deposit, mint)
+    function invariant_partialPauseBlocksEntry() public view {
+        assertFalse(handler.entrySucceededWhilePartiallyPaused());
+    }
+
+    /// @notice INV-15: Full pause blocks all 5 vault operations
+    function invariant_fullPauseBlocksAll() public view {
+        assertFalse(handler.anyOpSucceededWhileFullyPaused());
+    }
+
+    /// @notice INV-16: Emergency withdraw only when fully paused
+    function invariant_emergencyWithdrawOnlyWhenFullyPaused() public view {
+        assertFalse(handler.emergencyWithdrawSucceededWhenNotFullyPaused());
+    }
+
+    /// @notice INV-17: Emergency withdraw only for vault owner
+    function invariant_emergencyWithdrawOnlyForVaultOwner() public view {
+        assertFalse(handler.emergencyWithdrawByNonOwnerSucceeded());
+    }
+
+    /// @notice INV-18: Emergency withdraw reverts on settled vaults
+    function invariant_emergencyWithdrawOnlyForUnsettled() public view {
+        assertFalse(handler.emergencyWithdrawOnSettledSucceeded());
+    }
+
+    /// @notice INV-19: Emergency withdraw marks vault settled (no double-claim)
+    function invariant_emergencyWithdrawMarksSettled() public view {
+        assertFalse(handler.doubleEmergencyWithdrawSucceeded());
     }
 }

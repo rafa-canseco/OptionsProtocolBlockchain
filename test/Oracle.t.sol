@@ -117,4 +117,83 @@ contract OracleTest is Test {
         assertEq(price1, 2100e8);
         assertEq(price2, 2200e8);
     }
+
+    // --- Price Deviation Bounds ---
+
+    function test_setPriceDeviationThreshold() public {
+        oracle.setPriceDeviationThreshold(2000); // 20%
+        assertEq(oracle.priceDeviationThresholdBps(), 2000);
+    }
+
+    function test_onlyOwnerCanSetDeviationThreshold() public {
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(Oracle.OnlyOwner.selector);
+        oracle.setPriceDeviationThreshold(2000);
+    }
+
+    function test_boundsCheckSkippedWhenThresholdZero() public {
+        // threshold=0 (default) → no check, any price accepted
+        oracle.setExpiryPrice(weth, expiry, 9999e8);
+        (uint256 price,) = oracle.getExpiryPrice(weth, expiry);
+        assertEq(price, 9999e8);
+    }
+
+    function test_boundsCheckSkippedWhenNoFeed() public {
+        oracle.setPriceDeviationThreshold(1000); // 10%
+        address noFeedAsset = address(0xAAAA);
+        // No feed set for this asset → skip check
+        oracle.setExpiryPrice(noFeedAsset, expiry, 9999e8);
+        (uint256 price,) = oracle.getExpiryPrice(noFeedAsset, expiry);
+        assertEq(price, 9999e8);
+    }
+
+    function test_expiryPriceWithinThresholdAccepted() public {
+        // Feed = 2087e8, threshold = 20% (2000 bps)
+        // 2087 * 1.20 = 2504.4, 2087 * 0.80 = 1669.6
+        oracle.setPriceDeviationThreshold(2000);
+        oracle.setExpiryPrice(weth, expiry, 2400e8); // within 20%
+        (uint256 price,) = oracle.getExpiryPrice(weth, expiry);
+        assertEq(price, 2400e8);
+    }
+
+    function test_expiryPriceAtExactThresholdAccepted() public {
+        // Feed = 2087e8, threshold = 2000 bps (20%)
+        // Deviation = |2087 - 2504| / 2087 ≈ 19.98% → within 20%
+        oracle.setPriceDeviationThreshold(2000);
+        oracle.setExpiryPrice(weth, expiry, 2504e8);
+        (uint256 price,) = oracle.getExpiryPrice(weth, expiry);
+        assertEq(price, 2504e8);
+    }
+
+    function test_expiryPriceExceedingThresholdReverts() public {
+        // Feed = 2087e8, threshold = 10% (1000 bps)
+        // diff = 313e8, deviation = 313e8 * 10000 / 2087e8 = 1499 bps
+        oracle.setPriceDeviationThreshold(1000);
+        vm.expectRevert(abi.encodeWithSelector(Oracle.PriceDeviationTooHigh.selector, 2400e8, 2087e8, 1499));
+        oracle.setExpiryPrice(weth, expiry, 2400e8);
+    }
+
+    function test_expiryPriceBelowThresholdReverts() public {
+        // Feed = 2087e8, threshold = 10% (1000 bps)
+        // diff = 587e8, deviation = 587e8 * 10000 / 2087e8 = 2812 bps
+        oracle.setPriceDeviationThreshold(1000);
+        vm.expectRevert(abi.encodeWithSelector(Oracle.PriceDeviationTooHigh.selector, 1500e8, 2087e8, 2812));
+        oracle.setExpiryPrice(weth, expiry, 1500e8);
+    }
+
+    function test_fatFingerPriceRejected() public {
+        // Feed = 2087e8, threshold = 20%
+        // diff = 1879e8, deviation = 1879e8 * 10000 / 2087e8 = 9003 bps
+        oracle.setPriceDeviationThreshold(2000);
+        vm.expectRevert(abi.encodeWithSelector(Oracle.PriceDeviationTooHigh.selector, 208e8, 2087e8, 9003));
+        oracle.setExpiryPrice(weth, expiry, 208e8);
+    }
+
+    function test_wrongDecimalsPriceRejected() public {
+        // Feed = 2087e8, threshold = 20%
+        // diff = 206613e6, deviation = 206613e6 * 10000 / 2087e8 = 9900 bps
+        oracle.setPriceDeviationThreshold(2000);
+        vm.expectRevert(abi.encodeWithSelector(Oracle.PriceDeviationTooHigh.selector, 2087e6, 2087e8, 9900));
+        oracle.setExpiryPrice(weth, expiry, 2087e6);
+    }
 }
