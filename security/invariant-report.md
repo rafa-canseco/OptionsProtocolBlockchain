@@ -1,6 +1,6 @@
 # Invariant Report — b1nary Options Protocol
 
-18 invariant properties tested via Foundry stateful fuzzing.
+24 invariant properties tested via Foundry stateful fuzzing.
 
 ## Original Invariants (ProtocolHandler)
 
@@ -63,9 +63,10 @@ After expiry, no call to `Controller.mintOtoken` succeeds. The
 handler's `tryMintExpired` action attempts to mint after warping past
 expiry; the `expiredMintSucceeded` flag must remain false.
 
-**Bug found:** Controller was missing the expiry check. Fixed by
-adding `if (!betaMode && block.timestamp >= oToken.expiry()) revert
-OptionExpired()` to `mintOtoken`.
+**Bug found:** Controller was missing the expiry check. Fixed in
+B1N-83 by adding `if (block.timestamp >= oToken.expiry()) revert
+OptionExpired()` to `mintOtoken`. Regression caught in B1N-100 after
+betaMode removal lost the fix.
 
 ### 7. collateralConservation
 
@@ -103,7 +104,7 @@ repaid, swap output forwarded).
 ### 11. accessControlExhaustive
 
 6 owner-only functions tested from a random attacker address:
-- `Controller.setBetaMode`
+- `Controller.setPartialPauser`
 - `Controller.transferOwnership`
 - `BatchSettler.setOperator`
 - `BatchSettler.setProtocolFeeBps`
@@ -181,10 +182,65 @@ The fill must revert with `StaleNonce`. The `staleNonceQuoteFilled`
 flag must remain false. This validates the bulk cancellation mechanism
 that lets MMs invalidate all outstanding quotes in a single tx.
 
+## Pause/Emergency Invariants (PauseEmergencyHandler)
+
+Scope: pause state transitions and emergency withdraw behavior.
+Handler creates 3 vaults with collateral, then randomly toggles
+pause states and probes all vault operations + emergency withdraw.
+
+Handler actions:
+- `togglePartialPause` — toggle partial pause via pauser role
+- `toggleFullPause` — toggle full pause via owner
+- `tryEntryWhilePartiallyPaused` — probe deposit during partial pause
+- `tryOpsWhileFullyPaused` — probe all 5 vault ops during full pause
+- `tryEmergencyWithdrawWhenNotPaused` — probe emergency withdraw when not paused
+- `tryEmergencyWithdrawByNonOwner` — probe emergency withdraw by attacker
+- `tryEmergencyWithdrawOnSettled` — probe emergency withdraw on settled vault
+- `doEmergencyWithdrawAndRetry` — valid withdraw + immediate retry (double-claim check)
+
+### 19. partialPauseBlocksEntry
+
+When `systemPartiallyPaused == true`, `depositCollateral` reverts.
+Entry operations (deposit, mint) are blocked. Exit operations
+(settle, redeem) remain available. The
+`entrySucceededWhilePartiallyPaused` flag must remain false.
+
+### 20. fullPauseBlocksAll
+
+When `systemFullyPaused == true`, all 5 vault operations revert:
+`openVault`, `depositCollateral`, `mintOtoken`, `settleVault`,
+`redeem`. The `anyOpSucceededWhileFullyPaused` flag must remain false.
+
+### 21. emergencyWithdrawOnlyWhenFullyPaused
+
+`emergencyWithdrawVault` reverts unless `systemFullyPaused == true`.
+The `emergencyWithdrawSucceededWhenNotFullyPaused` flag must remain
+false.
+
+### 22. emergencyWithdrawOnlyForVaultOwner
+
+An attacker (non-vault-owner) cannot call `emergencyWithdrawVault` to
+steal another user's collateral. The vault lookup uses
+`msg.sender` as the owner key. The
+`emergencyWithdrawByNonOwnerSucceeded` flag must remain false.
+
+### 23. emergencyWithdrawOnlyForUnsettled
+
+`emergencyWithdrawVault` reverts on already-settled vaults (whether
+settled via `settleVault` or a prior `emergencyWithdrawVault`). The
+`emergencyWithdrawOnSettledSucceeded` flag must remain false.
+
+### 24. emergencyWithdrawMarksSettled
+
+After a successful `emergencyWithdrawVault`, the vault is marked as
+settled. An immediate retry on the same vault reverts with
+`VaultAlreadySettledError`. The `doubleEmergencyWithdrawSucceeded`
+flag must remain false. This prevents double-claim of collateral.
+
 ## Run Configuration
 
 Default profile: 256 runs, 500 calls per run.
-Security profile: 1,000 runs, depth 100.
+Security profile: 10,000 fuzz runs, 1,000 invariant runs, depth 100.
 
 ```bash
 # Default
