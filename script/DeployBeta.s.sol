@@ -159,6 +159,9 @@ contract DeployBeta is Script {
         // MM approvals: deployer approves MarginPool to pull collateral
         lusd.approve(address(pool), type(uint256).max);
         leth.approve(address(pool), type(uint256).max);
+
+        // MM approvals: deployer approves BatchSettler to pull premium
+        lusd.approve(address(settler), type(uint256).max);
     }
 
     function _logAddresses() internal view {
