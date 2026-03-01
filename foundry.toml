@@ -10,6 +10,13 @@ via_ir = true
 [profile.default.fuzz]
 runs = 256
 
+[profile.security.fuzz]
+runs = 10000
+
+[profile.security.invariant]
+runs = 1000
+depth = 100
+
 [rpc_endpoints]
 base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
 base = "${BASE_RPC_URL}"

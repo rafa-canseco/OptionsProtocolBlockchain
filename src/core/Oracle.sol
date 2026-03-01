@@ -25,14 +25,20 @@ contract Oracle is Initializable, UUPSUpgradeable {
     /// @notice Whether an expiry price has been set
     mapping(address => mapping(uint256 => bool)) public expiryPriceSet;
 
+    /// @notice Max allowed deviation (bps) between submitted and Chainlink price.
+    ///         0 = disabled. e.g. 2000 = 20%.
+    uint256 public priceDeviationThresholdBps;
+
     event PriceFeedSet(address indexed asset, address indexed feed);
     event ExpiryPriceSet(address indexed asset, uint256 indexed expiry, uint256 price);
+    event PriceDeviationThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
     error OnlyOwner();
     error PriceAlreadySet();
     error PriceNotSet();
     error FeedNotSet();
     error InvalidPrice();
     error InvalidAddress();
+    error PriceDeviationTooHigh(uint256 submitted, uint256 chainlink, uint256 deviationBps);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -61,10 +67,17 @@ contract Oracle is Initializable, UUPSUpgradeable {
         if (_price == 0) revert InvalidPrice();
         if (expiryPriceSet[_asset][_expiry]) revert PriceAlreadySet();
 
+        _validatePriceDeviation(_asset, _price);
+
         expiryPrice[_asset][_expiry] = _price;
         expiryPriceSet[_asset][_expiry] = true;
 
         emit ExpiryPriceSet(_asset, _expiry, _price);
+    }
+
+    function setPriceDeviationThreshold(uint256 _thresholdBps) external onlyOwner {
+        emit PriceDeviationThresholdUpdated(priceDeviationThresholdBps, _thresholdBps);
+        priceDeviationThresholdBps = _thresholdBps;
     }
 
     function getExpiryPrice(address _asset, uint256 _expiry) external view returns (uint256, bool) {
@@ -91,9 +104,30 @@ contract Oracle is Initializable, UUPSUpgradeable {
         owner = _newOwner;
     }
 
+    /// @dev Reverts if a Chainlink feed exists, threshold is set,
+    ///      and the submitted price deviates beyond the threshold.
+    function _validatePriceDeviation(address _asset, uint256 _price) internal view {
+        uint256 threshold = priceDeviationThresholdBps;
+        if (threshold == 0) return;
+
+        address feed = priceFeed[_asset];
+        if (feed == address(0)) return;
+
+        (, int256 answer,,,) = IChainlinkAggregator(feed).latestRoundData();
+        if (answer <= 0) return;
+
+        uint256 chainlinkPrice = uint256(answer);
+        uint256 diff = _price > chainlinkPrice ? _price - chainlinkPrice : chainlinkPrice - _price;
+        uint256 deviationBps = (diff * 10_000) / chainlinkPrice;
+
+        if (deviationBps > threshold) {
+            revert PriceDeviationTooHigh(_price, chainlinkPrice, deviationBps);
+        }
+    }
+
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[45] private __gap;
+    uint256[44] private __gap;
 }
 
 interface IChainlinkAggregator {

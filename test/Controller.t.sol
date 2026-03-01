@@ -409,6 +409,47 @@ contract ControllerTest is Test {
         assertEq(OToken(oToken).balanceOf(user), 0);
     }
 
+    // --- Expiry Guard ---
+
+    function test_cannotMintAtExpiry() public {
+        address oToken = _createPut();
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        vm.stopPrank();
+
+        vm.warp(expiry);
+        vm.prank(user);
+        vm.expectRevert(Controller.OptionExpired.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+    }
+
+    function test_cannotMintAfterExpiry() public {
+        address oToken = _createPut();
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        vm.stopPrank();
+
+        vm.warp(expiry + 1);
+        vm.prank(user);
+        vm.expectRevert(Controller.OptionExpired.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+    }
+
+    function test_canMintOneSecondBeforeExpiry() public {
+        address oToken = _createPut();
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        vm.stopPrank();
+
+        vm.warp(expiry - 1);
+        vm.prank(user);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        assertEq(OToken(oToken).balanceOf(user), 1e8);
+    }
+
     // --- Micro-options ---
 
     function test_microOption_1USDC() public {
