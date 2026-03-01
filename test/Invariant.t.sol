@@ -1240,13 +1240,16 @@ contract PauseEmergencyHandler is Test {
     // Tracking
     uint256 public emergencyWithdrawCount;
 
+    address public oToken;
+
     constructor(
         Controller _controller,
         MarginPool _pool,
         MockERC20 _usdc,
         MockERC20 _weth,
         address _admin,
-        address _pauser
+        address _pauser,
+        address _oToken
     ) {
         controller = _controller;
         pool = _pool;
@@ -1254,6 +1257,7 @@ contract PauseEmergencyHandler is Test {
         weth = _weth;
         admin = _admin;
         pauser = _pauser;
+        oToken = _oToken;
 
         for (uint256 i = 0; i < NUM_USERS; i++) {
             vaultOwners.push(address(uint160(0xE000 + i)));
@@ -1283,19 +1287,30 @@ contract PauseEmergencyHandler is Test {
     }
 
     // --- Probe: try entry ops while partially paused ---
-    function tryEntryWhilePartiallyPaused(uint256 vaultIdx) external {
+    function tryEntryWhilePartiallyPaused(uint256 vaultIdx, uint256 opIdx) external {
         if (!controller.systemPartiallyPaused()) return;
         if (vaultIds.length == 0) return;
         vaultIdx = bound(vaultIdx, 0, vaultIds.length - 1);
+        opIdx = bound(opIdx, 0, 2);
 
         address owner = vaultOwners[vaultIdx];
         uint256 vid = vaultIds[vaultIdx];
 
-        // Try depositCollateral
-        vm.prank(owner);
-        try controller.depositCollateral(owner, vid, address(usdc), 1e6) {
-            entrySucceededWhilePartiallyPaused = true;
-        } catch {}
+        vm.startPrank(owner);
+        if (opIdx == 0) {
+            try controller.depositCollateral(owner, vid, address(usdc), 1e6) {
+                entrySucceededWhilePartiallyPaused = true;
+            } catch {}
+        } else if (opIdx == 1) {
+            try controller.openVault(owner) {
+                entrySucceededWhilePartiallyPaused = true;
+            } catch {}
+        } else {
+            try controller.mintOtoken(owner, vid, oToken, 1, owner) {
+                entrySucceededWhilePartiallyPaused = true;
+            } catch {}
+        }
+        vm.stopPrank();
     }
 
     // --- Probe: try any op while fully paused ---
@@ -1318,7 +1333,7 @@ contract PauseEmergencyHandler is Test {
                 anyOpSucceededWhileFullyPaused = true;
             } catch {}
         } else if (opIdx == 2) {
-            try controller.mintOtoken(owner, vid, address(0x1), 1, owner) {
+            try controller.mintOtoken(owner, vid, oToken, 1, owner) {
                 anyOpSucceededWhileFullyPaused = true;
             } catch {}
         } else if (opIdx == 3) {
@@ -1326,7 +1341,7 @@ contract PauseEmergencyHandler is Test {
                 anyOpSucceededWhileFullyPaused = true;
             } catch {}
         } else {
-            try controller.redeem(address(0x1), 1) {
+            try controller.redeem(oToken, 1) {
                 anyOpSucceededWhileFullyPaused = true;
             } catch {}
         }
@@ -1345,7 +1360,7 @@ contract PauseEmergencyHandler is Test {
         vm.prank(owner);
         try controller.emergencyWithdrawVault(vid) {
             emergencyWithdrawSucceededWhenNotFullyPaused = true;
-        } catch {}
+        } catch (bytes memory) {}
     }
 
     // --- Probe: emergency withdraw by non-owner ---
@@ -1360,7 +1375,7 @@ contract PauseEmergencyHandler is Test {
         vm.prank(attacker);
         try controller.emergencyWithdrawVault(vid) {
             emergencyWithdrawByNonOwnerSucceeded = true;
-        } catch {}
+        } catch (bytes memory) {}
     }
 
     // --- Probe: emergency withdraw on already-settled vault ---
@@ -1377,7 +1392,7 @@ contract PauseEmergencyHandler is Test {
         vm.prank(owner);
         try controller.emergencyWithdrawVault(vid) {
             emergencyWithdrawOnSettledSucceeded = true;
-        } catch {}
+        } catch (bytes memory) {}
     }
 
     // --- Action: valid emergency withdraw + double-claim check ---
@@ -1400,8 +1415,10 @@ contract PauseEmergencyHandler is Test {
             vm.prank(owner);
             try controller.emergencyWithdrawVault(vid) {
                 doubleEmergencyWithdrawSucceeded = true;
-            } catch {}
-        } catch {}
+            } catch (bytes memory) {}
+        } catch (bytes memory reason) {
+            emit log_named_bytes("first emergency withdraw failed", reason);
+        }
     }
 }
 
@@ -1554,7 +1571,7 @@ contract PauseEmergencyInvariantTest is Test {
         vm.prank(mm);
         usdc.approve(address(settler), type(uint256).max);
 
-        handler = new PauseEmergencyHandler(controller, pool, usdc, weth, admin, pauser);
+        handler = new PauseEmergencyHandler(controller, pool, usdc, weth, admin, pauser, putOToken);
 
         // Create 3 vaults with collateral via executeOrder
         for (uint256 i = 0; i < 3; i++) {
