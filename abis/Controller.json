@@ -805,6 +805,11 @@
   },
   {
     "type": "error",
+    "name": "OptionExpired",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OptionNotExpired",
     "inputs": []
   },

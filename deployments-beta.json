@@ -2,24 +2,25 @@
   "chain": "base-sepolia",
   "chainId": 84532,
   "rpcUrl": "https://lb.drpc.live/base-sepolia/AoDDk50qb0tXkCHdlvBJuAu4OZKUGXYR8J9tThukG97E",
-  "deployer": "unknown",
+  "deployer": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
   "contracts": {
-    "LETH": "0x45f3B57231bB03Ba7213a50FBe03f1B3De71412B",
-    "LUSD": "0x7fC7F74e5ED3a4ff03eDc310919779DD59D9C17A",
-    "MockChainlinkFeed": "0x1E6D4088D871E37c3a2E80924718f702B7d756de",
-    "MockAavePool": "0xD82927DD5006d6eC365116835Ad391CE8F7A57cb",
-    "MockSwapRouter": "0xe80b21f0f174282E255145668119d58959d2566f",
-    "AddressBook": "0x87247F9378f966834Fc90fA38A4230d31786642f",
-    "Controller": "0x15945776Ff184e9798BC2505129e2E4f7f404D3F",
-    "MarginPool": "0x9193f3a8b875749d3d5e4342BB2BECb1B15dEbDf",
-    "OTokenFactory": "0x40A1CcA80b2E0408C72698e9a04777efe546bE0a",
-    "Oracle": "0xea3Ae72b85C130798fdBFD23C817913cC884816f",
-    "Whitelist": "0x43b512dA5b4938f4FE1B1Ae199Cd2324cA2478FC",
-    "BatchSettler": "0xF87958fDE6F4D721b9C732DE79572E1937687eEF"
+    "LETH": "0x8C259D169378B705ae62AA697F3233C8dc3774Da",
+    "LUSD": "0x5A2972d3390ABe3E57010272c8032BfC84E2077b",
+    "MockChainlinkFeed": "0x98c790507427E9084CEeAA6c5b5ca1F22B24A46E",
+    "MockAavePool": "0x95E834E2fa4F3389e9fA5088Bfefa35f5874349d",
+    "MockSwapRouter": "0xE66Bd8C8303550d13c8748884CAdC84f1506460a",
+    "AddressBook": "0x2043b48D7Cb9ED1b983c51F805E3D364230cbAd3",
+    "Controller": "0x5f3fAb42F74ce2455732e7d2F444ABbD6C5AAd2e",
+    "MarginPool": "0xA1832B3bf28272Ae9F1Fa28288Bb894b47491D44",
+    "OTokenFactory": "0x29f897775ccFcFc7382929e0EC9580756041E4FE",
+    "Oracle": "0x7843A0b0288DeEceCef333b8764342eA4Fc439D9",
+    "Whitelist": "0xe188f203650425AcFF343bD64F7FF5bd8c89AB43",
+    "BatchSettler": "0x29bb32c014aC3378FfbE335804B94cED48f2afc4"
   },
   "config": {
     "protocolFeeBps": 400,
     "swapFeeTier": 500,
-    "initialEthPrice": "2500e8"
+    "initialEthPrice": "2500e8",
+    "priceDeviationThresholdBps": 1000
   }
 }
