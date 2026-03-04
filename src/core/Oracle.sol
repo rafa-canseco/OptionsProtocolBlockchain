@@ -29,9 +29,14 @@ contract Oracle is Initializable, UUPSUpgradeable {
     ///         0 = disabled. e.g. 2000 = 20%.
     uint256 public priceDeviationThresholdBps;
 
+    /// @notice Max age (seconds) for a Chainlink answer to be considered fresh.
+    ///         0 = disabled. e.g. 3600 = 1 hour.
+    uint256 public maxOracleStaleness;
+
     event PriceFeedSet(address indexed asset, address indexed feed);
     event ExpiryPriceSet(address indexed asset, uint256 indexed expiry, uint256 price);
     event PriceDeviationThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
+    event MaxOracleStalenessUpdated(uint256 oldStaleness, uint256 newStaleness);
     error OnlyOwner();
     error PriceAlreadySet();
     error PriceNotSet();
@@ -39,6 +44,7 @@ contract Oracle is Initializable, UUPSUpgradeable {
     error InvalidPrice();
     error InvalidAddress();
     error PriceDeviationTooHigh(uint256 submitted, uint256 chainlink, uint256 deviationBps);
+    error StaleOraclePrice(uint256 updatedAt, uint256 maxAge);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -80,6 +86,11 @@ contract Oracle is Initializable, UUPSUpgradeable {
         priceDeviationThresholdBps = _thresholdBps;
     }
 
+    function setMaxOracleStaleness(uint256 _maxStaleness) external onlyOwner {
+        emit MaxOracleStalenessUpdated(maxOracleStaleness, _maxStaleness);
+        maxOracleStaleness = _maxStaleness;
+    }
+
     function getExpiryPrice(address _asset, uint256 _expiry) external view returns (uint256, bool) {
         return (expiryPrice[_asset][_expiry], expiryPriceSet[_asset][_expiry]);
     }
@@ -88,8 +99,13 @@ contract Oracle is Initializable, UUPSUpgradeable {
         address feed = priceFeed[_asset];
         if (feed == address(0)) revert FeedNotSet();
 
-        (, int256 answer,,,) = IChainlinkAggregator(feed).latestRoundData();
+        (, int256 answer,, uint256 updatedAt,) = IChainlinkAggregator(feed).latestRoundData();
         if (answer <= 0) revert InvalidPrice();
+
+        uint256 maxAge = maxOracleStaleness;
+        if (maxAge > 0 && block.timestamp - updatedAt > maxAge) {
+            revert StaleOraclePrice(updatedAt, maxAge);
+        }
 
         return uint256(answer);
     }
@@ -113,8 +129,13 @@ contract Oracle is Initializable, UUPSUpgradeable {
         address feed = priceFeed[_asset];
         if (feed == address(0)) return;
 
-        (, int256 answer,,,) = IChainlinkAggregator(feed).latestRoundData();
+        (, int256 answer,, uint256 updatedAt,) = IChainlinkAggregator(feed).latestRoundData();
         if (answer <= 0) return;
+
+        uint256 maxAge = maxOracleStaleness;
+        if (maxAge > 0 && block.timestamp - updatedAt > maxAge) {
+            revert StaleOraclePrice(updatedAt, maxAge);
+        }
 
         uint256 chainlinkPrice = uint256(answer);
         uint256 diff = _price > chainlinkPrice ? _price - chainlinkPrice : chainlinkPrice - _price;
@@ -127,7 +148,7 @@ contract Oracle is Initializable, UUPSUpgradeable {
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[44] private __gap;
+    uint256[43] private __gap;
 }
 
 interface IChainlinkAggregator {

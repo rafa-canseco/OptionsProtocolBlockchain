@@ -169,7 +169,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         OToken oToken = OToken(_oToken);
         if (block.timestamp >= oToken.expiry()) revert OptionExpired();
 
-        uint256 requiredCollateral = _getRequiredCollateral(oToken, _amount);
+        uint256 requiredCollateral = _getRequiredCollateral(oToken, vault.shortAmount + _amount);
         if (vault.collateralAmount < requiredCollateral) revert InsufficientCollateral();
 
         vault.shortOtoken = _oToken;
@@ -192,7 +192,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         if (!isSet) revert ExpiryPriceNotSet();
 
         uint256 payout = _calculatePayout(oToken, vault.shortAmount, expiryPrice);
-        uint256 collateralToReturn = vault.collateralAmount - payout;
+        uint256 collateralToReturn = payout >= vault.collateralAmount ? 0 : vault.collateralAmount - payout;
 
         vaultSettled[_owner][_vaultId] = true;
 
