@@ -85,6 +85,9 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     /// @notice oToken balances custodied per MM (mm => oToken => balance).
     mapping(address => mapping(address => uint256)) public mmOTokenBalance;
 
+    /// @notice Delay after expiry before MM can self-redeem (escape hatch).
+    uint256 public escapeDelay;
+
     // ===== Events =====
 
     event OrderExecuted(
@@ -107,6 +110,8 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     event QuoteCancelSkipped(address indexed mm, bytes32 indexed quoteHash);
     event MakerNonceIncremented(address indexed mm, uint256 newNonce);
     event MMWhitelisted(address indexed mm, bool status);
+    event MMSelfRedeem(address indexed mm, address indexed oToken, uint256 amount, uint256 payout);
+    event EscapeDelayUpdated(uint256 oldDelay, uint256 newDelay);
 
     // ===== Errors =====
 
@@ -133,6 +138,8 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     error CapacityExceeded();
     error StaleNonce();
     error QuoteAlreadyCancelled();
+    error EscapeNotReady();
+    error EscapeDelayTooShort();
 
     // Panic(uint256) selector: 0x4e487b71
     bytes4 private constant _PANIC_SELECTOR = 0x4e487b71;
@@ -204,6 +211,14 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
             revert InvalidFeeTier();
         }
         swapFeeTier = _feeTier;
+    }
+
+    uint256 public constant MIN_ESCAPE_DELAY = 3 days;
+
+    function setEscapeDelay(uint256 _delay) external onlyOwner {
+        if (_delay < MIN_ESCAPE_DELAY) revert EscapeDelayTooShort();
+        emit EscapeDelayUpdated(escapeDelay, _delay);
+        escapeDelay = _delay;
     }
 
     function setWhitelistedMM(address _mm, bool _status) external onlyOwner {
@@ -594,6 +609,52 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         }
     }
 
+    // ===== Escape Hatch: MM Self-Redeem =====
+
+    /// @notice Allows a whitelisted MM to redeem their custodied oTokens
+    ///         after expiry + escapeDelay, bypassing the operator.
+    function mmSelfRedeem(address oToken, uint256 amount) external nonReentrant {
+        if (!whitelistedMMs[msg.sender]) revert MMNotWhitelisted();
+        if (amount == 0) revert InvalidAmount();
+        if (escapeDelay == 0) revert EscapeNotReady();
+
+        OToken ot = OToken(oToken);
+        uint256 expiry = ot.expiry();
+        if (block.timestamp < expiry + escapeDelay) revert EscapeNotReady();
+
+        if (mmOTokenBalance[msg.sender][oToken] < amount) {
+            revert InsufficientMMBalance();
+        }
+        mmOTokenBalance[msg.sender][oToken] -= amount;
+
+        Controller ctrl = Controller(addressBook.controller());
+        address collateralAsset = ot.collateralAsset();
+        uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+
+        ctrl.redeem(oToken, amount);
+
+        uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+        if (payout > 0) {
+            IERC20(collateralAsset).safeTransfer(msg.sender, payout);
+        }
+
+        emit MMSelfRedeem(msg.sender, oToken, amount, payout);
+    }
+
+    // ===== Monitoring =====
+
+    /// @notice Compares MM's internal ledger balance against actual
+    ///         oToken balance held by this contract.
+    function verifyLedgerSync(address mm, address oToken)
+        external
+        view
+        returns (uint256 ledgerBalance, uint256 actualBalance, bool inSync)
+    {
+        ledgerBalance = mmOTokenBalance[mm][oToken];
+        actualBalance = IERC20(oToken).balanceOf(address(this));
+        inSync = actualBalance >= ledgerBalance;
+    }
+
     /// @dev Re-reverts if `reason` is a Panic(uint256). Panics indicate bugs, not expected failures.
     function _revertOnPanic(bytes memory reason) private pure {
         if (reason.length >= 4) {
@@ -617,5 +678,5 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[36] private __gap;
+    uint256[35] private __gap;
 }
