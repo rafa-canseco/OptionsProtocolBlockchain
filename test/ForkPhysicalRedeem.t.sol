@@ -181,8 +181,7 @@ contract ForkPhysicalRedeemTest is Test {
         vm.startPrank(mm);
         IERC20(USDC).approve(address(settler), type(uint256).max);
         IERC20(WETH).approve(address(settler), type(uint256).max);
-        IERC20(putOToken).approve(address(settler), type(uint256).max);
-        IERC20(callOToken).approve(address(settler), type(uint256).max);
+        // No oToken approvals needed — settler custodies oTokens
         vm.stopPrank();
     }
 
@@ -216,7 +215,7 @@ contract ForkPhysicalRedeemTest is Test {
 
         uint256 before_ = IERC20(WETH).balanceOf(user);
         vm.prank(mm);
-        settler.physicalRedeem(putOToken, user, amount, collateral);
+        settler.physicalRedeem(putOToken, user, amount, collateral, mm);
 
         assertEq(IERC20(WETH).balanceOf(user) - before_, amount * 1e10, "Exact WETH");
         assertEq(IERC20(USDC).balanceOf(address(settler)), 0, "Settler 0 USDC");
@@ -241,7 +240,7 @@ contract ForkPhysicalRedeemTest is Test {
         uint256 expectedUsdc = (amount * callStrike) / 1e10;
 
         vm.prank(mm);
-        settler.physicalRedeem(callOToken, user, amount, collateral);
+        settler.physicalRedeem(callOToken, user, amount, collateral, mm);
 
         assertEq(IERC20(USDC).balanceOf(user) - before_, expectedUsdc, "Exact USDC");
         assertEq(IERC20(USDC).balanceOf(address(settler)), 0, "Settler 0 USDC");
@@ -266,7 +265,7 @@ contract ForkPhysicalRedeemTest is Test {
         uint256 userUsdcBefore = IERC20(USDC).balanceOf(user);
 
         vm.prank(mm);
-        settler.physicalRedeem(putOToken, user, amount, collateral);
+        settler.physicalRedeem(putOToken, user, amount, collateral, mm);
 
         assertEq(IERC20(USDC).balanceOf(user), userUsdcBefore, "User USDC unchanged");
         assertGt(IERC20(USDC).balanceOf(mm) - mmUsdcBefore, 0, "MM gets surplus");
@@ -298,14 +297,10 @@ contract ForkPhysicalRedeemTest is Test {
         settler.executeOrder(q, sig, amount, collateral);
 
         // grossPremium=50 USDC, fee=2 USDC (4%), net=48 USDC
-        assertEq(
-            IERC20(USDC).balanceOf(user),
-            before[0] - collateral + 48e6,
-            "User: -collateral +netPremium"
-        );
+        assertEq(IERC20(USDC).balanceOf(user), before[0] - collateral + 48e6, "User: -collateral +netPremium");
         assertEq(IERC20(USDC).balanceOf(treasury) - before[2], 2e6, "Treasury: +fee");
         assertEq(before[1] - IERC20(USDC).balanceOf(mm), 50e6, "MM: -grossPremium");
-        assertEq(IERC20(putOToken).balanceOf(mm), amount, "MM holds oTokens");
+        assertEq(settler.mmOTokenBalance(mm, putOToken), amount, "Settler custodies oTokens for MM");
         assertEq(IERC20(USDC).balanceOf(address(pool)), collateral, "Pool holds collateral");
     }
 
@@ -382,15 +377,15 @@ contract ForkPhysicalRedeemTest is Test {
         uint256[] memory amounts = new uint256[](1);
         oTokens[0] = _oToken;
         amounts[0] = _amount;
-        vm.prank(mm);
-        settler.batchRedeem(oTokens, amounts);
+        vm.prank(mm); // mm is operator in fork tests
+        settler.operatorRedeemForMM(mm, oTokens, amounts);
     }
 
     // --- Flash loan callback rejection ---
 
     function test_flashLoanCallback_realAave_rejectsAttacker() public onlyFork {
         address attacker = address(0xDEAD);
-        bytes memory fakeParams = abi.encode(putOToken, attacker, uint256(1e8), uint256(2000e6));
+        bytes memory fakeParams = abi.encode(putOToken, attacker, uint256(1e8), uint256(2000e6), mm);
 
         vm.prank(attacker);
         vm.expectRevert(BatchSettler.FlashLoanUnauthorized.selector);
