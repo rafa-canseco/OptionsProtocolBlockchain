@@ -146,7 +146,7 @@ contract ForkPhysicalRedeemTest is Test {
         settler.setProtocolFeeBps(400);
         settler.setAavePool(AAVE_POOL);
         settler.setSwapRouter(SWAP_ROUTER);
-        settler.setSwapFeeTier(500);
+        settler.setSwapFeeTier(3000);
 
         oracle.setPriceFeed(WETH, CHAINLINK_ETH_USD);
 
@@ -204,83 +204,55 @@ contract ForkPhysicalRedeemTest is Test {
 
     function test_physicalDelivery_put_realAaveUniswap() public onlyFork {
         uint256 amount = 1e8;
-        uint256 collateral = (amount * putStrike) / 1e10; // 2000 USDC
+        uint256 collateral = (amount * putStrike) / 1e10;
 
         (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(putOToken);
         vm.prank(user);
         uint256 vaultId = settler.executeOrder(q, sig, amount, collateral);
 
-        // Expire ITM (put: price < strike)
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(WETH, expiry, 1800e8);
+        _settleVault(user, vaultId);
 
-        address[] memory owners = new address[](1);
-        uint256[] memory ids = new uint256[](1);
-        owners[0] = user;
-        ids[0] = vaultId;
-        vm.prank(mm);
-        settler.batchSettleVaults(owners, ids);
-
-        uint256 userWethBefore = IERC20(WETH).balanceOf(user);
-        uint256 expectedWeth = amount * 1e10; // 1e18
-
+        uint256 before_ = IERC20(WETH).balanceOf(user);
         vm.prank(mm);
         settler.physicalRedeem(putOToken, user, amount, collateral);
 
-        uint256 wethReceived = IERC20(WETH).balanceOf(user) - userWethBefore;
-        assertEq(wethReceived, expectedWeth, "User must receive exact WETH");
+        assertEq(IERC20(WETH).balanceOf(user) - before_, amount * 1e10, "Exact WETH");
         assertEq(IERC20(USDC).balanceOf(address(settler)), 0, "Settler 0 USDC");
         assertEq(IERC20(WETH).balanceOf(address(settler)), 0, "Settler 0 WETH");
-
-        emit log_named_uint("PUT: WETH delivered to user", wethReceived);
     }
 
     // --- CALL physical delivery (collateral=WETH, user receives USDC) ---
 
     function test_physicalDelivery_call_realAaveUniswap() public onlyFork {
-        uint256 amount = 1e8; // 1 call option
-        uint256 collateral = amount * 1e10; // 1e18 WETH
+        uint256 amount = 1e8;
+        uint256 collateral = amount * 1e10;
 
         (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(callOToken);
         vm.prank(user);
         uint256 vaultId = settler.executeOrder(q, sig, amount, collateral);
 
-        assertEq(IERC20(callOToken).balanceOf(mm), amount, "MM holds call oTokens");
-        assertEq(IERC20(WETH).balanceOf(address(pool)), collateral, "Pool holds WETH collateral");
-
-        // Expire ITM (call: price > strike)
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(WETH, expiry, 2200e8);
+        _settleVault(user, vaultId);
 
-        address[] memory owners = new address[](1);
-        uint256[] memory ids = new uint256[](1);
-        owners[0] = user;
-        ids[0] = vaultId;
-        vm.prank(mm);
-        settler.batchSettleVaults(owners, ids);
-        assertTrue(controller.vaultSettled(user, vaultId), "Vault settled");
-
-        // Physical delivery: user receives USDC (strikeAsset)
-        // contraAmount = (amount * callStrike) / 1e10 = 1800e6
-        uint256 userUsdcBefore = IERC20(USDC).balanceOf(user);
+        uint256 before_ = IERC20(USDC).balanceOf(user);
         uint256 expectedUsdc = (amount * callStrike) / 1e10;
 
         vm.prank(mm);
         settler.physicalRedeem(callOToken, user, amount, collateral);
 
-        uint256 usdcReceived = IERC20(USDC).balanceOf(user) - userUsdcBefore;
-        assertEq(usdcReceived, expectedUsdc, "User must receive exact USDC");
+        assertEq(IERC20(USDC).balanceOf(user) - before_, expectedUsdc, "Exact USDC");
         assertEq(IERC20(USDC).balanceOf(address(settler)), 0, "Settler 0 USDC");
         assertEq(IERC20(WETH).balanceOf(address(settler)), 0, "Settler 0 WETH");
-
-        emit log_named_uint("CALL: USDC delivered to user", usdcReceived);
     }
 
     // --- Surplus goes to operator (MM), not user ---
 
     function test_physicalDelivery_put_surplusGoesToOperator() public onlyFork {
         uint256 amount = 1e8;
-        uint256 collateral = (amount * putStrike) / 1e10; // 2000 USDC
+        uint256 collateral = (amount * putStrike) / 1e10;
 
         (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(putOToken);
         vm.prank(user);
@@ -288,31 +260,16 @@ contract ForkPhysicalRedeemTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(WETH, expiry, 1800e8);
+        _settleVault(user, vaultId);
 
-        address[] memory owners = new address[](1);
-        uint256[] memory ids = new uint256[](1);
-        owners[0] = user;
-        ids[0] = vaultId;
-        vm.prank(mm);
-        settler.batchSettleVaults(owners, ids);
-
-        // Track balances before physical redeem
         uint256 mmUsdcBefore = IERC20(USDC).balanceOf(mm);
         uint256 userUsdcBefore = IERC20(USDC).balanceOf(user);
 
         vm.prank(mm);
         settler.physicalRedeem(putOToken, user, amount, collateral);
 
-        // User receives only WETH (the contra-asset), no USDC surplus
-        uint256 userUsdcAfter = IERC20(USDC).balanceOf(user);
-        assertEq(userUsdcAfter, userUsdcBefore, "User USDC unchanged");
-
-        // MM receives surplus USDC (collateral not consumed by swap)
-        uint256 mmUsdcAfter = IERC20(USDC).balanceOf(mm);
-        uint256 surplus = mmUsdcAfter - mmUsdcBefore;
-        assertGt(surplus, 0, "MM must receive surplus");
-
-        emit log_named_uint("PUT surplus USDC to MM", surplus);
+        assertEq(IERC20(USDC).balanceOf(user), userUsdcBefore, "User USDC unchanged");
+        assertGt(IERC20(USDC).balanceOf(mm) - mmUsdcBefore, 0, "MM gets surplus");
     }
 
     // --- Chainlink price sanity ---
@@ -323,6 +280,110 @@ contract ForkPhysicalRedeemTest is Test {
         assertLt(price, 100_000e8, "ETH price too high");
 
         emit log_named_uint("Chainlink ETH/USD (8 dec)", price);
+    }
+
+    // --- Premium delivery: MM pays premium to user, fee to treasury ---
+
+    function test_executeOrder_premiumToUser_feeToTreasury() public onlyFork {
+        uint256 amount = 1e8;
+        uint256 collateral = (amount * putStrike) / 1e10;
+
+        uint256[3] memory before;
+        before[0] = IERC20(USDC).balanceOf(user);
+        before[1] = IERC20(USDC).balanceOf(mm);
+        before[2] = IERC20(USDC).balanceOf(treasury);
+
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(putOToken);
+        vm.prank(user);
+        settler.executeOrder(q, sig, amount, collateral);
+
+        // grossPremium=50 USDC, fee=2 USDC (4%), net=48 USDC
+        assertEq(
+            IERC20(USDC).balanceOf(user),
+            before[0] - collateral + 48e6,
+            "User: -collateral +netPremium"
+        );
+        assertEq(IERC20(USDC).balanceOf(treasury) - before[2], 2e6, "Treasury: +fee");
+        assertEq(before[1] - IERC20(USDC).balanceOf(mm), 50e6, "MM: -grossPremium");
+        assertEq(IERC20(putOToken).balanceOf(mm), amount, "MM holds oTokens");
+        assertEq(IERC20(USDC).balanceOf(address(pool)), collateral, "Pool holds collateral");
+    }
+
+    // --- OTM settlement: full collateral refund ---
+
+    function test_otmSettlement_put_fullCollateralRefund() public onlyFork {
+        uint256 amount = 1e8;
+        uint256 collateral = (amount * putStrike) / 1e10;
+
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(putOToken);
+        vm.prank(user);
+        uint256 vaultId = settler.executeOrder(q, sig, amount, collateral);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(WETH, expiry, 2200e8); // OTM
+
+        uint256 before_ = IERC20(USDC).balanceOf(user);
+        _settleVault(user, vaultId);
+
+        assertEq(IERC20(USDC).balanceOf(user) - before_, collateral, "OTM: full refund");
+        assertTrue(controller.vaultSettled(user, vaultId));
+    }
+
+    function test_otmSettlement_call_fullCollateralRefund() public onlyFork {
+        uint256 amount = 1e8;
+        uint256 collateral = amount * 1e10;
+
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(callOToken);
+        vm.prank(user);
+        uint256 vaultId = settler.executeOrder(q, sig, amount, collateral);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(WETH, expiry, 1700e8); // OTM
+
+        uint256 before_ = IERC20(WETH).balanceOf(user);
+        _settleVault(user, vaultId);
+
+        assertEq(IERC20(WETH).balanceOf(user) - before_, collateral, "OTM CALL: full refund");
+    }
+
+    // --- ITM payout: exact contra-asset amount ---
+
+    function test_itmSettlement_put_exactPayout() public onlyFork {
+        uint256 amount = 2e8;
+        uint256 collateral = (amount * putStrike) / 1e10; // 4000 USDC
+
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(putOToken);
+        vm.prank(user);
+        uint256 vaultId = settler.executeOrder(q, sig, amount, collateral);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(WETH, expiry, 1800e8); // ITM
+
+        _settleVault(user, vaultId);
+
+        // MM redeems oTokens — gets full collateral (ITM put)
+        uint256 mmBefore = IERC20(USDC).balanceOf(mm);
+        _batchRedeem(putOToken, amount);
+        uint256 payout = IERC20(USDC).balanceOf(mm) - mmBefore;
+        assertEq(payout, collateral, "ITM PUT: MM gets full collateral");
+    }
+
+    function _settleVault(address _owner, uint256 _vaultId) private {
+        address[] memory owners = new address[](1);
+        uint256[] memory ids = new uint256[](1);
+        owners[0] = _owner;
+        ids[0] = _vaultId;
+        vm.prank(mm);
+        settler.batchSettleVaults(owners, ids);
+    }
+
+    function _batchRedeem(address _oToken, uint256 _amount) private {
+        address[] memory oTokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        oTokens[0] = _oToken;
+        amounts[0] = _amount;
+        vm.prank(mm);
+        settler.batchRedeem(oTokens, amounts);
     }
 
     // --- Flash loan callback rejection ---
