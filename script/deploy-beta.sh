@@ -63,13 +63,13 @@ get_addr() {
 
 # --- 6. Write deployments-beta.json ---
 echo "[..] Writing deployments-beta.json..."
-DEPLOYER_ADDR=$(python3 -c "
+DEPLOYER_ADDR=$(uv run python3 -c "
 from eth_keys import keys
 pk = bytes.fromhex('${PRIVATE_KEY#0x}')
 print(keys.PrivateKey(pk).public_key.to_checksum_address())
 " 2>/dev/null || echo "unknown")
 
-python3 -c "
+uv run python3 -c "
 import json
 
 addrs = {}
@@ -103,6 +103,7 @@ deployment = {
         'protocolFeeBps': 400,
         'swapFeeTier': 500,
         'initialEthPrice': '2500e8',
+        'priceDeviationThresholdBps': 1000,
     }
 }
 
@@ -158,7 +159,7 @@ mkdir -p "$ABI_DIR"
 for contract in AddressBook Controller MarginPool OTokenFactory Oracle Whitelist BatchSettler OToken; do
     ABI_FILE="$BLOCKCHAIN_DIR/out/${contract}.sol/${contract}.json"
     if [ -f "$ABI_FILE" ]; then
-        python3 -c "
+        uv run python3 -c "
 import json
 with open('$ABI_FILE') as f:
     data = json.load(f)
@@ -173,7 +174,7 @@ done
 for contract in MockERC20 MockChainlinkFeed MockAavePool MockSwapRouter; do
     ABI_FILE="$BLOCKCHAIN_DIR/out/${contract}.sol/${contract}.json"
     if [ -f "$ABI_FILE" ]; then
-        python3 -c "
+        uv run python3 -c "
 import json
 with open('$ABI_FILE') as f:
     data = json.load(f)

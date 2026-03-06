@@ -11,6 +11,10 @@ import "./Oracle.sol";
 import "./Whitelist.sol";
 import "../interfaces/IMarginVault.sol";
 
+interface IBatchSettlerClearance {
+    function clearMMBalanceForVault(address owner, uint256 vaultId, address oToken, uint256 amount) external;
+}
+
 /**
  * @title Controller
  * @notice Main entry point for the options protocol.
@@ -169,7 +173,9 @@ contract Controller is Initializable, UUPSUpgradeable {
         OToken oToken = OToken(_oToken);
         if (block.timestamp >= oToken.expiry()) revert OptionExpired();
 
-        uint256 requiredCollateral = _getRequiredCollateral(oToken, _amount);
+        if (vault.collateralAsset != oToken.collateralAsset()) revert CollateralMismatch();
+
+        uint256 requiredCollateral = _getRequiredCollateral(oToken, vault.shortAmount + _amount);
         if (vault.collateralAmount < requiredCollateral) revert InsufficientCollateral();
 
         vault.shortOtoken = _oToken;
@@ -192,7 +198,7 @@ contract Controller is Initializable, UUPSUpgradeable {
         if (!isSet) revert ExpiryPriceNotSet();
 
         uint256 payout = _calculatePayout(oToken, vault.shortAmount, expiryPrice);
-        uint256 collateralToReturn = vault.collateralAmount - payout;
+        uint256 collateralToReturn = payout >= vault.collateralAmount ? 0 : vault.collateralAmount - payout;
 
         vaultSettled[_owner][_vaultId] = true;
 
@@ -205,6 +211,9 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     function redeem(address _oToken, uint256 _amount) external notFullyPaused {
         if (_amount == 0) revert NoOtokensToRedeem();
+
+        Whitelist wl = Whitelist(addressBook.whitelist());
+        if (!wl.isWhitelistedOToken(_oToken)) revert OTokenNotWhitelisted();
 
         OToken oToken = OToken(_oToken);
         if (block.timestamp < oToken.expiry()) revert OptionNotExpired();
@@ -292,10 +301,8 @@ contract Controller is Initializable, UUPSUpgradeable {
     /// @notice Allows a vault owner to rescue their collateral when the
     ///         system is fully paused (emergency circuit breaker).
     /// @dev    Marks the vault as settled to prevent double-claims.
-    ///         vault.collateralAmount remains in storage (stale by design,
-    ///         consistent with settleVault which also does not zero it).
-    ///         oTokens minted against this vault lose their collateral
-    ///         backing — this is the expected tradeoff in an emergency.
+    ///         Burns outstanding oTokens from BatchSettler and clears
+    ///         the MM's custodied balance to prevent phantom redemption.
     function emergencyWithdrawVault(uint256 _vaultId) external {
         if (!systemFullyPaused) revert SystemNotFullyPaused();
 
@@ -308,6 +315,21 @@ contract Controller is Initializable, UUPSUpgradeable {
         uint256 amount = vault.collateralAmount;
         address asset = vault.collateralAsset;
 
+        // Burn oTokens and clear MM ledger to prevent phantom redemption
+        if (vault.shortOtoken != address(0) && vault.shortAmount > 0) {
+            address settler = addressBook.batchSettler();
+            if (settler != address(0)) {
+                OToken ot = OToken(vault.shortOtoken);
+                uint256 settlerBal = ot.balanceOf(settler);
+                uint256 toBurn = vault.shortAmount < settlerBal ? vault.shortAmount : settlerBal;
+                if (toBurn > 0) {
+                    ot.burnOtoken(settler, toBurn);
+                }
+                IBatchSettlerClearance(settler)
+                    .clearMMBalanceForVault(msg.sender, _vaultId, vault.shortOtoken, vault.shortAmount);
+            }
+        }
+
         vaultSettled[msg.sender][_vaultId] = true;
 
         MarginPool(addressBook.marginPool()).transferToUser(asset, msg.sender, amount);
@@ -317,15 +339,27 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     // --- Ownership ---
 
+    address public pendingOwner;
+
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    error OnlyPendingOwner();
 
     function transferOwnership(address _newOwner) external onlyOwner {
         if (_newOwner == address(0)) revert InvalidAddress();
-        emit OwnershipTransferred(owner, _newOwner);
-        owner = _newOwner;
+        pendingOwner = _newOwner;
+        emit OwnershipTransferStarted(owner, _newOwner);
+    }
+
+    function acceptOwnership() external {
+        if (msg.sender != pendingOwner) revert OnlyPendingOwner();
+        emit OwnershipTransferred(owner, msg.sender);
+        owner = msg.sender;
+        pendingOwner = address(0);
     }
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[44] private __gap;
+    uint256[43] private __gap;
 }

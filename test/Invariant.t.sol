@@ -254,21 +254,8 @@ contract BatchRedeemHandler is Test {
         }
     }
 
-    /// @notice Randomly toggle approval for one oToken
-    function toggleApproval(uint256 idx) external {
-        idx = bound(idx, 0, tokenCount - 1);
-        address token = oTokenList[idx];
-        uint256 current = IERC20(token).allowance(mm, address(settler));
-        vm.prank(mm);
-        if (current > 0) {
-            IERC20(token).approve(address(settler), 0);
-        } else {
-            IERC20(token).approve(address(settler), type(uint256).max);
-        }
-    }
-
-    /// @notice Call batchRedeem with a random subset of oTokens.
-    ///         Some may have revoked approval or zero balance (already redeemed).
+    /// @notice Call operatorRedeemForMM with a random subset of oTokens.
+    ///         Some may have zero custodial balance (already redeemed).
     ///         The batch must never revert completely.
     function redeemBatch(uint256 seed) external {
         uint256 count = 0;
@@ -289,10 +276,10 @@ contract BatchRedeemHandler is Test {
         }
 
         vm.prank(mm);
-        try settler.batchRedeem(selected, amounts) {}
+        try settler.operatorRedeemForMM(mm, selected, amounts) {}
         catch (bytes memory reason) {
             batchRedeemReverted = true;
-            emit log_named_bytes("batchRedeem revert reason", reason);
+            emit log_named_bytes("operatorRedeemForMM revert reason", reason);
         }
     }
 }
@@ -429,7 +416,6 @@ contract BatchRedeemInvariantTest is Test {
             usdc.mint(users[i], collateral * 2);
             vm.startPrank(users[i]);
             usdc.approve(address(pool), type(uint256).max);
-            IERC20(oTokens[i]).approve(address(settler), type(uint256).max);
             vm.stopPrank();
 
             (BatchSettler.Quote memory q, bytes memory sig) =
@@ -451,13 +437,6 @@ contract BatchRedeemInvariantTest is Test {
         }
         vm.prank(mm);
         settler.batchSettleVaults(settleOwners, settleVaults);
-
-        // MM approves all oTokens to settler
-        vm.startPrank(mm);
-        for (uint256 i = 0; i < NUM_TOKENS; i++) {
-            IERC20(oTokens[i]).approve(address(settler), type(uint256).max);
-        }
-        vm.stopPrank();
 
         // Create handler and target it
         batchHandler = new BatchRedeemHandler(settler, mm, oTokens);
@@ -591,8 +570,6 @@ contract FullLifecycleHandler is Test {
             vm.startPrank(u);
             usdc.approve(address(pool), type(uint256).max);
             weth.approve(address(pool), type(uint256).max);
-            IERC20(cfg.putOToken).approve(address(settler), type(uint256).max);
-            IERC20(cfg.callOToken).approve(address(settler), type(uint256).max);
             vm.stopPrank();
         }
     }
@@ -694,24 +671,24 @@ contract FullLifecycleHandler is Test {
         totalPoolOutflowWeth += wethBefore - weth.balanceOf(address(pool));
     }
 
-    // --- Post-expiry: redeem oTokens (MM redeems both types) ---
+    // --- Post-expiry: redeem oTokens (operator redeems for MM) ---
     function redeemTokens(uint256 amount, uint256 tokenSeed) external {
         if (!isExpired) return;
 
         // Pick put or call based on seed, fallback to whichever has balance
         bool pickPut = (tokenSeed % 2 == 0);
         address token;
-        if (pickPut && IERC20(putOToken).balanceOf(mm) > 0) {
+        if (pickPut && settler.mmOTokenBalance(mm, putOToken) > 0) {
             token = putOToken;
-        } else if (IERC20(callOToken).balanceOf(mm) > 0) {
+        } else if (settler.mmOTokenBalance(mm, callOToken) > 0) {
             token = callOToken;
-        } else if (IERC20(putOToken).balanceOf(mm) > 0) {
+        } else if (settler.mmOTokenBalance(mm, putOToken) > 0) {
             token = putOToken;
         } else {
             return;
         }
 
-        uint256 bal = IERC20(token).balanceOf(mm);
+        uint256 bal = settler.mmOTokenBalance(mm, token);
         amount = bound(amount, 1, bal);
 
         uint256 usdcBefore = usdc.balanceOf(address(pool));
@@ -724,7 +701,7 @@ contract FullLifecycleHandler is Test {
         amounts[0] = amount;
 
         vm.prank(mm);
-        settler.batchRedeem(tokens, amounts);
+        settler.operatorRedeemForMM(mm, tokens, amounts);
 
         totalPoolOutflowUsdc += usdcBefore - usdc.balanceOf(address(pool));
         totalPoolOutflowWeth += wethBefore - weth.balanceOf(address(pool));
@@ -752,7 +729,7 @@ contract FullLifecycleHandler is Test {
         userIdx = bound(userIdx, 0, NUM_USERS - 1);
         address u = users[userIdx];
 
-        uint256 mmBal = IERC20(token).balanceOf(mm);
+        uint256 mmBal = settler.mmOTokenBalance(mm, token);
         if (mmBal == 0) return;
         amount = bound(amount, 1, mmBal);
 
@@ -770,7 +747,7 @@ contract FullLifecycleHandler is Test {
         uint256 maxSpent = isPut ? (amount * strikePrice) / 1e10 : amount * 1e10;
 
         vm.prank(mm);
-        settler.physicalRedeem(token, u, amount, maxSpent);
+        settler.physicalRedeem(token, u, amount, maxSpent, mm);
 
         uint256 actualReceived = IERC20(contraAsset).balanceOf(u) - userContraBefore;
         deliveries.push(Delivery({user: u, expectedContraAmount: expectedContra, actualContraReceived: actualReceived}));
@@ -1069,8 +1046,6 @@ contract FullLifecycleInvariantTest is Test {
         vm.startPrank(mm);
         usdc.approve(address(settler), type(uint256).max);
         weth.approve(address(settler), type(uint256).max);
-        IERC20(putOToken).approve(address(settler), type(uint256).max);
-        IERC20(callOToken).approve(address(settler), type(uint256).max);
         vm.stopPrank();
 
         handler = new FullLifecycleHandler(
@@ -1580,7 +1555,6 @@ contract PauseEmergencyInvariantTest is Test {
             usdc.mint(user, collateral);
             vm.startPrank(user);
             usdc.approve(address(pool), type(uint256).max);
-            IERC20(putOToken).approve(address(settler), type(uint256).max);
             vm.stopPrank();
 
             (BatchSettler.Quote memory q, bytes memory sig) =

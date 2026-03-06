@@ -146,9 +146,22 @@ contract DeployBeta is Script {
         settler.setTreasury(deployer);
         settler.setProtocolFeeBps(400); // 4%
 
+        // Oracle: price deviation threshold (10%)
+        oracle.setPriceDeviationThreshold(1000);
+
+        // Controller: set deployer as partial pauser
+        controller.setPartialPauser(deployer);
+
         // Mint initial tokens to deployer
         lusd.mint(deployer, 1_000_000e6);
         leth.mint(deployer, 1_000e18);
+
+        // MM approvals: deployer approves MarginPool to pull collateral
+        lusd.approve(address(pool), type(uint256).max);
+        leth.approve(address(pool), type(uint256).max);
+
+        // MM approvals: deployer approves BatchSettler to pull premium
+        lusd.approve(address(settler), type(uint256).max);
     }
 
     function _logAddresses() internal view {

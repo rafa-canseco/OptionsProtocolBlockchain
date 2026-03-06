@@ -8,13 +8,20 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract MockChainlinkFeed {
     int256 public price;
+    uint256 public lastUpdated;
 
     constructor(int256 _price) {
         price = _price;
+        lastUpdated = block.timestamp;
     }
 
     function setPrice(int256 _price) external {
         price = _price;
+        lastUpdated = block.timestamp;
+    }
+
+    function setUpdatedAt(uint256 _ts) external {
+        lastUpdated = _ts;
     }
 
     function latestRoundData()
@@ -22,7 +29,7 @@ contract MockChainlinkFeed {
         view
         returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
     {
-        return (1, price, block.timestamp, block.timestamp, 1);
+        return (1, price, lastUpdated, lastUpdated, 1);
     }
 }
 
@@ -195,5 +202,82 @@ contract OracleTest is Test {
         oracle.setPriceDeviationThreshold(2000);
         vm.expectRevert(abi.encodeWithSelector(Oracle.PriceDeviationTooHigh.selector, 2087e6, 2087e8, 9900));
         oracle.setExpiryPrice(weth, expiry, 2087e6);
+    }
+
+    // --- Oracle Staleness ---
+
+    function test_setMaxOracleStaleness() public {
+        oracle.setMaxOracleStaleness(7200);
+        assertEq(oracle.maxOracleStaleness(), 7200);
+    }
+
+    function test_onlyOwnerCanSetMaxStaleness() public {
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(Oracle.OnlyOwner.selector);
+        oracle.setMaxOracleStaleness(3600);
+    }
+
+    function test_getPriceRevertsWhenStale() public {
+        oracle.setMaxOracleStaleness(3600);
+        // Make feed stale: updatedAt = now - 7200
+        ethFeed.setUpdatedAt(block.timestamp - 7200);
+
+        vm.expectRevert(abi.encodeWithSelector(Oracle.StaleOraclePrice.selector, block.timestamp - 7200, 3600));
+        oracle.getPrice(weth);
+    }
+
+    function test_getPricePassesWhenFresh() public {
+        oracle.setMaxOracleStaleness(3600);
+        // Feed is fresh (updatedAt = now via setPrice)
+        uint256 price = oracle.getPrice(weth);
+        assertEq(price, 2087e8);
+    }
+
+    function test_stalenessDisabledWhenZero() public {
+        // maxOracleStaleness = 0 (default) → no staleness check
+        ethFeed.setUpdatedAt(block.timestamp - 999999);
+        uint256 price = oracle.getPrice(weth);
+        assertEq(price, 2087e8);
+    }
+
+    function test_setExpiryPriceRevertsWhenStale() public {
+        oracle.setMaxOracleStaleness(3600);
+        oracle.setPriceDeviationThreshold(1000);
+        ethFeed.setUpdatedAt(block.timestamp - 7200);
+
+        vm.expectRevert(abi.encodeWithSelector(Oracle.StaleOraclePrice.selector, block.timestamp - 7200, 3600));
+        oracle.setExpiryPrice(weth, expiry, 2087e8);
+    }
+
+    function test_stalenessBoundary_exactlyAtThreshold() public {
+        oracle.setMaxOracleStaleness(3600);
+        // updatedAt = now - 3600 → diff == maxAge, should pass
+        ethFeed.setUpdatedAt(block.timestamp - 3600);
+        uint256 price = oracle.getPrice(weth);
+        assertEq(price, 2087e8);
+    }
+
+    function test_stalenessBoundary_oneSecondOver() public {
+        oracle.setMaxOracleStaleness(3600);
+        // updatedAt = now - 3601 → diff > maxAge, should revert
+        ethFeed.setUpdatedAt(block.timestamp - 3601);
+        vm.expectRevert(abi.encodeWithSelector(Oracle.StaleOraclePrice.selector, block.timestamp - 3601, 3600));
+        oracle.getPrice(weth);
+    }
+
+    function test_deviationRevertsWhenChainlinkAnswerZero() public {
+        oracle.setPriceDeviationThreshold(1000);
+        ethFeed.setPrice(0);
+
+        vm.expectRevert(Oracle.InvalidPrice.selector);
+        oracle.setExpiryPrice(weth, expiry, 2000e8);
+    }
+
+    function test_deviationRevertsWhenChainlinkAnswerNegative() public {
+        oracle.setPriceDeviationThreshold(1000);
+        ethFeed.setPrice(-100);
+
+        vm.expectRevert(Oracle.InvalidPrice.selector);
+        oracle.setExpiryPrice(weth, expiry, 2000e8);
     }
 }

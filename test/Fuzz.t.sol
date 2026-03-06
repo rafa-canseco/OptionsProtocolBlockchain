@@ -463,8 +463,8 @@ contract BatchSettlerFuzzTest is Test {
             settler.executeOrder(q, sig, 1e8, 2000e6);
         }
 
-        // MM should have received all oTokens
-        assertEq(OToken(oToken).balanceOf(mm), count * 1e8);
+        // oTokens custodied in settler for MM
+        assertEq(settler.mmOTokenBalance(mm, oToken), count * 1e8);
     }
 
     /// @notice Fuzz premium via bidPrice — user always receives (amount * bidPrice) / 1e8
@@ -879,7 +879,7 @@ contract PhysicalRedeemFuzzTest is Test {
 
         // Physical delivery
         vm.prank(mm);
-        settler.physicalRedeem(oToken, alice, amount, collateral);
+        settler.physicalRedeem(oToken, alice, amount, collateral, mm);
 
         // User receives exactly amount * 1e10 WETH
         assertEq(weth.balanceOf(alice), aliceWethBefore + amount * 1e10);
@@ -924,7 +924,7 @@ contract PhysicalRedeemFuzzTest is Test {
 
         // Physical delivery
         vm.prank(mm);
-        settler.physicalRedeem(oToken, alice, amount, collateral);
+        settler.physicalRedeem(oToken, alice, amount, collateral, mm);
 
         // User receives exactly (amount * strikePrice) / 1e10 USDC
         assertEq(usdc.balanceOf(alice), aliceUsdcBefore + (amount * strikePrice) / 1e10);
@@ -970,7 +970,7 @@ contract PhysicalRedeemFuzzTest is Test {
 
         // Physical delivery
         vm.prank(mm);
-        settler.physicalRedeem(oToken, alice, amount, collateral);
+        settler.physicalRedeem(oToken, alice, amount, collateral, mm);
 
         // User receives exactly amount * 1e10 WETH
         assertEq(weth.balanceOf(alice), aliceWethBefore + amount * 1e10);
@@ -1016,7 +1016,7 @@ contract PhysicalRedeemFuzzTest is Test {
 
         // Physical delivery
         vm.prank(mm);
-        settler.physicalRedeem(oToken, alice, amount, collateral);
+        settler.physicalRedeem(oToken, alice, amount, collateral, mm);
 
         // User receives exactly (amount * strikePrice) / 1e10 USDC
         assertEq(usdc.balanceOf(alice), aliceUsdcBefore + (amount * strikePrice) / 1e10);
