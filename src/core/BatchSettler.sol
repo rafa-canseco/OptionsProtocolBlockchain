@@ -22,10 +22,10 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  *         1. MM signs EIP-712 quotes off-chain (bidPrice, deadline, quoteId, maxAmount, makerNonce)
  *         2. User calls executeOrder() with the signed quote + signature
  *         3. Contract recovers MM address via ECDSA, verifies whitelist, checks fills
- *         4. Atomic: vault, collateral, mint oTokens→MM, premium→user
+ *         4. Atomic: vault, collateral, mint oTokens→settler (custodied for MM), premium→user
  *
  *         Post-expiry flow (physical settlement):
- *         - batchSettleVaults() settles expired vaults (ITM: user gets 0 back, OTM: full refund)
+ *         - batchSettleVaults() settles expired vaults (returns collateral minus intrinsic value)
  *         - batchPhysicalRedeem() delivers contra-asset to ITM users via flash loan + DEX swap
  *         - batchRedeem() redeems remaining oTokens after expiry
  */

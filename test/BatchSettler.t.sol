@@ -30,21 +30,7 @@ contract MockERC20 is ERC20 {
     }
 }
 
-contract BatchSettlerTest is Test {
-    event OrderExecuted(
-        address indexed user,
-        address indexed oToken,
-        address indexed mm,
-        uint256 amount,
-        uint256 grossPremium,
-        uint256 netPremium,
-        uint256 fee,
-        uint256 collateral,
-        uint256 vaultId
-    );
-    event VaultSettleFailed(address indexed vaultOwner, uint256 vaultId, bytes reason);
-    event RedeemFailed(address indexed oToken, uint256 amount, bytes reason);
-
+abstract contract BatchSettlerTestBase is Test {
     AddressBook public addressBook;
     Controller public controller;
     MarginPool public pool;
@@ -56,27 +42,17 @@ contract BatchSettlerTest is Test {
     MockERC20 public weth;
     MockERC20 public usdc;
 
-    uint256 public mmKey = 0xAA01;
-    address public mm;
     address public alice = address(0xA11CE);
     address public bob = address(0xB0B0);
-    address public carol = address(0xCA201);
 
     uint256 public strikePrice = 2000e8;
     uint256 public expiry;
-
     uint256 nextQuoteId = 1;
 
-    function setUp() public {
-        vm.warp(1700000000);
-
-        mm = vm.addr(mmKey);
-
-        // Deploy tokens
+    function _deployProtocol(address _operator) internal {
         weth = new MockERC20("Wrapped ETH", "WETH", 18);
         usdc = new MockERC20("USD Coin", "USDC", 6);
 
-        // Deploy protocol (behind UUPS proxies)
         addressBook = AddressBook(
             address(
                 new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
@@ -123,42 +99,22 @@ contract BatchSettlerTest is Test {
             address(
                 new ERC1967Proxy(
                     address(new BatchSettler()),
-                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), _operator, address(this)))
                 )
             )
         );
 
-        // Wire AddressBook
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
+    }
 
-        // Whitelist MM
-        settler.setWhitelistedMM(mm, true);
-
-        // Whitelist assets & products
-        whitelist.whitelistUnderlying(address(weth));
-        whitelist.whitelistCollateral(address(usdc));
-        whitelist.whitelistCollateral(address(weth));
-        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);
-        whitelist.whitelistProduct(address(weth), address(usdc), address(weth), false);
-
-        // Expiry
+    function _computeExpiry() internal {
         uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
         expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
-
-        // Fund MM with USDC for premiums
-        usdc.mint(mm, 1_000_000e6);
-        vm.prank(mm);
-        usdc.approve(address(settler), type(uint256).max);
-
-        // Fund users with USDC (for puts) and approve MarginPool
-        _fundUser(alice, 10_000e6, 10e18);
-        _fundUser(bob, 50_000e6, 50e18);
-        _fundUser(carol, 1_000e6, 1e18);
     }
 
     function _fundUser(address user, uint256 usdcAmount, uint256 wethAmount) internal {
@@ -182,6 +138,67 @@ contract BatchSettlerTest is Test {
         return oToken;
     }
 
+    function _signQuoteFor(uint256 _mmKey, address oToken, uint256 bidPrice, uint256 deadline, uint256 maxAmount)
+        internal
+        returns (BatchSettler.Quote memory quote, bytes memory sig)
+    {
+        address signer = vm.addr(_mmKey);
+        quote = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: bidPrice,
+            deadline: deadline,
+            quoteId: nextQuoteId++,
+            maxAmount: maxAmount,
+            makerNonce: settler.makerNonce(signer)
+        });
+        bytes32 digest = settler.hashQuote(quote);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(_mmKey, digest);
+        sig = abi.encodePacked(r, s, v);
+    }
+}
+
+contract BatchSettlerTest is BatchSettlerTestBase {
+    event OrderExecuted(
+        address indexed user,
+        address indexed oToken,
+        address indexed mm,
+        uint256 amount,
+        uint256 grossPremium,
+        uint256 netPremium,
+        uint256 fee,
+        uint256 collateral,
+        uint256 vaultId
+    );
+    event VaultSettleFailed(address indexed vaultOwner, uint256 vaultId, bytes reason);
+    event RedeemFailed(address indexed oToken, uint256 amount, bytes reason);
+
+    uint256 public mmKey = 0xAA01;
+    address public mm;
+
+    function setUp() public {
+        vm.warp(1700000000);
+        mm = vm.addr(mmKey);
+
+        _deployProtocol(mm);
+
+        settler.setWhitelistedMM(mm, true);
+
+        whitelist.whitelistUnderlying(address(weth));
+        whitelist.whitelistCollateral(address(usdc));
+        whitelist.whitelistCollateral(address(weth));
+        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);
+        whitelist.whitelistProduct(address(weth), address(usdc), address(weth), false);
+
+        _computeExpiry();
+
+        usdc.mint(mm, 1_000_000e6);
+        vm.prank(mm);
+        usdc.approve(address(settler), type(uint256).max);
+
+        _fundUser(alice, 10_000e6, 10e18);
+        _fundUser(bob, 50_000e6, 50e18);
+    }
+
     function _approveOToken(address user, address oToken) internal {
         vm.prank(user);
         IERC20(oToken).approve(address(settler), type(uint256).max);
@@ -191,17 +208,7 @@ contract BatchSettlerTest is Test {
         internal
         returns (BatchSettler.Quote memory quote, bytes memory sig)
     {
-        quote = BatchSettler.Quote({
-            oToken: oToken,
-            bidPrice: bidPrice,
-            deadline: deadline,
-            quoteId: nextQuoteId++,
-            maxAmount: maxAmount,
-            makerNonce: settler.makerNonce(mm)
-        });
-        bytes32 digest = settler.hashQuote(quote);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
-        sig = abi.encodePacked(r, s, v);
+        return _signQuoteFor(mmKey, oToken, bidPrice, deadline, maxAmount);
     }
 
     // ===== executeOrder (instant settlement) =====
@@ -1175,130 +1182,43 @@ contract MockSwapRouter {
 // Physical Delivery Tests
 // =============================================================================
 
-contract PhysicalRedeemTest is Test {
+contract PhysicalRedeemTest is BatchSettlerTestBase {
     using SafeERC20 for IERC20;
 
     event PhysicalDelivery(address indexed oToken, address indexed user, uint256 contraAmount, uint256 collateralUsed);
     event PhysicalRedeemFailed(address indexed oToken, address indexed user, uint256 amount, bytes reason);
 
-    AddressBook public addressBook;
-    Controller public controller;
-    MarginPool public pool;
-    OTokenFactory public factory;
-    Oracle public oracle;
-    Whitelist public whitelist;
-    BatchSettler public settler;
-
-    MockERC20 public weth;
-    MockERC20 public usdc;
     MockAavePool public mockAave;
     MockSwapRouter public mockRouter;
 
     uint256 public mmKey = 0xAA01;
     address public mm;
     address public operatorBot = address(0x0BE0A702);
-    address public alice = address(0xA11CE);
-    address public bob = address(0xB0B0);
 
-    uint256 public strikePrice = 2000e8; // $2000
-    uint256 public expiry;
-    uint256 public constant MOCK_ETH_PRICE = 1800e6; // $1800
-
-    uint256 nextQuoteId = 1;
+    uint256 public constant MOCK_ETH_PRICE = 1800e6;
 
     function setUp() public {
         vm.warp(1700000000);
-
         mm = vm.addr(mmKey);
 
-        // Deploy tokens
-        weth = new MockERC20("Wrapped ETH", "WETH", 18);
-        usdc = new MockERC20("USD Coin", "USDC", 6);
-
-        // Deploy mocks
         mockAave = new MockAavePool();
         mockRouter = new MockSwapRouter(MOCK_ETH_PRICE);
 
-        // Deploy protocol (behind UUPS proxies)
-        addressBook = AddressBook(
-            address(
-                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
-            )
-        );
-        controller = Controller(
-            address(
-                new ERC1967Proxy(
-                    address(new Controller()),
-                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
-                )
-            )
-        );
-        pool = MarginPool(
-            address(
-                new ERC1967Proxy(
-                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-                )
-            )
-        );
-        factory = OTokenFactory(
-            address(
-                new ERC1967Proxy(
-                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-                )
-            )
-        );
-        oracle = Oracle(
-            address(
-                new ERC1967Proxy(
-                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
-                )
-            )
-        );
-        whitelist = Whitelist(
-            address(
-                new ERC1967Proxy(
-                    address(new Whitelist()),
-                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
-                )
-            )
-        );
-        settler = BatchSettler(
-            address(
-                new ERC1967Proxy(
-                    address(new BatchSettler()),
-                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), operatorBot, address(this)))
-                )
-            )
-        );
+        _deployProtocol(operatorBot);
 
-        // Wire AddressBook
-        addressBook.setController(address(controller));
-        addressBook.setMarginPool(address(pool));
-        addressBook.setOTokenFactory(address(factory));
-        addressBook.setOracle(address(oracle));
-        addressBook.setWhitelist(address(whitelist));
-        addressBook.setBatchSettler(address(settler));
-
-        // Whitelist MM (separate from operator)
         settler.setWhitelistedMM(mm, true);
-
-        // Configure physical delivery
         settler.setAavePool(address(mockAave));
         settler.setSwapRouter(address(mockRouter));
         settler.setSwapFeeTier(500);
 
-        // Whitelist
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
         whitelist.whitelistCollateral(address(weth));
         whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);
         whitelist.whitelistProduct(address(weth), address(usdc), address(weth), false);
 
-        // Expiry
-        uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
-        expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
+        _computeExpiry();
 
-        // Fund MM with USDC for premiums (only approval needed from MM)
         usdc.mint(mm, 1_000_000e6);
         weth.mint(mm, 1_000e18);
         vm.startPrank(mm);
@@ -1306,55 +1226,20 @@ contract PhysicalRedeemTest is Test {
         weth.approve(address(settler), type(uint256).max);
         vm.stopPrank();
 
-        // Fund users
         _fundUser(alice, 50_000e6, 50e18);
         _fundUser(bob, 50_000e6, 50e18);
 
-        // Fund mock Aave pool with liquidity for flash loans
         weth.mint(address(mockAave), 1_000e18);
         usdc.mint(address(mockAave), 10_000_000e6);
-
-        // Fund mock swap router with liquidity
         weth.mint(address(mockRouter), 1_000e18);
         usdc.mint(address(mockRouter), 10_000_000e6);
-    }
-
-    function _fundUser(address user, uint256 usdcAmount, uint256 wethAmount) internal {
-        usdc.mint(user, usdcAmount);
-        weth.mint(user, wethAmount);
-        vm.startPrank(user);
-        usdc.approve(address(pool), type(uint256).max);
-        weth.approve(address(pool), type(uint256).max);
-        vm.stopPrank();
-    }
-
-    function _createPut(uint256 strike) internal returns (address) {
-        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strike, expiry, true);
-        whitelist.whitelistOToken(oToken);
-        return oToken;
-    }
-
-    function _createCall(uint256 strike) internal returns (address) {
-        address oToken = factory.createOToken(address(weth), address(usdc), address(weth), strike, expiry, false);
-        whitelist.whitelistOToken(oToken);
-        return oToken;
     }
 
     function _signQuote(address oToken, uint256 bidPrice, uint256 deadline, uint256 maxAmount)
         internal
         returns (BatchSettler.Quote memory quote, bytes memory sig)
     {
-        quote = BatchSettler.Quote({
-            oToken: oToken,
-            bidPrice: bidPrice,
-            deadline: deadline,
-            quoteId: nextQuoteId++,
-            maxAmount: maxAmount,
-            makerNonce: settler.makerNonce(mm)
-        });
-        bytes32 digest = settler.hashQuote(quote);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
-        sig = abi.encodePacked(r, s, v);
+        return _signQuoteFor(mmKey, oToken, bidPrice, deadline, maxAmount);
     }
 
     function _setupPutPosition(address user, address oToken, uint256 amount) internal {
@@ -1903,97 +1788,19 @@ contract PhysicalRedeemTest is Test {
 
 // ===== Escape Hatch, Ledger Sync, Multi-MM Tests =====
 
-contract EscapeHatchTest is Test {
-    AddressBook public addressBook;
-    Controller public controller;
-    MarginPool public pool;
-    OTokenFactory public factory;
-    Oracle public oracle;
-    Whitelist public whitelist;
-    BatchSettler public settler;
-
-    MockERC20 public weth;
-    MockERC20 public usdc;
-
+contract EscapeHatchTest is BatchSettlerTestBase {
     uint256 public mm1Key = 0xAA01;
     uint256 public mm2Key = 0xBB02;
     address public mm1;
     address public mm2;
     address public operatorBot = address(0x0BE0A702);
-    address public alice = address(0xA11CE);
-    address public bob = address(0xB0B0);
-
-    uint256 public strikePrice = 2000e8;
-    uint256 public expiry;
-
-    uint256 nextQuoteId = 1;
 
     function setUp() public {
         vm.warp(1700000000);
-
         mm1 = vm.addr(mm1Key);
         mm2 = vm.addr(mm2Key);
 
-        weth = new MockERC20("Wrapped ETH", "WETH", 18);
-        usdc = new MockERC20("USD Coin", "USDC", 6);
-
-        addressBook = AddressBook(
-            address(
-                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
-            )
-        );
-        controller = Controller(
-            address(
-                new ERC1967Proxy(
-                    address(new Controller()),
-                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
-                )
-            )
-        );
-        pool = MarginPool(
-            address(
-                new ERC1967Proxy(
-                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
-                )
-            )
-        );
-        factory = OTokenFactory(
-            address(
-                new ERC1967Proxy(
-                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
-                )
-            )
-        );
-        oracle = Oracle(
-            address(
-                new ERC1967Proxy(
-                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
-                )
-            )
-        );
-        whitelist = Whitelist(
-            address(
-                new ERC1967Proxy(
-                    address(new Whitelist()),
-                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
-                )
-            )
-        );
-        settler = BatchSettler(
-            address(
-                new ERC1967Proxy(
-                    address(new BatchSettler()),
-                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), operatorBot, address(this)))
-                )
-            )
-        );
-
-        addressBook.setController(address(controller));
-        addressBook.setMarginPool(address(pool));
-        addressBook.setOTokenFactory(address(factory));
-        addressBook.setOracle(address(oracle));
-        addressBook.setWhitelist(address(whitelist));
-        addressBook.setBatchSettler(address(settler));
+        _deployProtocol(operatorBot);
 
         settler.setWhitelistedMM(mm1, true);
         settler.setWhitelistedMM(mm2, true);
@@ -2003,10 +1810,8 @@ contract EscapeHatchTest is Test {
         whitelist.whitelistCollateral(address(usdc));
         whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);
 
-        uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
-        expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
+        _computeExpiry();
 
-        // Fund both MMs with USDC for premiums
         usdc.mint(mm1, 1_000_000e6);
         usdc.mint(mm2, 1_000_000e6);
         vm.prank(mm1);
@@ -2014,7 +1819,6 @@ contract EscapeHatchTest is Test {
         vm.prank(mm2);
         usdc.approve(address(settler), type(uint256).max);
 
-        // Fund users
         usdc.mint(alice, 50_000e6);
         usdc.mint(bob, 50_000e6);
         vm.prank(alice);
@@ -2023,28 +1827,17 @@ contract EscapeHatchTest is Test {
         usdc.approve(address(pool), type(uint256).max);
     }
 
-    function _signQuote(uint256 mmKey, address oToken, uint256 bidPrice, uint256 maxAmount)
+    function _signQuote(uint256 _mmKey, address oToken, uint256 bidPrice, uint256 maxAmount)
         internal
         returns (BatchSettler.Quote memory q, bytes memory sig)
     {
-        address signer = vm.addr(mmKey);
-        q = BatchSettler.Quote({
-            oToken: oToken,
-            bidPrice: bidPrice,
-            deadline: block.timestamp + 1 hours,
-            quoteId: nextQuoteId++,
-            maxAmount: maxAmount,
-            makerNonce: settler.makerNonce(signer)
-        });
-        bytes32 digest = settler.hashQuote(q);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
-        sig = abi.encodePacked(r, s, v);
+        return _signQuoteFor(_mmKey, oToken, bidPrice, block.timestamp + 1 hours, maxAmount);
     }
 
-    function _executeOrderForMM(uint256 mmKey, address user, address oToken, uint256 amount, uint256 collateral)
+    function _executeOrderForMM(uint256 _mmKey, address user, address oToken, uint256 amount, uint256 collateral)
         internal
     {
-        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(mmKey, oToken, 50e6, 100e8);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(_mmKey, oToken, 50e6, 100e8);
         vm.prank(user);
         settler.executeOrder(q, sig, amount, collateral);
     }
