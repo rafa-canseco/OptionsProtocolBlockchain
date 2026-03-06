@@ -437,6 +437,19 @@ contract ControllerTest is Test {
         controller.mintOtoken(user, vaultId, oToken, 1e8, user);
     }
 
+    function test_cannotMintAtExactExpiry() public {
+        address oToken = _createPut();
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        vm.stopPrank();
+
+        vm.warp(expiry);
+        vm.prank(user);
+        vm.expectRevert(Controller.OptionExpired.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+    }
+
     function test_canMintOneSecondBeforeExpiry() public {
         address oToken = _createPut();
         vm.startPrank(user);
