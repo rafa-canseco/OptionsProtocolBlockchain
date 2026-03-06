@@ -214,8 +214,9 @@ contract BatchSettlerTest is Test {
         vm.prank(alice);
         settler.executeOrder(q, sig, 1e8, 2000e6);
 
-        // MM got oTokens directly via mint, user never held them
-        assertEq(OToken(oToken).balanceOf(mm), 1e8);
+        // oTokens custodied in settler, tracked per MM
+        assertEq(OToken(oToken).balanceOf(address(settler)), 1e8);
+        assertEq(settler.mmOTokenBalance(mm, oToken), 1e8);
         assertEq(OToken(oToken).balanceOf(alice), 0);
     }
 
@@ -233,9 +234,9 @@ contract BatchSettlerTest is Test {
         assertEq(vaultId, 1);
         // Alice: -2000 collateral, +70 premium
         assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6 + 70e6);
-        // MM: -70 premium, +1 oToken
+        // MM: -70 premium, oTokens custodied in settler
         assertEq(usdc.balanceOf(mm), mmBefore - 70e6);
-        assertEq(OToken(oToken).balanceOf(mm), 1e8);
+        assertEq(settler.mmOTokenBalance(mm, oToken), 1e8);
         // Pool: holds 2000 collateral
         assertEq(usdc.balanceOf(address(pool)), 2000e6);
     }
@@ -254,8 +255,8 @@ contract BatchSettlerTest is Test {
         // Bob: -1 WETH collateral, +50 USDC premium
         assertEq(weth.balanceOf(bob), bobWethBefore - 1e18);
         assertEq(usdc.balanceOf(bob), bobUsdcBefore + 50e6);
-        // MM got oToken
-        assertEq(OToken(oToken).balanceOf(mm), 1e8);
+        // oTokens custodied in settler for MM
+        assertEq(settler.mmOTokenBalance(mm, oToken), 1e8);
     }
 
     function test_executeOrder_premiumCalculation() public {
@@ -474,8 +475,8 @@ contract BatchSettlerTest is Test {
         vm.prank(bob);
         settler.executeOrder(q, sig, 2e8, 4000e6);
 
-        // MM has 3 oTokens total
-        assertEq(OToken(oToken).balanceOf(mm), 3e8);
+        // oTokens custodied in settler for MM
+        assertEq(settler.mmOTokenBalance(mm, oToken), 3e8);
 
         // Expire ITM: price = $1800
         vm.warp(expiry + 1);
@@ -498,20 +499,17 @@ contract BatchSettlerTest is Test {
         // Bob: -4000 collateral + 140 premium + 0 returned
         assertEq(usdc.balanceOf(bob), 50_000e6 - 4000e6 + 140e6);
 
-        // MM redeems via batchRedeem
-        vm.prank(mm);
-        OToken(oToken).approve(address(settler), 3e8);
-
+        // Operator redeems for MM (no oToken approval needed — settler holds them)
         address[] memory oTokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         oTokens[0] = oToken;
         amounts[0] = 3e8;
 
         uint256 mmBefore = usdc.balanceOf(mm);
-        vm.prank(mm);
-        settler.batchRedeem(oTokens, amounts);
+        vm.prank(mm); // mm is operator in this test
+        settler.operatorRedeemForMM(mm, oTokens, amounts);
 
-        // Physical settlement: full collateral payout = $2000 * 3 = $6000
+        // Full collateral payout = $2000 * 3 = $6000
         assertEq(usdc.balanceOf(mm), mmBefore + 6000e6);
 
         // Pool empty
@@ -615,7 +613,7 @@ contract BatchSettlerTest is Test {
 
     // ===== batchRedeem =====
 
-    function test_batchRedeem_singleOtoken() public {
+    function test_operatorRedeemForMM_singleOtoken() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
         (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
@@ -636,23 +634,22 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchSettleVaults(owners, vaultIds);
 
-        // MM redeems via batchRedeem
-        vm.prank(mm);
-        OToken(oToken).approve(address(settler), 1e8);
-
+        // Operator redeems for MM (no oToken approval needed)
         address[] memory oTokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         oTokens[0] = oToken;
         amounts[0] = 1e8;
 
         uint256 mmBefore = usdc.balanceOf(mm);
-        vm.prank(mm);
-        settler.batchRedeem(oTokens, amounts);
+        vm.prank(mm); // mm is operator in this test
+        settler.operatorRedeemForMM(mm, oTokens, amounts);
 
-        // Physical settlement: full collateral payout = $2000
+        // Full collateral payout = $2000
         assertEq(usdc.balanceOf(mm), mmBefore + 2000e6);
-        // oTokens burned
-        assertEq(OToken(oToken).balanceOf(mm), 0);
+        // oTokens burned from settler
+        assertEq(OToken(oToken).balanceOf(address(settler)), 0);
+        // MM balance tracking cleared
+        assertEq(settler.mmOTokenBalance(mm, oToken), 0);
     }
 
     function test_batchRedeem_revertsOnLengthMismatch() public {
@@ -732,7 +729,7 @@ contract BatchSettlerTest is Test {
 
         // Alice gets zero premium (intentional), only loses collateral
         assertEq(usdc.balanceOf(alice), aliceBefore - 2000e6);
-        assertEq(OToken(oToken).balanceOf(mm), 1e8);
+        assertEq(settler.mmOTokenBalance(mm, oToken), 1e8);
     }
 
     function test_executeOrder_revertsOnPremiumTruncation() public {
@@ -749,7 +746,7 @@ contract BatchSettlerTest is Test {
 
     // ===== batchRedeem edge cases =====
 
-    function test_batchRedeem_multipleOtokensSameCollateral() public {
+    function test_operatorRedeemForMM_multipleOtokensSameCollateral() public {
         // Two different PUT strikes, both USDC-collateralized
         address oToken1 = _createPut(2000e8);
         address oToken2 = _createPut(2500e8);
@@ -778,12 +775,7 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchSettleVaults(owners, vaultIds);
 
-        // MM redeems both oTokens in a single batchRedeem
-        vm.startPrank(mm);
-        OToken(oToken1).approve(address(settler), 1e8);
-        OToken(oToken2).approve(address(settler), 1e8);
-        vm.stopPrank();
-
+        // Operator redeems both oTokens for MM (no approvals needed)
         address[] memory oTokens = new address[](2);
         uint256[] memory amounts = new uint256[](2);
         oTokens[0] = oToken1;
@@ -792,18 +784,16 @@ contract BatchSettlerTest is Test {
         amounts[1] = 1e8;
 
         uint256 mmBefore = usdc.balanceOf(mm);
-        vm.prank(mm);
-        settler.batchRedeem(oTokens, amounts);
+        vm.prank(mm); // mm is operator
+        settler.operatorRedeemForMM(mm, oTokens, amounts);
 
-        // Physical settlement: full collateral payouts
-        // oToken1 payout: 2000e6 (full collateral)
-        // oToken2 payout: 2500e6 (full collateral)
+        // Full collateral payouts: 2000e6 + 2500e6
         assertEq(usdc.balanceOf(mm), mmBefore + 2000e6 + 2500e6);
         // No residual left in settler
         assertEq(usdc.balanceOf(address(settler)), 0);
     }
 
-    function test_batchRedeem_otmZeroPayout() public {
+    function test_operatorRedeemForMM_otmZeroPayout() public {
         address oToken = _createPut(strikePrice);
         _approveOToken(alice, oToken);
         (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
@@ -823,26 +813,24 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchSettleVaults(owners, vaultIds);
 
-        // MM redeems OTM oToken -- zero payout but should not revert
-        vm.prank(mm);
-        OToken(oToken).approve(address(settler), 1e8);
-
+        // Operator redeems OTM oToken for MM — zero payout but should not revert
         address[] memory oTokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         oTokens[0] = oToken;
         amounts[0] = 1e8;
 
         uint256 mmBefore = usdc.balanceOf(mm);
-        vm.prank(mm);
-        settler.batchRedeem(oTokens, amounts);
+        vm.prank(mm); // mm is operator
+        settler.operatorRedeemForMM(mm, oTokens, amounts);
 
         // Zero payout, balance unchanged
         assertEq(usdc.balanceOf(mm), mmBefore);
-        // oTokens burned
-        assertEq(OToken(oToken).balanceOf(mm), 0);
+        // oTokens burned from settler
+        assertEq(OToken(oToken).balanceOf(address(settler)), 0);
+        assertEq(settler.mmOTokenBalance(mm, oToken), 0);
     }
 
-    function test_batchRedeem_continuesOnPullFailure() public {
+    function test_operatorRedeemForMM_continuesOnInsufficientBalance() public {
         address oToken1 = _createPut(2000e8);
         address oToken2 = _createPut(2500e8);
         _approveOToken(alice, oToken1);
@@ -869,20 +857,15 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         settler.batchSettleVaults(settleOwners, settleVaults);
 
-        // Redeem oToken1 first so MM has 0 balance of it
-        vm.startPrank(mm);
-        OToken(oToken1).approve(address(settler), 1e8);
-        OToken(oToken2).approve(address(settler), 1e8);
-        vm.stopPrank();
-
+        // Redeem oToken1 first so MM balance is 0
         address[] memory oTokens1 = new address[](1);
         uint256[] memory amounts1 = new uint256[](1);
         oTokens1[0] = oToken1;
         amounts1[0] = 1e8;
         vm.prank(mm);
-        settler.batchRedeem(oTokens1, amounts1);
+        settler.operatorRedeemForMM(mm, oTokens1, amounts1);
 
-        // Now batch both: oToken1 pull fails (0 balance, no approval), oToken2 succeeds
+        // Now batch both: oToken1 fails (0 MM balance), oToken2 succeeds
         address[] memory oTokens = new address[](2);
         uint256[] memory amounts = new uint256[](2);
         oTokens[0] = oToken1;
@@ -894,60 +877,39 @@ contract BatchSettlerTest is Test {
         vm.prank(mm);
         vm.expectEmit(true, false, false, false);
         emit RedeemFailed(oToken1, 1e8, "");
-        settler.batchRedeem(oTokens, amounts);
+        settler.operatorRedeemForMM(mm, oTokens, amounts);
 
-        // Physical: oToken2 full collateral = $2500, oToken1 failed but didn't kill the batch
+        // oToken2 full collateral = $2500, oToken1 failed but didn't kill the batch
         assertEq(usdc.balanceOf(mm), mmBefore + 2500e6);
     }
 
-    function test_batchRedeem_continuesOnRevokedApproval() public {
-        address oToken1 = _createPut(2000e8);
-        address oToken2 = _createPut(2500e8);
-        _approveOToken(alice, oToken1);
-        _approveOToken(bob, oToken2);
-
-        (BatchSettler.Quote memory q1, bytes memory sig1) = _signQuote(oToken1, 70e6, block.timestamp + 1 hours, 100e8);
-        (BatchSettler.Quote memory q2, bytes memory sig2) = _signQuote(oToken2, 90e6, block.timestamp + 1 hours, 100e8);
+    function test_operatorRedeemForMM_onlyOperatorCanCall() public {
+        address oToken = _createPut(strikePrice);
+        _approveOToken(alice, oToken);
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 100e8);
 
         vm.prank(alice);
-        settler.executeOrder(q1, sig1, 1e8, 2000e6);
-        vm.prank(bob);
-        settler.executeOrder(q2, sig2, 1e8, 2500e6);
+        settler.executeOrder(q, sig, 1e8, 2000e6);
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
-        // Settle both
-        address[] memory settleOwners = new address[](2);
-        uint256[] memory settleVaults = new uint256[](2);
-        settleOwners[0] = alice;
-        settleOwners[1] = bob;
-        settleVaults[0] = 1;
-        settleVaults[1] = 1;
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
         vm.prank(mm);
-        settler.batchSettleVaults(settleOwners, settleVaults);
+        settler.batchSettleVaults(owners, vaultIds);
 
-        // MM approves oToken2 but revokes oToken1 approval
-        vm.startPrank(mm);
-        OToken(oToken1).approve(address(settler), 0);
-        OToken(oToken2).approve(address(settler), 1e8);
-        vm.stopPrank();
-
-        address[] memory oTokens = new address[](2);
-        uint256[] memory amounts = new uint256[](2);
-        oTokens[0] = oToken1;
-        oTokens[1] = oToken2;
+        address[] memory oTokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        oTokens[0] = oToken;
         amounts[0] = 1e8;
-        amounts[1] = 1e8;
 
-        uint256 mmBefore = usdc.balanceOf(mm);
-        vm.prank(mm);
-        settler.batchRedeem(oTokens, amounts);
-
-        // oToken1 failed (revoked approval), oToken2 succeeded (physical: full $2500 payout)
-        assertEq(usdc.balanceOf(mm), mmBefore + 2500e6);
-        // MM still has oToken1 (pull failed, not burned)
-        assertEq(OToken(oToken1).balanceOf(mm), 1e8);
+        // Non-operator cannot call
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.OnlyOperator.selector);
+        settler.operatorRedeemForMM(mm, oTokens, amounts);
     }
 
     // ===== New validation tests =====
@@ -1234,6 +1196,7 @@ contract PhysicalRedeemTest is Test {
 
     uint256 public mmKey = 0xAA01;
     address public mm;
+    address public operatorBot = address(0x0BE0A702);
     address public alice = address(0xA11CE);
     address public bob = address(0xB0B0);
 
@@ -1303,7 +1266,7 @@ contract PhysicalRedeemTest is Test {
             address(
                 new ERC1967Proxy(
                     address(new BatchSettler()),
-                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), operatorBot, address(this)))
                 )
             )
         );
@@ -1316,7 +1279,7 @@ contract PhysicalRedeemTest is Test {
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
 
-        // Whitelist MM
+        // Whitelist MM (separate from operator)
         settler.setWhitelistedMM(mm, true);
 
         // Configure physical delivery
@@ -1335,7 +1298,7 @@ contract PhysicalRedeemTest is Test {
         uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
         expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
 
-        // Fund MM
+        // Fund MM with USDC for premiums (only approval needed from MM)
         usdc.mint(mm, 1_000_000e6);
         weth.mint(mm, 1_000e18);
         vm.startPrank(mm);
@@ -1404,10 +1367,7 @@ contract PhysicalRedeemTest is Test {
 
         vm.prank(user);
         settler.executeOrder(q, sig, amount, collateral);
-
-        // MM approves settler for oTokens (needed for physicalRedeem)
-        vm.prank(mm);
-        IERC20(oToken).approve(address(settler), type(uint256).max);
+        // No MM oToken approval needed — settler custodies oTokens
     }
 
     function _setupCallPosition(address user, address oToken, uint256 amount) internal {
@@ -1420,9 +1380,7 @@ contract PhysicalRedeemTest is Test {
 
         vm.prank(user);
         settler.executeOrder(q, sig, amount, collateral);
-
-        vm.prank(mm);
-        IERC20(oToken).approve(address(settler), type(uint256).max);
+        // No MM oToken approval needed — settler custodies oTokens
     }
 
     // ===== Physical Redeem: PUT ITM =====
@@ -1440,19 +1398,20 @@ contract PhysicalRedeemTest is Test {
         uint256[] memory vaultIds = new uint256[](1);
         owners[0] = alice;
         vaultIds[0] = 1;
-        vm.prank(mm);
+        vm.prank(operatorBot);
         settler.batchSettleVaults(owners, vaultIds);
 
         uint256 aliceWethBefore = weth.balanceOf(alice);
 
         // Physical delivery: alice should receive 1 ETH
-        vm.prank(mm);
-        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+        vm.prank(operatorBot);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
 
         // Alice received 1 WETH
         assertEq(weth.balanceOf(alice), aliceWethBefore + 1e18);
-        // oTokens burned (MM had 1e8, now 0)
-        assertEq(OToken(oToken).balanceOf(mm), 0);
+        // oTokens burned from settler
+        assertEq(OToken(oToken).balanceOf(address(settler)), 0);
+        assertEq(settler.mmOTokenBalance(mm, oToken), 0);
     }
 
     // ===== Physical Redeem: CALL ITM =====
@@ -1473,14 +1432,14 @@ contract PhysicalRedeemTest is Test {
         uint256[] memory vaultIds = new uint256[](1);
         owners[0] = alice;
         vaultIds[0] = 1;
-        vm.prank(mm);
+        vm.prank(operatorBot);
         settler.batchSettleVaults(owners, vaultIds);
 
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
 
         // Physical delivery: alice should receive $2000 USDC (strike amount)
-        vm.prank(mm);
-        settler.physicalRedeem(oToken, alice, 1e8, 1e18);
+        vm.prank(operatorBot);
+        settler.physicalRedeem(oToken, alice, 1e8, 1e18, mm);
 
         // Alice received strikePrice USDC
         assertEq(usdc.balanceOf(alice), aliceUsdcBefore + 2000e6);
@@ -1496,9 +1455,9 @@ contract PhysicalRedeemTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
 
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.OptionNotITM.selector);
-        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
     }
 
     // ===== Reverts on ATM (expiryPrice == strike) =====
@@ -1510,9 +1469,9 @@ contract PhysicalRedeemTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2000e8); // exactly at strike
 
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.OptionNotITM.selector);
-        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
     }
 
     // ===== Reverts on not expired =====
@@ -1522,9 +1481,9 @@ contract PhysicalRedeemTest is Test {
         _setupPutPosition(alice, oToken, 1e8);
 
         // Don't warp past expiry
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.OptionNotExpired.selector);
-        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
     }
 
     // ===== Reverts on non-operator =====
@@ -1538,12 +1497,12 @@ contract PhysicalRedeemTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(BatchSettler.OnlyOperator.selector);
-        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
     }
 
-    // ===== Operator receives surplus =====
+    // ===== MM receives surplus (not operator) =====
 
-    function test_physicalRedeem_operatorReceivesSurplus() public {
+    function test_physicalRedeem_mmReceivesSurplus() public {
         address oToken = _createPut(strikePrice);
         _setupPutPosition(alice, oToken, 1e8);
 
@@ -1555,18 +1514,15 @@ contract PhysicalRedeemTest is Test {
         uint256[] memory vaultIds = new uint256[](1);
         owners[0] = alice;
         vaultIds[0] = 1;
-        vm.prank(mm);
+        vm.prank(operatorBot);
         settler.batchSettleVaults(owners, vaultIds);
 
         uint256 mmUsdcBefore = usdc.balanceOf(mm);
+        uint256 operatorUsdcBefore = usdc.balanceOf(operatorBot);
 
-        // Physical delivery
-        // Collateral from redeem: 2000 USDC
-        // Flash loan: 1 WETH, fee = 1e18 * 5 / 10000 = 5e14
-        // Swap: need 1e18 + 5e14 WETH. At $1800, cost = (1e18 + 5e14) * 1800e6 / 1e18 ~ 1800.9e6 USDC
-        // Surplus ~ 2000e6 - 1800.9e6 ~ 199.1e6 USDC -> goes to MM
-        vm.prank(mm);
-        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+        // Physical delivery — operator triggers, but surplus goes to MM
+        vm.prank(operatorBot);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
 
         uint256 mmUsdcAfter = usdc.balanceOf(mm);
         uint256 surplus = mmUsdcAfter - mmUsdcBefore;
@@ -1575,6 +1531,8 @@ contract PhysicalRedeemTest is Test {
         assertGt(surplus, 0);
         // Surplus should be less than full collateral (some went to swap)
         assertLt(surplus, 2000e6);
+        // Operator balance unchanged — surplus goes to MM, not operator
+        assertEq(usdc.balanceOf(operatorBot), operatorUsdcBefore);
     }
 
     // ===== Batch physical redeem =====
@@ -1586,7 +1544,6 @@ contract PhysicalRedeemTest is Test {
         vm.prank(alice);
         IERC20(oToken).approve(address(settler), type(uint256).max);
 
-        // Create a single quote with enough capacity for both users
         BatchSettler.Quote memory q = BatchSettler.Quote({
             oToken: oToken,
             bidPrice: 70e6,
@@ -1608,9 +1565,6 @@ contract PhysicalRedeemTest is Test {
         vm.prank(bob);
         settler.executeOrder(q, sig, 1e8, 2000e6);
 
-        vm.prank(mm);
-        IERC20(oToken).approve(address(settler), type(uint256).max);
-
         // Expire ITM
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
@@ -1622,17 +1576,18 @@ contract PhysicalRedeemTest is Test {
         settleOwners[1] = bob;
         settleVaults[0] = 1;
         settleVaults[1] = 1;
-        vm.prank(mm);
+        vm.prank(operatorBot);
         settler.batchSettleVaults(settleOwners, settleVaults);
 
         uint256 aliceWethBefore = weth.balanceOf(alice);
         uint256 bobWethBefore = weth.balanceOf(bob);
 
-        // Batch physical delivery
+        // Batch physical delivery with MM addresses
         address[] memory oTokens = new address[](2);
         address[] memory users = new address[](2);
         uint256[] memory amounts = new uint256[](2);
         uint256[] memory maxSpents = new uint256[](2);
+        address[] memory mms = new address[](2);
         oTokens[0] = oToken;
         oTokens[1] = oToken;
         users[0] = alice;
@@ -1641,9 +1596,11 @@ contract PhysicalRedeemTest is Test {
         amounts[1] = 1e8;
         maxSpents[0] = 2000e6;
         maxSpents[1] = 2000e6;
+        mms[0] = mm;
+        mms[1] = mm;
 
-        vm.prank(mm);
-        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents);
+        vm.prank(operatorBot);
+        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents, mms);
 
         // Both received 1 WETH each
         assertEq(weth.balanceOf(alice), aliceWethBefore + 1e18);
@@ -1663,9 +1620,6 @@ contract PhysicalRedeemTest is Test {
         vm.prank(alice);
         settler.executeOrder(q, sig, 1e8, 2000e6);
 
-        vm.prank(mm);
-        IERC20(oToken).approve(address(settler), type(uint256).max);
-
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
@@ -1673,7 +1627,7 @@ contract PhysicalRedeemTest is Test {
         uint256[] memory settleVaults = new uint256[](1);
         settleOwners[0] = alice;
         settleVaults[0] = 1;
-        vm.prank(mm);
+        vm.prank(operatorBot);
         settler.batchSettleVaults(settleOwners, settleVaults);
 
         uint256 aliceWethBefore = weth.balanceOf(alice);
@@ -1685,6 +1639,7 @@ contract PhysicalRedeemTest is Test {
         address[] memory users = new address[](2);
         uint256[] memory amounts = new uint256[](2);
         uint256[] memory maxSpents = new uint256[](2);
+        address[] memory mms = new address[](2);
         oTokens[0] = bogusToken;
         oTokens[1] = oToken;
         users[0] = bob;
@@ -1693,9 +1648,11 @@ contract PhysicalRedeemTest is Test {
         amounts[1] = 1e8;
         maxSpents[0] = 2000e6;
         maxSpents[1] = 2000e6;
+        mms[0] = mm;
+        mms[1] = mm;
 
-        vm.prank(mm);
-        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents);
+        vm.prank(operatorBot);
+        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents, mms);
 
         // Alice still got her delivery despite bogus first item
         assertEq(weth.balanceOf(alice), aliceWethBefore + 1e18);
@@ -1721,7 +1678,7 @@ contract PhysicalRedeemTest is Test {
             address(
                 new ERC1967Proxy(
                     address(new BatchSettler()),
-                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), operatorBot, address(this)))
                 )
             )
         );
@@ -1735,9 +1692,9 @@ contract PhysicalRedeemTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.AavePoolNotSet.selector);
-        freshSettler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+        freshSettler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
 
         // Restore original settler
         addressBook.setBatchSettler(address(settler));
@@ -1748,7 +1705,7 @@ contract PhysicalRedeemTest is Test {
             address(
                 new ERC1967Proxy(
                     address(new BatchSettler()),
-                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), mm, address(this)))
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), operatorBot, address(this)))
                 )
             )
         );
@@ -1762,9 +1719,9 @@ contract PhysicalRedeemTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.SwapRouterNotSet.selector);
-        freshSettler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+        freshSettler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
 
         addressBook.setBatchSettler(address(settler));
     }
@@ -1774,9 +1731,9 @@ contract PhysicalRedeemTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.InvalidAmount.selector);
-        settler.physicalRedeem(oToken, alice, 0, 2000e6);
+        settler.physicalRedeem(oToken, alice, 0, 2000e6, mm);
     }
 
     function test_physicalRedeem_revertsOnExpiryPriceNotSet() public {
@@ -1785,9 +1742,9 @@ contract PhysicalRedeemTest is Test {
         vm.warp(expiry + 1);
         // oracle price NOT set
 
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.ExpiryPriceNotSet.selector);
-        settler.physicalRedeem(oToken, alice, 1e8, 2000e6);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
     }
 
     // ===== Flash loan callback security =====
@@ -1807,9 +1764,9 @@ contract PhysicalRedeemTest is Test {
     // ===== Self-call guard =====
 
     function test_physicalRedeemSingle_revertsOnDirectCall() public {
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.InvalidAddress.selector);
-        settler._physicalRedeemSingle(address(0x1), alice, 1e8, 2000e6);
+        settler._physicalRedeemSingle(address(0x1), alice, 1e8, 2000e6, mm);
     }
 
     // ===== Slippage protection =====
@@ -1826,13 +1783,13 @@ contract PhysicalRedeemTest is Test {
         uint256[] memory vaultIds = new uint256[](1);
         owners[0] = alice;
         vaultIds[0] = 1;
-        vm.prank(mm);
+        vm.prank(operatorBot);
         settler.batchSettleVaults(owners, vaultIds);
 
         // maxCollateralSpent = 1 USDC (way too low to buy 1 ETH)
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(); // "Too much slippage" from MockSwapRouter
-        settler.physicalRedeem(oToken, alice, 1e8, 1e6);
+        settler.physicalRedeem(oToken, alice, 1e8, 1e6, mm);
     }
 
     // ===== Fee tier validation =====
@@ -1863,7 +1820,7 @@ contract PhysicalRedeemTest is Test {
     }
 
     function test_setSwapFeeTier_revertsOnNonOwner() public {
-        vm.prank(alice);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.OnlyOwner.selector);
         settler.setSwapFeeTier(500);
     }
@@ -1872,17 +1829,25 @@ contract PhysicalRedeemTest is Test {
 
     function test_physicalRedeem_revertsOnZeroOToken() public {
         vm.warp(expiry + 1);
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.InvalidAddress.selector);
-        settler.physicalRedeem(address(0), alice, 1e8, 2000e6);
+        settler.physicalRedeem(address(0), alice, 1e8, 2000e6, mm);
     }
 
     function test_physicalRedeem_revertsOnZeroUser() public {
         address oToken = _createPut(strikePrice);
         vm.warp(expiry + 1);
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.InvalidAddress.selector);
-        settler.physicalRedeem(oToken, address(0), 1e8, 2000e6);
+        settler.physicalRedeem(oToken, address(0), 1e8, 2000e6, mm);
+    }
+
+    function test_physicalRedeem_revertsOnZeroMM() public {
+        address oToken = _createPut(strikePrice);
+        vm.warp(expiry + 1);
+        vm.prank(operatorBot);
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, address(0));
     }
 
     function test_setAavePool_revertsOnZeroAddress() public {
@@ -1902,10 +1867,11 @@ contract PhysicalRedeemTest is Test {
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](2);
         uint256[] memory maxSpents = new uint256[](2);
+        address[] memory mms = new address[](2);
 
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.LengthMismatch.selector);
-        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents);
+        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents, mms);
     }
 
     function test_batchPhysicalRedeem_revertsOnEmptyArrays() public {
@@ -1913,10 +1879,11 @@ contract PhysicalRedeemTest is Test {
         address[] memory users = new address[](0);
         uint256[] memory amounts = new uint256[](0);
         uint256[] memory maxSpents = new uint256[](0);
+        address[] memory mms = new address[](0);
 
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.EmptyArray.selector);
-        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents);
+        settler.batchPhysicalRedeem(oTokens, users, amounts, maxSpents, mms);
     }
 
     // ===== CALL ATM boundary =====
@@ -1928,8 +1895,430 @@ contract PhysicalRedeemTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2000e8); // exactly at strike
 
-        vm.prank(mm);
+        vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.OptionNotITM.selector);
-        settler.physicalRedeem(oToken, alice, 1e8, 1e18);
+        settler.physicalRedeem(oToken, alice, 1e8, 1e18, mm);
+    }
+}
+
+// ===== Escape Hatch, Ledger Sync, Multi-MM Tests =====
+
+contract EscapeHatchTest is Test {
+    AddressBook public addressBook;
+    Controller public controller;
+    MarginPool public pool;
+    OTokenFactory public factory;
+    Oracle public oracle;
+    Whitelist public whitelist;
+    BatchSettler public settler;
+
+    MockERC20 public weth;
+    MockERC20 public usdc;
+
+    uint256 public mm1Key = 0xAA01;
+    uint256 public mm2Key = 0xBB02;
+    address public mm1;
+    address public mm2;
+    address public operatorBot = address(0x0BE0A702);
+    address public alice = address(0xA11CE);
+    address public bob = address(0xB0B0);
+
+    uint256 public strikePrice = 2000e8;
+    uint256 public expiry;
+
+    uint256 nextQuoteId = 1;
+
+    function setUp() public {
+        vm.warp(1700000000);
+
+        mm1 = vm.addr(mm1Key);
+        mm2 = vm.addr(mm2Key);
+
+        weth = new MockERC20("Wrapped ETH", "WETH", 18);
+        usdc = new MockERC20("USD Coin", "USDC", 6);
+
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()),
+                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), operatorBot, address(this)))
+                )
+            )
+        );
+
+        addressBook.setController(address(controller));
+        addressBook.setMarginPool(address(pool));
+        addressBook.setOTokenFactory(address(factory));
+        addressBook.setOracle(address(oracle));
+        addressBook.setWhitelist(address(whitelist));
+        addressBook.setBatchSettler(address(settler));
+
+        settler.setWhitelistedMM(mm1, true);
+        settler.setWhitelistedMM(mm2, true);
+        settler.setEscapeDelay(7 days);
+
+        whitelist.whitelistUnderlying(address(weth));
+        whitelist.whitelistCollateral(address(usdc));
+        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);
+
+        uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
+        expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
+
+        // Fund both MMs with USDC for premiums
+        usdc.mint(mm1, 1_000_000e6);
+        usdc.mint(mm2, 1_000_000e6);
+        vm.prank(mm1);
+        usdc.approve(address(settler), type(uint256).max);
+        vm.prank(mm2);
+        usdc.approve(address(settler), type(uint256).max);
+
+        // Fund users
+        usdc.mint(alice, 50_000e6);
+        usdc.mint(bob, 50_000e6);
+        vm.prank(alice);
+        usdc.approve(address(pool), type(uint256).max);
+        vm.prank(bob);
+        usdc.approve(address(pool), type(uint256).max);
+    }
+
+    function _signQuote(uint256 mmKey, address oToken, uint256 bidPrice, uint256 maxAmount)
+        internal
+        returns (BatchSettler.Quote memory q, bytes memory sig)
+    {
+        address signer = vm.addr(mmKey);
+        q = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: bidPrice,
+            deadline: block.timestamp + 1 hours,
+            quoteId: nextQuoteId++,
+            maxAmount: maxAmount,
+            makerNonce: settler.makerNonce(signer)
+        });
+        bytes32 digest = settler.hashQuote(q);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        sig = abi.encodePacked(r, s, v);
+    }
+
+    function _executeOrderForMM(uint256 mmKey, address user, address oToken, uint256 amount, uint256 collateral)
+        internal
+    {
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(mmKey, oToken, 50e6, 100e8);
+        vm.prank(user);
+        settler.executeOrder(q, sig, amount, collateral);
+    }
+
+    // ===== setEscapeDelay =====
+
+    function test_setEscapeDelay() public {
+        settler.setEscapeDelay(10 days);
+        assertEq(settler.escapeDelay(), 10 days);
+    }
+
+    function test_setEscapeDelay_revertsBelowMinimum() public {
+        vm.expectRevert(BatchSettler.EscapeDelayTooShort.selector);
+        settler.setEscapeDelay(2 days);
+    }
+
+    function test_setEscapeDelay_revertsNonOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.OnlyOwner.selector);
+        settler.setEscapeDelay(7 days);
+    }
+
+    // ===== mmSelfRedeem =====
+
+    function test_mmSelfRedeem_afterDelay() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        _executeOrderForMM(mm1Key, alice, oToken, 1e8, 2000e6);
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
+
+        // Expire OTM (price above strike for put)
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2500e8);
+
+        // Settle vault so collateral returns
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(operatorBot);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        // Before escape delay: should revert
+        vm.prank(mm1);
+        vm.expectRevert(BatchSettler.EscapeNotReady.selector);
+        settler.mmSelfRedeem(oToken, 1e8);
+
+        // After escape delay: should succeed
+        vm.warp(expiry + 7 days + 1);
+        uint256 mm1UsdcBefore = usdc.balanceOf(mm1);
+        vm.prank(mm1);
+        settler.mmSelfRedeem(oToken, 1e8);
+
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 0);
+        // OTM put: full collateral returned to settler, then to MM
+        assertGe(usdc.balanceOf(mm1), mm1UsdcBefore);
+    }
+
+    function test_mmSelfRedeem_revertsNonWhitelistedMM() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        vm.warp(expiry + 7 days + 1);
+
+        vm.prank(alice); // alice is not a whitelisted MM
+        vm.expectRevert(BatchSettler.MMNotWhitelisted.selector);
+        settler.mmSelfRedeem(oToken, 1e8);
+    }
+
+    function test_mmSelfRedeem_revertsZeroAmount() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        vm.warp(expiry + 7 days + 1);
+
+        vm.prank(mm1);
+        vm.expectRevert(BatchSettler.InvalidAmount.selector);
+        settler.mmSelfRedeem(oToken, 0);
+    }
+
+    function test_mmSelfRedeem_revertsInsufficientBalance() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        vm.warp(expiry + 7 days + 1);
+
+        vm.prank(mm1);
+        vm.expectRevert(BatchSettler.InsufficientMMBalance.selector);
+        settler.mmSelfRedeem(oToken, 1e8);
+    }
+
+    function test_mmSelfRedeem_revertsWhenEscapeDelayNotSet() public {
+        // Deploy a fresh settler with no escape delay
+        BatchSettler settler2 = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), operatorBot, address(this)))
+                )
+            )
+        );
+        settler2.setWhitelistedMM(mm1, true);
+
+        vm.warp(expiry + 30 days);
+
+        vm.prank(mm1);
+        vm.expectRevert(BatchSettler.EscapeNotReady.selector);
+        settler2.mmSelfRedeem(address(0x1), 1e8);
+    }
+
+    function test_mmSelfRedeem_cannotFrontrunOperator() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        _executeOrderForMM(mm1Key, alice, oToken, 1e8, 2000e6);
+
+        // Expire and settle
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2500e8);
+        address[] memory owners = new address[](1);
+        uint256[] memory ids = new uint256[](1);
+        owners[0] = alice;
+        ids[0] = 1;
+        vm.prank(operatorBot);
+        settler.batchSettleVaults(owners, ids);
+
+        // MM tries self-redeem right after expiry (within delay)
+        vm.prank(mm1);
+        vm.expectRevert(BatchSettler.EscapeNotReady.selector);
+        settler.mmSelfRedeem(oToken, 1e8);
+
+        // Operator can still redeem normally during delay period
+        address[] memory oTokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        oTokens[0] = oToken;
+        amounts[0] = 1e8;
+        vm.prank(operatorBot);
+        settler.operatorRedeemForMM(mm1, oTokens, amounts);
+
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 0);
+    }
+
+    // ===== verifyLedgerSync =====
+
+    function test_verifyLedgerSync_inSync() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        _executeOrderForMM(mm1Key, alice, oToken, 1e8, 2000e6);
+
+        (uint256 ledger, uint256 actual, bool inSync) = settler.verifyLedgerSync(mm1, oToken);
+        assertEq(ledger, 1e8);
+        assertEq(actual, 1e8);
+        assertTrue(inSync);
+    }
+
+    function test_verifyLedgerSync_multiMM() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        _executeOrderForMM(mm1Key, alice, oToken, 1e8, 2000e6);
+        _executeOrderForMM(mm2Key, bob, oToken, 2e8, 4000e6);
+
+        (uint256 ledger1,,) = settler.verifyLedgerSync(mm1, oToken);
+        (uint256 ledger2, uint256 actual,) = settler.verifyLedgerSync(mm2, oToken);
+
+        assertEq(ledger1, 1e8);
+        assertEq(ledger2, 2e8);
+        // Total actual should cover both MMs
+        assertEq(actual, 3e8);
+    }
+
+    // ===== Multi-MM Isolation =====
+
+    function test_multiMM_balancesIsolated() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        _executeOrderForMM(mm1Key, alice, oToken, 1e8, 2000e6);
+        _executeOrderForMM(mm2Key, bob, oToken, 3e8, 6000e6);
+
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
+        assertEq(settler.mmOTokenBalance(mm2, oToken), 3e8);
+        assertEq(IERC20(oToken).balanceOf(address(settler)), 4e8);
+    }
+
+    function test_multiMM_redeemIsolated() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        _executeOrderForMM(mm1Key, alice, oToken, 1e8, 2000e6);
+        _executeOrderForMM(mm2Key, bob, oToken, 2e8, 4000e6);
+
+        // Expire OTM
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2500e8);
+
+        // Settle vaults
+        address[] memory owners = new address[](2);
+        uint256[] memory vaultIds = new uint256[](2);
+        owners[0] = alice;
+        owners[1] = bob;
+        vaultIds[0] = 1;
+        vaultIds[1] = 1;
+        vm.prank(operatorBot);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        // Redeem only mm1's tokens
+        address[] memory oTokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        oTokens[0] = oToken;
+        amounts[0] = 1e8;
+        vm.prank(operatorBot);
+        settler.operatorRedeemForMM(mm1, oTokens, amounts);
+
+        // mm1 balance zeroed, mm2 untouched
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 0);
+        assertEq(settler.mmOTokenBalance(mm2, oToken), 2e8);
+    }
+
+    function test_multiMM_selfRedeemIsolated() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        _executeOrderForMM(mm1Key, alice, oToken, 1e8, 2000e6);
+        _executeOrderForMM(mm2Key, bob, oToken, 2e8, 4000e6);
+
+        // Expire OTM + settle
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2500e8);
+        address[] memory owners = new address[](2);
+        uint256[] memory vaultIds = new uint256[](2);
+        owners[0] = alice;
+        owners[1] = bob;
+        vaultIds[0] = 1;
+        vaultIds[1] = 1;
+        vm.prank(operatorBot);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        // Wait for escape delay
+        vm.warp(expiry + 7 days + 1);
+
+        // mm1 self-redeems — should NOT affect mm2
+        vm.prank(mm1);
+        settler.mmSelfRedeem(oToken, 1e8);
+
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 0);
+        assertEq(settler.mmOTokenBalance(mm2, oToken), 2e8);
+
+        // mm2 can still self-redeem independently
+        uint256 mm2UsdcBefore = usdc.balanceOf(mm2);
+        vm.prank(mm2);
+        settler.mmSelfRedeem(oToken, 2e8);
+
+        assertEq(settler.mmOTokenBalance(mm2, oToken), 0);
+        assertGe(usdc.balanceOf(mm2), mm2UsdcBefore);
+    }
+
+    function test_multiMM_cannotRedeemOtherMMBalance() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        _executeOrderForMM(mm1Key, alice, oToken, 1e8, 2000e6);
+        // mm2 has no balance for this oToken
+
+        vm.warp(expiry + 7 days + 1);
+
+        // mm2 tries to self-redeem: should fail (no balance)
+        vm.prank(mm2);
+        vm.expectRevert(BatchSettler.InsufficientMMBalance.selector);
+        settler.mmSelfRedeem(oToken, 1e8);
+
+        // mm1's balance untouched
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
     }
 }

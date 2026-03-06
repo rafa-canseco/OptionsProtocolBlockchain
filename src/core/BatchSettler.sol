@@ -82,6 +82,12 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     /// @notice Whitelisted market makers.
     mapping(address => bool) public whitelistedMMs;
 
+    /// @notice oToken balances custodied per MM (mm => oToken => balance).
+    mapping(address => mapping(address => uint256)) public mmOTokenBalance;
+
+    /// @notice Delay after expiry before MM can self-redeem (escape hatch).
+    uint256 public escapeDelay;
+
     // ===== Events =====
 
     event OrderExecuted(
@@ -104,6 +110,8 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     event QuoteCancelSkipped(address indexed mm, bytes32 indexed quoteHash);
     event MakerNonceIncremented(address indexed mm, uint256 newNonce);
     event MMWhitelisted(address indexed mm, bool status);
+    event MMSelfRedeem(address indexed mm, address indexed oToken, uint256 amount, uint256 payout);
+    event EscapeDelayUpdated(uint256 oldDelay, uint256 newDelay);
 
     // ===== Errors =====
 
@@ -123,12 +131,15 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     error FeeTooHigh();
     error InvalidFeeTier();
     error RedeemReturnedZero();
+    error InsufficientMMBalance();
     error InvalidSignature();
     error MMNotWhitelisted();
     error QuoteExpired();
     error CapacityExceeded();
     error StaleNonce();
     error QuoteAlreadyCancelled();
+    error EscapeNotReady();
+    error EscapeDelayTooShort();
 
     // Panic(uint256) selector: 0x4e487b71
     bytes4 private constant _PANIC_SELECTOR = 0x4e487b71;
@@ -200,6 +211,14 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
             revert InvalidFeeTier();
         }
         swapFeeTier = _feeTier;
+    }
+
+    uint256 public constant MIN_ESCAPE_DELAY = 3 days;
+
+    function setEscapeDelay(uint256 _delay) external onlyOwner {
+        if (_delay < MIN_ESCAPE_DELAY) revert EscapeDelayTooShort();
+        emit EscapeDelayUpdated(escapeDelay, _delay);
+        escapeDelay = _delay;
     }
 
     function setWhitelistedMM(address _mm, bool _status) external onlyOwner {
@@ -316,8 +335,9 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         address collateralAsset = OToken(quote.oToken).collateralAsset();
         ctrl.depositCollateral(msg.sender, vaultId, collateralAsset, collateral);
 
-        // 7. Mint oTokens directly to MM
-        ctrl.mintOtoken(msg.sender, vaultId, quote.oToken, amount, mm);
+        // 7. Mint oTokens to this contract (custodied for MM)
+        ctrl.mintOtoken(msg.sender, vaultId, quote.oToken, amount, address(this));
+        mmOTokenBalance[mm][quote.oToken] += amount;
 
         // 8. Transfer premium from MM to user (minus protocol fee)
         _transferPremium(quote.oToken, amount, premium, collateral, vaultId, mm);
@@ -399,12 +419,12 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     // ===== Physical Delivery (flash loan + DEX swap) =====
 
-    function physicalRedeem(address oToken, address user, uint256 amount, uint256 maxCollateralSpent)
+    function physicalRedeem(address oToken, address user, uint256 amount, uint256 maxCollateralSpent, address mm)
         public
         onlyOperator
         nonReentrant
     {
-        _executePhysicalRedeem(oToken, user, amount, maxCollateralSpent);
+        _executePhysicalRedeem(oToken, user, amount, maxCollateralSpent, mm);
     }
 
     function executeOperation(address asset, uint256 amount, uint256 premium, address initiator, bytes calldata params)
@@ -415,12 +435,12 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         if (msg.sender != aavePool) revert FlashLoanUnauthorized();
         if (initiator != address(this)) revert FlashLoanUnauthorized();
 
-        (address oToken, address user, uint256 oTokenAmount, uint256 maxCollateralSpent) =
-            abi.decode(params, (address, address, uint256, uint256));
+        (address oToken, address user, uint256 oTokenAmount, uint256 maxCollateralSpent, address mm) =
+            abi.decode(params, (address, address, uint256, uint256, address));
 
         IERC20(asset).safeTransfer(user, amount);
 
-        uint256 collateralUsed = _redeemAndSwap(oToken, oTokenAmount, asset, amount + premium, maxCollateralSpent);
+        uint256 collateralUsed = _redeemAndSwap(oToken, oTokenAmount, asset, amount + premium, maxCollateralSpent, mm);
 
         IERC20(asset).forceApprove(aavePool, amount + premium);
 
@@ -434,14 +454,17 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         uint256 oTokenAmount,
         address contraAsset,
         uint256 repayAmount,
-        uint256 maxCollateralSpent
+        uint256 maxCollateralSpent,
+        address mm
     ) private returns (uint256 collateralUsed) {
-        IERC20(oToken).safeTransferFrom(operator, address(this), oTokenAmount);
+        // CEI: decrement MM balance before external calls
+        mmOTokenBalance[mm][oToken] -= oTokenAmount;
 
         Controller ctrl = Controller(addressBook.controller());
         address collateralAsset = OToken(oToken).collateralAsset();
         uint256 collateralBefore = IERC20(collateralAsset).balanceOf(address(this));
 
+        // BatchSettler already holds oTokens — redeem burns from msg.sender (this)
         ctrl.redeem(oToken, oTokenAmount);
 
         uint256 collateralReceived = IERC20(collateralAsset).balanceOf(address(this)) - collateralBefore;
@@ -464,7 +487,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
         uint256 surplus = collateralReceived - collateralUsed;
         if (surplus > 0) {
-            IERC20(collateralAsset).safeTransfer(operator, surplus);
+            IERC20(collateralAsset).safeTransfer(mm, surplus);
         }
 
         IERC20(collateralAsset).forceApprove(swapRouter, 0);
@@ -474,18 +497,19 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         address[] calldata oTokens,
         address[] calldata users,
         uint256[] calldata amounts,
-        uint256[] calldata maxCollateralSpents
+        uint256[] calldata maxCollateralSpents,
+        address[] calldata mms
     ) external onlyOperator {
         if (
             oTokens.length != users.length || users.length != amounts.length
-                || amounts.length != maxCollateralSpents.length
+                || amounts.length != maxCollateralSpents.length || amounts.length != mms.length
         ) revert LengthMismatch();
         if (oTokens.length == 0) revert EmptyArray();
 
         for (uint256 i = 0; i < oTokens.length; i++) {
             if (amounts[i] == 0) continue;
 
-            try this._physicalRedeemSingle(oTokens[i], users[i], amounts[i], maxCollateralSpents[i]) {}
+            try this._physicalRedeemSingle(oTokens[i], users[i], amounts[i], maxCollateralSpents[i], mms[i]) {}
             catch (bytes memory reason) {
                 _revertOnPanic(reason);
                 emit PhysicalRedeemFailed(oTokens[i], users[i], amounts[i], reason);
@@ -493,23 +517,30 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         }
     }
 
-    function _physicalRedeemSingle(address oToken, address user, uint256 amount, uint256 maxCollateralSpent)
+    function _physicalRedeemSingle(address oToken, address user, uint256 amount, uint256 maxCollateralSpent, address mm)
         external
         nonReentrant
     {
         if (msg.sender != address(this)) revert InvalidAddress();
-        _executePhysicalRedeem(oToken, user, amount, maxCollateralSpent);
+        _executePhysicalRedeem(oToken, user, amount, maxCollateralSpent, mm);
     }
 
-    function _executePhysicalRedeem(address oToken, address user, uint256 amount, uint256 maxCollateralSpent) private {
+    function _executePhysicalRedeem(
+        address oToken,
+        address user,
+        uint256 amount,
+        uint256 maxCollateralSpent,
+        address mm
+    ) private {
         if (oToken == address(0)) revert InvalidAddress();
         if (user == address(0)) revert InvalidAddress();
+        if (mm == address(0)) revert InvalidAddress();
         if (aavePool == address(0)) revert AavePoolNotSet();
         if (swapRouter == address(0)) revert SwapRouterNotSet();
         if (amount == 0) revert InvalidAmount();
+        if (mmOTokenBalance[mm][oToken] < amount) revert InsufficientMMBalance();
 
         OToken ot = OToken(oToken);
-        Controller ctrl = Controller(addressBook.controller());
         if (block.timestamp < ot.expiry()) revert OptionNotExpired();
 
         Oracle oracle = Oracle(addressBook.oracle());
@@ -533,8 +564,95 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
             contraAmount = (amount * strike) / 1e10;
         }
 
-        bytes memory params = abi.encode(oToken, user, amount, maxCollateralSpent);
+        bytes memory params = abi.encode(oToken, user, amount, maxCollateralSpent, mm);
         IPool(aavePool).flashLoanSimple(address(this), contraAsset, contraAmount, params, 0);
+    }
+
+    // ===== Operator-Triggered MM Redemption (cash settlement) =====
+
+    function operatorRedeemForMM(address mm, address[] calldata oTokens, uint256[] calldata amounts)
+        external
+        onlyOperator
+    {
+        if (oTokens.length != amounts.length) revert LengthMismatch();
+        if (oTokens.length == 0) revert EmptyArray();
+        if (mm == address(0)) revert InvalidAddress();
+
+        Controller ctrl = Controller(addressBook.controller());
+
+        for (uint256 i = 0; i < oTokens.length; i++) {
+            if (amounts[i] == 0) continue;
+
+            try this._redeemForMM(mm, oTokens[i], amounts[i], ctrl) {}
+            catch (bytes memory reason) {
+                _revertOnPanic(reason);
+                emit RedeemFailed(oTokens[i], amounts[i], reason);
+            }
+        }
+    }
+
+    function _redeemForMM(address mm, address oToken, uint256 amount, Controller ctrl) external {
+        if (msg.sender != address(this)) revert InvalidAddress();
+
+        // CEI: decrement balance before external calls
+        if (mmOTokenBalance[mm][oToken] < amount) revert InsufficientMMBalance();
+        mmOTokenBalance[mm][oToken] -= amount;
+
+        address collateralAsset = OToken(oToken).collateralAsset();
+        uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+
+        ctrl.redeem(oToken, amount);
+
+        uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+        if (payout > 0) {
+            IERC20(collateralAsset).safeTransfer(mm, payout);
+        }
+    }
+
+    // ===== Escape Hatch: MM Self-Redeem =====
+
+    /// @notice Allows a whitelisted MM to redeem their custodied oTokens
+    ///         after expiry + escapeDelay, bypassing the operator.
+    function mmSelfRedeem(address oToken, uint256 amount) external nonReentrant {
+        if (!whitelistedMMs[msg.sender]) revert MMNotWhitelisted();
+        if (amount == 0) revert InvalidAmount();
+        if (escapeDelay == 0) revert EscapeNotReady();
+
+        OToken ot = OToken(oToken);
+        uint256 expiry = ot.expiry();
+        if (block.timestamp < expiry + escapeDelay) revert EscapeNotReady();
+
+        if (mmOTokenBalance[msg.sender][oToken] < amount) {
+            revert InsufficientMMBalance();
+        }
+        mmOTokenBalance[msg.sender][oToken] -= amount;
+
+        Controller ctrl = Controller(addressBook.controller());
+        address collateralAsset = ot.collateralAsset();
+        uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+
+        ctrl.redeem(oToken, amount);
+
+        uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+        if (payout > 0) {
+            IERC20(collateralAsset).safeTransfer(msg.sender, payout);
+        }
+
+        emit MMSelfRedeem(msg.sender, oToken, amount, payout);
+    }
+
+    // ===== Monitoring =====
+
+    /// @notice Compares MM's internal ledger balance against actual
+    ///         oToken balance held by this contract.
+    function verifyLedgerSync(address mm, address oToken)
+        external
+        view
+        returns (uint256 ledgerBalance, uint256 actualBalance, bool inSync)
+    {
+        ledgerBalance = mmOTokenBalance[mm][oToken];
+        actualBalance = IERC20(oToken).balanceOf(address(this));
+        inSync = actualBalance >= ledgerBalance;
     }
 
     /// @dev Re-reverts if `reason` is a Panic(uint256). Panics indicate bugs, not expected failures.
@@ -560,5 +678,5 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[37] private __gap;
+    uint256[35] private __gap;
 }

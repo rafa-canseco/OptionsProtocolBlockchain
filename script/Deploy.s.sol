@@ -13,11 +13,11 @@ import "../src/core/BatchSettler.sol";
 
 /**
  * @title Deploy
- * @notice Deploys the full options protocol to Base Sepolia (UUPS proxied).
+ * @notice Deploys the full options protocol (UUPS proxied).
  *
  *         Usage:
  *         forge script script/Deploy.s.sol:Deploy \
- *           --rpc-url base_sepolia \
+ *           --rpc-url base \
  *           --broadcast \
  *           --verify \
  *           -vvvv
@@ -104,7 +104,7 @@ contract Deploy is Script {
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
 
-        // 4. Whitelist MM (operator is default MM for beta)
+        // 4. Whitelist MM
         settler.setWhitelistedMM(operator, true);
 
         // 5. Whitelist assets and products (ETH only for MVP)
@@ -123,11 +123,17 @@ contract Deploy is Script {
         // 8. Configure physical delivery infrastructure (Aave V3 + Uniswap V3)
         _configurePhysicalDelivery(settler);
 
+        // 9. Configure oracle safety bounds
+        _configureOracleSafety(oracle);
+
+        // 10. Set partial pauser (operator can pause new positions)
+        controller.setPartialPauser(operator);
+
         vm.stopBroadcast();
 
         // Summary
         console.log("\n=== Deployment Complete ===");
-        console.log("Chain: Base Sepolia");
+        console.log("Chain:", vm.envOr("CHAIN_LABEL", string("Base")));
         console.log("Operator:", operator);
         console.log("WETH:", weth);
         console.log("USDC:", usdc);
@@ -148,10 +154,21 @@ contract Deploy is Script {
         }
     }
 
+    function _configureOracleSafety(Oracle oracle) internal {
+        uint256 deviationBps = vm.envOr("PRICE_DEVIATION_THRESHOLD_BPS", uint256(1000));
+        uint256 staleness = vm.envOr("MAX_ORACLE_STALENESS", uint256(3600));
+
+        oracle.setPriceDeviationThreshold(deviationBps);
+        console.log("Price Deviation Threshold (bps):", deviationBps);
+
+        oracle.setMaxOracleStaleness(staleness);
+        console.log("Max Oracle Staleness (s):", staleness);
+    }
+
     function _configurePhysicalDelivery(BatchSettler settler) internal {
         address aavePool = vm.envOr("AAVE_POOL_ADDRESS", address(0));
         address router = vm.envOr("UNISWAP_SWAP_ROUTER", address(0));
-        uint24 feeTier = uint24(vm.envOr("SWAP_FEE_TIER", uint256(500)));
+        uint24 feeTier = uint24(vm.envOr("SWAP_FEE_TIER", uint256(3000)));
 
         if (aavePool == address(0)) {
             console.log("WARNING: AAVE_POOL_ADDRESS not set. Physical delivery will be non-functional.");

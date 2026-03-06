@@ -120,3 +120,57 @@ Slither L-1 through L-7.
 
 2. **Updated access control invariant** — `setBetaMode` replaced with
    `setPartialPauser` in `tryUnauthorizedCall`.
+
+---
+
+## Delta Report — B1N-122 (2026-03-05)
+
+**Tools:** Slither v0.11.5 (101 detectors), security profile forge test
+**Scope:** Delta review on code changed since B1N-83/B1N-124
+
+### Result: Zero new critical/high findings on core contracts
+
+Re-run produced 6 High, 9 Medium, 30 Low, 160 Informational.
+Comparing to B1N-83:
+
+- **+1 High:** `arbitrary-send-erc20` in `MockAavePool` (mock only,
+  not deployed). No action.
+- **+2 reclassified:** `reentrancy-balance` and `uninitialized-state`
+  moved from Medium to High by Slither version. Same FPs as B1N-83.
+- **+1 Medium:** `locked-ether` in `MockSwapRouter` (mock only).
+- **+4 Medium:** `unused-return` in OZ library internals. Not our code.
+
+All core contract findings identical to B1N-83.
+
+### Invariants (security profile)
+
+All 301 tests passed (5 invariants at 1000 runs / 100,000 calls each):
+
+- `invariant_poolCoversObligations`
+- `invariant_poolBalanceMatchesDeposits`
+- `invariant_oTokenSupplyMatchesMinted`
+- `invariant_vaultCountConsistent`
+- `invariant_batchRedeemNeverRevertsCompletely`
+
+### Fork Tests (Base mainnet, block 42733000)
+
+9/9 tests passed against real Aave V3, Uniswap V3, Chainlink, WETH,
+USDC on Base mainnet:
+
+- Premium delivery: user receives 48 USDC net, treasury 2 USDC fee
+- OTM PUT: full USDC collateral returned
+- OTM CALL: full WETH collateral returned
+- ITM PUT physical delivery: exact 1e18 WETH to user via flash loan
+- ITM CALL physical delivery: exact 1800e6 USDC to user via flash loan
+- Surplus USDC goes to MM (operator), not user
+- ITM PUT redeem: MM receives full collateral
+- Flash loan callback rejects unauthorized callers
+
+### Deploy Script Fixes (Deploy.s.sol)
+
+1. `SWAP_FEE_TIER` default changed from 500 to 3000 (0.3% pool)
+2. Added `_configureOracleSafety()` — sets `priceDeviationThresholdBps`
+   (default 1000 = 10%) and `maxOracleStaleness` (default 3600 = 1h)
+3. Added `controller.setPartialPauser(operator)` for circuit breaker
+4. Removed hardcoded "Base Sepolia" references from NatSpec/logs
+5. Fork test `swapFeeTier` updated from 500 to 3000
