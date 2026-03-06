@@ -85,6 +85,11 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     /// @notice oToken balances custodied per MM (mm => oToken => balance).
     mapping(address => mapping(address => uint256)) public mmOTokenBalance;
 
+    /// @notice Vault-to-MM mapping for emergency withdrawal ledger clearance.
+    /// @dev    Set during executeOrder. For pre-migration vaults, returns
+    ///         address(0) — clearMMBalanceForVault becomes a safe no-op.
+    mapping(address => mapping(uint256 => address)) public vaultMM;
+
     /// @notice Delay after expiry before MM can self-redeem (escape hatch).
     uint256 public escapeDelay;
 
@@ -112,6 +117,9 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     event MMWhitelisted(address indexed mm, bool status);
     event MMSelfRedeem(address indexed mm, address indexed oToken, uint256 amount, uint256 payout);
     event EscapeDelayUpdated(uint256 oldDelay, uint256 newDelay);
+    event MMBalanceCleared(address indexed mm, address indexed oToken, uint256 amount);
+    event ProtocolFeeBpsUpdated(uint256 oldFeeBps, uint256 newFeeBps);
+    event SwapFeeTierUpdated(uint24 oldFeeTier, uint24 newFeeTier);
 
     // ===== Errors =====
 
@@ -140,6 +148,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     error QuoteAlreadyCancelled();
     error EscapeNotReady();
     error EscapeDelayTooShort();
+    error OnlyController();
 
     // Panic(uint256) selector: 0x4e487b71
     bytes4 private constant _PANIC_SELECTOR = 0x4e487b71;
@@ -193,6 +202,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     function setProtocolFeeBps(uint256 _feeBps) external onlyOwner {
         if (_feeBps > 2000) revert FeeTooHigh();
+        emit ProtocolFeeBpsUpdated(protocolFeeBps, _feeBps);
         protocolFeeBps = _feeBps;
     }
 
@@ -210,6 +220,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         if (_feeTier != 100 && _feeTier != 500 && _feeTier != 3000 && _feeTier != 10000) {
             revert InvalidFeeTier();
         }
+        emit SwapFeeTierUpdated(swapFeeTier, _feeTier);
         swapFeeTier = _feeTier;
     }
 
@@ -330,6 +341,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         // 5. Open vault for user
         Controller ctrl = Controller(addressBook.controller());
         vaultId = ctrl.openVault(msg.sender);
+        vaultMM[msg.sender][vaultId] = mm;
 
         // 6. Deposit user's collateral
         address collateralAsset = OToken(quote.oToken).collateralAsset();
@@ -641,6 +653,24 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         emit MMSelfRedeem(msg.sender, oToken, amount, payout);
     }
 
+    // ===== Emergency Ledger Clearance =====
+
+    /// @notice Called by Controller during emergencyWithdrawVault to clear
+    ///         the MM's custodied balance after oTokens are burned.
+    function clearMMBalanceForVault(address vaultOwner, uint256 vaultId, address oToken, uint256 amount) external {
+        if (msg.sender != addressBook.controller()) revert OnlyController();
+
+        address mm = vaultMM[vaultOwner][vaultId];
+        if (mm == address(0)) return; // pre-migration vault, safe no-op
+
+        uint256 balance = mmOTokenBalance[mm][oToken];
+        uint256 toClear = amount < balance ? amount : balance;
+        if (toClear > 0) {
+            mmOTokenBalance[mm][oToken] = balance - toClear;
+            emit MMBalanceCleared(mm, oToken, toClear);
+        }
+    }
+
     // ===== Monitoring =====
 
     /// @notice Compares MM's internal ledger balance against actual
@@ -668,15 +698,27 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     // --- Ownership ---
 
+    address public pendingOwner;
+
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    error OnlyPendingOwner();
 
     function transferOwnership(address _newOwner) external onlyOwner {
         if (_newOwner == address(0)) revert InvalidAddress();
-        emit OwnershipTransferred(owner, _newOwner);
-        owner = _newOwner;
+        pendingOwner = _newOwner;
+        emit OwnershipTransferStarted(owner, _newOwner);
+    }
+
+    function acceptOwnership() external {
+        if (msg.sender != pendingOwner) revert OnlyPendingOwner();
+        emit OwnershipTransferred(owner, msg.sender);
+        owner = msg.sender;
+        pendingOwner = address(0);
     }
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[35] private __gap;
+    uint256[33] private __gap;
 }

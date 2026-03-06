@@ -2321,4 +2321,88 @@ contract EscapeHatchTest is Test {
         // mm1's balance untouched
         assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
     }
+
+    // ===== Emergency Withdrawal Ledger Clearance (Finding 2 fix) =====
+
+    function test_emergencyWithdraw_clearsMMBalance() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        // Alice sells option via mm1
+        _executeOrderForMM(mm1Key, alice, oToken, 1e8, 2000e6);
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
+        assertEq(settler.vaultMM(alice, 1), mm1);
+
+        // Full pause + emergency withdraw
+        controller.setSystemFullyPaused(true);
+        vm.prank(alice);
+        controller.emergencyWithdrawVault(1);
+
+        // mm1's balance should be cleared
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 0);
+    }
+
+    function test_emergencyWithdraw_preventsCrossMMTheft() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        // Alice sells via mm1, Bob sells via mm2
+        _executeOrderForMM(mm1Key, alice, oToken, 1e8, 2000e6);
+        _executeOrderForMM(mm2Key, bob, oToken, 2e8, 4000e6);
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
+        assertEq(settler.mmOTokenBalance(mm2, oToken), 2e8);
+
+        // Emergency: Alice withdraws, mm1's balance cleared
+        controller.setSystemFullyPaused(true);
+        vm.prank(alice);
+        controller.emergencyWithdrawVault(1);
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 0);
+        // mm2's balance untouched
+        assertEq(settler.mmOTokenBalance(mm2, oToken), 2e8);
+
+        // Unpause and settle normally for mm2
+        controller.setSystemFullyPaused(false);
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        // mm2 can still redeem their oTokens
+        vm.prank(operatorBot);
+        address[] memory oTokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        oTokens[0] = oToken;
+        amounts[0] = 2e8;
+        settler.operatorRedeemForMM(mm2, oTokens, amounts);
+
+        assertEq(settler.mmOTokenBalance(mm2, oToken), 0);
+    }
+
+    function test_emergencyWithdraw_clearUsesMinForPartialBalance() public {
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        // mm1 fills two vaults: Alice (1e8) and Bob (2e8) = 3e8 total
+        _executeOrderForMM(mm1Key, alice, oToken, 1e8, 2000e6);
+        _executeOrderForMM(mm1Key, bob, oToken, 2e8, 4000e6);
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 3e8);
+
+        // Full pause + Alice emergency withdraws vault 1 (shortAmount=1e8)
+        controller.setSystemFullyPaused(true);
+        vm.prank(alice);
+        controller.emergencyWithdrawVault(1);
+
+        // 1e8 cleared from mm1's balance, 2e8 remains (Bob's vault)
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 2e8);
+
+        // Bob also emergency withdraws vault 1 (shortAmount=2e8)
+        vm.prank(bob);
+        controller.emergencyWithdrawVault(1);
+
+        // All cleared, no underflow
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 0);
+    }
+
+    function test_clearMMBalance_onlyController() public {
+        vm.expectRevert(BatchSettler.OnlyController.selector);
+        settler.clearMMBalanceForVault(alice, 1, address(0x123), 1e8);
+    }
 }

@@ -39,7 +39,6 @@ contract Oracle is Initializable, UUPSUpgradeable {
     event MaxOracleStalenessUpdated(uint256 oldStaleness, uint256 newStaleness);
     error OnlyOwner();
     error PriceAlreadySet();
-    error PriceNotSet();
     error FeedNotSet();
     error InvalidPrice();
     error InvalidAddress();
@@ -112,12 +111,24 @@ contract Oracle is Initializable, UUPSUpgradeable {
 
     // --- Ownership ---
 
+    address public pendingOwner;
+
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    error OnlyPendingOwner();
 
     function transferOwnership(address _newOwner) external onlyOwner {
         if (_newOwner == address(0)) revert InvalidAddress();
-        emit OwnershipTransferred(owner, _newOwner);
-        owner = _newOwner;
+        pendingOwner = _newOwner;
+        emit OwnershipTransferStarted(owner, _newOwner);
+    }
+
+    function acceptOwnership() external {
+        if (msg.sender != pendingOwner) revert OnlyPendingOwner();
+        emit OwnershipTransferred(owner, msg.sender);
+        owner = msg.sender;
+        pendingOwner = address(0);
     }
 
     /// @dev Reverts if a Chainlink feed exists, threshold is set,
@@ -148,7 +159,7 @@ contract Oracle is Initializable, UUPSUpgradeable {
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[43] private __gap;
+    uint256[42] private __gap;
 }
 
 interface IChainlinkAggregator {

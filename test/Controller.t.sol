@@ -307,7 +307,7 @@ contract ControllerTest is Test {
         controller.openVault(user);
 
         vm.prank(user);
-        vm.expectRevert(Controller.InsufficientCollateral.selector);
+        vm.expectRevert(Controller.CollateralMismatch.selector);
         controller.mintOtoken(user, 1, oToken, 1e8, user);
     }
 
@@ -477,5 +477,40 @@ contract ControllerTest is Test {
         controller.settleVault(user, vaultId);
 
         assertEq(usdc.balanceOf(user), 100_000e6 - 1e6); // deposited 1 USDC, got 0 back
+    }
+
+    // --- Collateral Asset Validation (Finding 1 fix) ---
+
+    function test_cannotMintWithWrongCollateralAsset() public {
+        // Put oToken requires USDC collateral
+        address oToken = _createPut();
+
+        // Create a worthless token and fund the attacker
+        MockERC20 worthless = new MockERC20("Worthless", "JUNK", 6);
+        worthless.mint(attacker, 1_000_000e6);
+        vm.prank(attacker);
+        worthless.approve(address(pool), type(uint256).max);
+
+        // Deposit worthless token as collateral
+        vm.startPrank(attacker);
+        uint256 vaultId = controller.openVault(attacker);
+        controller.depositCollateral(attacker, vaultId, address(worthless), 2000e6);
+
+        // Try to mint real oTokens — should revert CollateralMismatch
+        vm.expectRevert(Controller.CollateralMismatch.selector);
+        controller.mintOtoken(attacker, vaultId, oToken, 1e8, attacker);
+        vm.stopPrank();
+    }
+
+    function test_canMintWithCorrectCollateralAsset() public {
+        address oToken = _createPut();
+
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        vm.stopPrank();
+
+        assertEq(OToken(oToken).balanceOf(user), 1e8);
     }
 }
