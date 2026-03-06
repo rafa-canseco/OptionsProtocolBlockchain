@@ -126,7 +126,12 @@ contract Deploy is Script {
         // 9. Configure oracle safety bounds
         _configureOracleSafety(oracle);
 
-        // 10. Set partial pauser (operator can pause new positions)
+        // 10. Configure escape hatch delay for MMs
+        uint256 escapeDelay = vm.envOr("ESCAPE_DELAY", uint256(3 days));
+        settler.setEscapeDelay(escapeDelay);
+        console.log("Escape Delay (s):", escapeDelay);
+
+        // 11. Set partial pauser (operator can pause new positions)
         controller.setPartialPauser(operator);
 
         vm.stopBroadcast();

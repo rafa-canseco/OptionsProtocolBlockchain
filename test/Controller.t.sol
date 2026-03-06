@@ -513,4 +513,48 @@ contract ControllerTest is Test {
 
         assertEq(OToken(oToken).balanceOf(user), 1e8);
     }
+
+    // --- Cumulative collateral check (multi-mint) ---
+
+    function test_cannotMultiMintBeyondCollateral() public {
+        address oToken = _createPut();
+
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        // Deposit enough for 1 oToken but not 2
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+
+        // Second mint should fail — cumulative check: 1e8 + 1e8 = 2e8 needs 4000 USDC
+        vm.expectRevert(Controller.InsufficientCollateral.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        vm.stopPrank();
+    }
+
+    function test_canMultiMintWithSufficientCollateral() public {
+        address oToken = _createPut();
+
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 4000e6);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        vm.stopPrank();
+
+        assertEq(OToken(oToken).balanceOf(user), 2e8);
+    }
+
+    // --- Redeem whitelist check ---
+
+    function test_cannotRedeemUnwhitelistedOToken() public {
+        // Create but do NOT whitelist
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        vm.prank(user);
+        vm.expectRevert(Controller.OTokenNotWhitelisted.selector);
+        controller.redeem(oToken, 1e8);
+    }
 }

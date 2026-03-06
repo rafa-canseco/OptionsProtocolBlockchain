@@ -141,7 +141,7 @@ contract Oracle is Initializable, UUPSUpgradeable {
         if (feed == address(0)) return;
 
         (, int256 answer,, uint256 updatedAt,) = IChainlinkAggregator(feed).latestRoundData();
-        if (answer <= 0) return;
+        if (answer <= 0) revert InvalidPrice();
 
         uint256 maxAge = maxOracleStaleness;
         if (maxAge > 0 && block.timestamp - updatedAt > maxAge) {

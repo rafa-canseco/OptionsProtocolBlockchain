@@ -63,7 +63,7 @@ get_addr() {
 
 # --- 6. Write deployments-beta.json ---
 echo "[..] Writing deployments-beta.json..."
-DEPLOYER_ADDR=$(uv run uv run python3 -c "
+DEPLOYER_ADDR=$(uv run python3 -c "
 from eth_keys import keys
 pk = bytes.fromhex('${PRIVATE_KEY#0x}')
 print(keys.PrivateKey(pk).public_key.to_checksum_address())

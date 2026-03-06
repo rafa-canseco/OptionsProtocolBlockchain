@@ -325,9 +325,8 @@ contract Controller is Initializable, UUPSUpgradeable {
                 if (toBurn > 0) {
                     ot.burnOtoken(settler, toBurn);
                 }
-                IBatchSettlerClearance(settler).clearMMBalanceForVault(
-                    msg.sender, _vaultId, vault.shortOtoken, vault.shortAmount
-                );
+                IBatchSettlerClearance(settler)
+                    .clearMMBalanceForVault(msg.sender, _vaultId, vault.shortOtoken, vault.shortAmount);
             }
         }
 

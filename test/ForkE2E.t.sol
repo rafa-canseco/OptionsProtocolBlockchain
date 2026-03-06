@@ -67,19 +67,13 @@ contract ForkE2E is Test {
         vm.startPrank(deployer);
 
         addressBook = AddressBook(
-            address(
-                new ERC1967Proxy(
-                    address(new AddressBook()),
-                    abi.encodeCall(AddressBook.initialize, (deployer))
-                )
-            )
+            address(new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (deployer))))
         );
 
         controller = Controller(
             address(
                 new ERC1967Proxy(
-                    address(new Controller()),
-                    abi.encodeCall(Controller.initialize, (address(addressBook), deployer))
+                    address(new Controller()), abi.encodeCall(Controller.initialize, (address(addressBook), deployer))
                 )
             )
         );
@@ -87,8 +81,7 @@ contract ForkE2E is Test {
         pool = MarginPool(
             address(
                 new ERC1967Proxy(
-                    address(new MarginPool()),
-                    abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
                 )
             )
         );
@@ -96,8 +89,7 @@ contract ForkE2E is Test {
         factory = OTokenFactory(
             address(
                 new ERC1967Proxy(
-                    address(new OTokenFactory()),
-                    abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
                 )
             )
         );
@@ -105,8 +97,7 @@ contract ForkE2E is Test {
         oracle = Oracle(
             address(
                 new ERC1967Proxy(
-                    address(new Oracle()),
-                    abi.encodeCall(Oracle.initialize, (address(addressBook), deployer))
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), deployer))
                 )
             )
         );
@@ -114,8 +105,7 @@ contract ForkE2E is Test {
         whitelist = Whitelist(
             address(
                 new ERC1967Proxy(
-                    address(new Whitelist()),
-                    abi.encodeCall(Whitelist.initialize, (address(addressBook), deployer))
+                    address(new Whitelist()), abi.encodeCall(Whitelist.initialize, (address(addressBook), deployer))
                 )
             )
         );
@@ -124,10 +114,7 @@ contract ForkE2E is Test {
             address(
                 new ERC1967Proxy(
                     address(new BatchSettler()),
-                    abi.encodeCall(
-                        BatchSettler.initialize,
-                        (address(addressBook), operatorBot, deployer)
-                    )
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), operatorBot, deployer))
                 )
             )
         );
@@ -185,13 +172,7 @@ contract ForkE2E is Test {
         vm.mockCall(
             CHAINLINK_ETH_USD,
             abi.encodeWithSignature("latestRoundData()"),
-            abi.encode(
-                uint80(1),
-                int256(price),
-                block.timestamp,
-                block.timestamp,
-                uint80(1)
-            )
+            abi.encode(uint80(1), int256(price), block.timestamp, block.timestamp, uint80(1))
         );
     }
 
@@ -208,12 +189,10 @@ contract ForkE2E is Test {
         return abi.encodePacked(r, s, v);
     }
 
-    function _executeOrder(
-        address oToken,
-        uint256 amount,
-        uint256 bidPrice,
-        uint256 collateral
-    ) internal returns (uint256 vaultId) {
+    function _executeOrder(address oToken, uint256 amount, uint256 bidPrice, uint256 collateral)
+        internal
+        returns (uint256 vaultId)
+    {
         BatchSettler.Quote memory quote = BatchSettler.Quote({
             oToken: oToken,
             bidPrice: bidPrice,
@@ -277,11 +256,7 @@ contract ForkE2E is Test {
         vm.prank(mm);
         settler.mmSelfRedeem(oToken, amount);
 
-        assertEq(
-            IERC20(USDC).balanceOf(mm) - mmUsdcBefore,
-            collateral,
-            "mm self-redeems full collateral"
-        );
+        assertEq(IERC20(USDC).balanceOf(mm) - mmUsdcBefore, collateral, "mm self-redeems full collateral");
         assertEq(settler.mmOTokenBalance(mm, oToken), 0, "mm ledger cleared");
     }
 
@@ -305,9 +280,7 @@ contract ForkE2E is Test {
         controller.emergencyWithdrawVault(1);
 
         assertEq(
-            IERC20(USDC).balanceOf(alice) - aliceUsdcBefore,
-            collateral,
-            "alice gets full collateral back in emergency"
+            IERC20(USDC).balanceOf(alice) - aliceUsdcBefore, collateral, "alice gets full collateral back in emergency"
         );
 
         assertEq(settler.mmOTokenBalance(mm, oToken), 0, "mm ledger cleared after emergency");
@@ -354,11 +327,7 @@ contract ForkE2E is Test {
         // Verify independent ledgers
         assertEq(settler.mmOTokenBalance(mm, oToken), amount, "mm1 has 1 oToken");
         assertEq(settler.mmOTokenBalance(mm2, oToken), amount, "mm2 has 1 oToken");
-        assertEq(
-            IERC20(oToken).balanceOf(address(settler)),
-            2 * amount,
-            "settler holds total"
-        );
+        assertEq(IERC20(oToken).balanceOf(address(settler)), 2 * amount, "settler holds total");
 
         // ITM settlement
         vm.warp(expiry + 1);
