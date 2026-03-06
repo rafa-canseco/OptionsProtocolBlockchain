@@ -11,15 +11,23 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 contract MockERC20 is ERC20 {
     uint8 private _dec;
 
-    constructor(string memory name_, string memory symbol_, uint8 dec_) ERC20(name_, symbol_) {
+    constructor(string memory name_, string memory symbol_, uint8 dec_) ERC20(name_, symbol_)  {
         _dec = dec_;
     }
 
-    function mint(address to, uint256 amount) external {
+    function mint(address to, uint amount)
+        external
+    {
         _mint(to, amount);
     }
 
-    function decimals() public view override returns (uint8) {
+    function decimals()
+        public
+        view
+        override
+        returns
+        (uint8)
+    {
         return _dec;
     }
 }

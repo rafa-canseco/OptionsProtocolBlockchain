@@ -35,47 +35,66 @@ contract Whitelist is Initializable, UUPSUpgradeable {
     error OnlyOwner();
     error InvalidAddress();
 
-    modifier onlyOwner() {
+    modifier onlyOwner()  {
         if (msg.sender != owner) revert OnlyOwner();
         _;
     }
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
+    constructor()  {
         _disableInitializers();
     }
 
-    function initialize(address _addressBook, address _owner) external initializer {
+    function initialize(address _addressBook, address _owner)
+        external
+        initializer
+    {
         if (_addressBook == address(0) || _owner == address(0)) revert InvalidAddress();
-        addressBook = AddressBook(_addressBook);
-        owner = _owner;
+           addressBook   = AddressBook(_addressBook);
+           owner         = _owner;
     }
 
-    function whitelistCollateral(address _asset) external onlyOwner {
-        if (_asset == address(0)) revert InvalidAddress();
-        isWhitelistedCollateral[_asset] = true;
-        emit CollateralWhitelisted(_asset);
-    }
-
-    function whitelistUnderlying(address _asset) external onlyOwner {
-        if (_asset == address(0)) revert InvalidAddress();
-        isWhitelistedUnderlying[_asset] = true;
-        emit UnderlyingWhitelisted(_asset);
-    }
-
-    function whitelistProduct(address _underlying, address _strikeAsset, address _collateralAsset, bool _isPut)
+    function whitelistCollateral(address _asset)
         external
         onlyOwner
     {
-        if (_underlying == address(0) || _strikeAsset == address(0) || _collateralAsset == address(0)) {
+        if (_asset == address(0)) revert InvalidAddress();
+           isWhitelistedCollateral[_asset] = true;
+        emit CollateralWhitelisted(_asset);
+    }
+
+    function whitelistUnderlying(address _asset)
+        external
+        onlyOwner
+    {
+        if (_asset == address(0)) revert InvalidAddress();
+           isWhitelistedUnderlying[_asset] = true;
+        emit UnderlyingWhitelisted(_asset);
+    }
+
+    function whitelistProduct(
+        address _underlying,
+        address _strikeAsset,
+        address _collateralAsset,
+        bool _isPut
+    )
+        external
+        onlyOwner
+    {
+        if (_underlying == address(0) || _strikeAsset == address(0) || _collateralAsset == address(0))  {
             revert InvalidAddress();
         }
-        bytes32 productHash = keccak256(abi.encodePacked(_underlying, _strikeAsset, _collateralAsset, _isPut));
-        isWhitelistedProduct[productHash] = true;
+        bytes32 productHash                       = keccak256(abi.encodePacked(_underlying, _strikeAsset, _collateralAsset, _isPut));
+                isWhitelistedProduct[productHash] = true;
         emit ProductWhitelisted(_underlying, _strikeAsset, _collateralAsset, _isPut);
     }
 
-    function isProductWhitelisted(address _underlying, address _strikeAsset, address _collateralAsset, bool _isPut)
+    function isProductWhitelisted(
+        address _underlying,
+        address _strikeAsset,
+        address _collateralAsset,
+        bool _isPut
+    )
         external
         view
         returns (bool)
@@ -84,9 +103,12 @@ contract Whitelist is Initializable, UUPSUpgradeable {
         return isWhitelistedProduct[productHash];
     }
 
-    function whitelistOToken(address _oToken) external onlyOwner {
+    function whitelistOToken(address _oToken)
+        external
+        onlyOwner
+    {
         if (_oToken == address(0)) revert InvalidAddress();
-        isWhitelistedOToken[_oToken] = true;
+           isWhitelistedOToken[_oToken] = true;
         emit OTokenWhitelisted(_oToken);
     }
 
@@ -99,20 +121,29 @@ contract Whitelist is Initializable, UUPSUpgradeable {
 
     error OnlyPendingOwner();
 
-    function transferOwnership(address _newOwner) external onlyOwner {
+    function transferOwnership(address _newOwner)
+        external
+        onlyOwner
+    {
         if (_newOwner == address(0)) revert InvalidAddress();
-        pendingOwner = _newOwner;
+           pendingOwner = _newOwner;
         emit OwnershipTransferStarted(owner, _newOwner);
     }
 
-    function acceptOwnership() external {
+    function acceptOwnership()
+        external
+    {
         if (msg.sender != pendingOwner) revert OnlyPendingOwner();
         emit OwnershipTransferred(owner, msg.sender);
-        owner = msg.sender;
+        owner        = msg.sender;
         pendingOwner = address(0);
     }
 
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    function _authorizeUpgrade(address)
+        internal
+        override
+        onlyOwner
+        {}
 
-    uint256[43] private __gap;
+    uint[43] private __gap;
 }

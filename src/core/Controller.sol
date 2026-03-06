@@ -12,7 +12,13 @@ import "./Whitelist.sol";
 import "../interfaces/IMarginVault.sol";
 
 interface IBatchSettlerClearance {
-    function clearMMBalanceForVault(address owner, uint256 vaultId, address oToken, uint256 amount) external;
+    function clearMMBalanceForVault(
+        address owner,
+        uint vaultId,
+        address oToken,
+        uint amount
+    )
+        external;
 }
 
 /**
@@ -36,13 +42,13 @@ contract Controller is Initializable, UUPSUpgradeable {
     address public owner;
 
     /// @notice user address → vault count
-    mapping(address => uint256) public vaultCount;
+    mapping(address => uint) public vaultCount;
 
     /// @notice user address → vault id → Vault
-    mapping(address => mapping(uint256 => MarginVault.Vault)) public vaults;
+    mapping(address => mapping(uint => MarginVault.Vault)) public vaults;
 
     /// @notice Whether a vault has been settled
-    mapping(address => mapping(uint256 => bool)) public vaultSettled;
+    mapping(address => mapping(uint => bool)) public vaultSettled;
 
     /// @notice Whether new positions are blocked (settle/redeem still allowed)
     bool public systemPartiallyPaused;
@@ -53,15 +59,15 @@ contract Controller is Initializable, UUPSUpgradeable {
     /// @notice Address authorized to toggle partial pause
     address public partialPauser;
 
-    event VaultOpened(address indexed owner, uint256 vaultId);
-    event CollateralDeposited(address indexed owner, uint256 vaultId, address asset, uint256 amount);
-    event OTokenMinted(address indexed owner, uint256 vaultId, address oToken, uint256 amount);
-    event VaultSettled(address indexed owner, uint256 vaultId, uint256 collateralReturned);
-    event Redeemed(address indexed oToken, address indexed redeemer, uint256 otokenAmount, uint256 payout);
+    event VaultOpened(address indexed owner, uint vaultId);
+    event CollateralDeposited(address indexed owner, uint vaultId, address asset, uint amount);
+    event OTokenMinted(address indexed owner, uint vaultId, address oToken, uint amount);
+    event VaultSettled(address indexed owner, uint vaultId, uint collateralReturned);
+    event Redeemed(address indexed oToken, address indexed redeemer, uint otokenAmount, uint payout);
     event SystemPartiallyPaused(address indexed caller);
     event SystemFullyPaused(address indexed caller);
     event SystemUnpaused(address indexed caller);
-    event EmergencyWithdraw(address indexed user, uint256 vaultId, address asset, uint256 amount);
+    event EmergencyWithdraw(address indexed user, uint vaultId, address asset, uint amount);
     event PartialPauserUpdated(address indexed oldPauser, address indexed newPauser);
 
     error OnlyOwner();
@@ -83,37 +89,40 @@ contract Controller is Initializable, UUPSUpgradeable {
     error NoCollateral();
     error SystemNotFullyPaused();
 
-    modifier onlyOwner() {
+    modifier onlyOwner()  {
         if (msg.sender != owner) revert OnlyOwner();
         _;
     }
 
-    modifier onlyAuthorized(address _owner) {
-        if (msg.sender != _owner && msg.sender != addressBook.batchSettler()) {
+    modifier onlyAuthorized(address _owner)  {
+        if (msg.sender != _owner && msg.sender != addressBook.batchSettler())  {
             revert Unauthorized();
         }
         _;
     }
 
-    modifier notPartiallyPaused() {
+    modifier notPartiallyPaused()  {
         if (systemPartiallyPaused) revert SystemIsPartiallyPaused();
         _;
     }
 
-    modifier notFullyPaused() {
+    modifier notFullyPaused()  {
         if (systemFullyPaused) revert SystemIsFullyPaused();
         _;
     }
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
+    constructor()  {
         _disableInitializers();
     }
 
-    function initialize(address _addressBook, address _owner) external initializer {
+    function initialize(address _addressBook, address _owner)
+        external
+        initializer
+    {
         if (_addressBook == address(0) || _owner == address(0)) revert InvalidAddress();
-        addressBook = AddressBook(_addressBook);
-        owner = _owner;
+           addressBook   = AddressBook(_addressBook);
+           owner         = _owner;
     }
 
     // --- Vault Operations ---
@@ -123,16 +132,21 @@ contract Controller is Initializable, UUPSUpgradeable {
         onlyAuthorized(_owner)
         notPartiallyPaused
         notFullyPaused
-        returns (uint256)
+        returns (uint)
     {
-        uint256 vaultId = vaultCount[_owner] + 1;
-        vaultCount[_owner] = vaultId;
+        uint vaultId            = vaultCount[_owner] + 1;
+             vaultCount[_owner] = vaultId;
 
         emit VaultOpened(_owner, vaultId);
         return vaultId;
     }
 
-    function depositCollateral(address _owner, uint256 _vaultId, address _asset, uint256 _amount)
+    function depositCollateral(
+        address _owner,
+        uint _vaultId,
+        address _asset,
+        uint _amount
+    )
         external
         onlyAuthorized(_owner)
         notPartiallyPaused
@@ -142,11 +156,11 @@ contract Controller is Initializable, UUPSUpgradeable {
 
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
 
-        if (vault.collateralAsset != address(0) && vault.collateralAsset != _asset) {
+        if (vault.collateralAsset != address(0) && vault.collateralAsset != _asset)  {
             revert CollateralMismatch();
         }
 
-        vault.collateralAsset = _asset;
+                               vault.collateralAsset = _asset;
         vault.collateralAmount += _amount;
 
         MarginPool(addressBook.marginPool()).transferToPool(_asset, _owner, _amount);
@@ -154,7 +168,13 @@ contract Controller is Initializable, UUPSUpgradeable {
         emit CollateralDeposited(_owner, _vaultId, _asset, _amount);
     }
 
-    function mintOtoken(address _owner, uint256 _vaultId, address _oToken, uint256 _amount, address _to)
+    function mintOtoken(
+        address _owner,
+        uint _vaultId,
+        address _oToken,
+        uint _amount,
+        address _to
+    )
         external
         onlyAuthorized(_owner)
         notPartiallyPaused
@@ -163,22 +183,22 @@ contract Controller is Initializable, UUPSUpgradeable {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
         if (vaultSettled[_owner][_vaultId]) revert VaultAlreadySettledError();
 
-        if (vault.shortOtoken != address(0) && vault.shortOtoken != _oToken) {
+        if (vault.shortOtoken != address(0) && vault.shortOtoken != _oToken)  {
             revert VaultAlreadyHasShort();
         }
 
         Whitelist wl = Whitelist(addressBook.whitelist());
         if (!wl.isWhitelistedOToken(_oToken)) revert OTokenNotWhitelisted();
 
-        OToken oToken = OToken(_oToken);
-        if (block.timestamp >= oToken.expiry()) revert OptionExpired();
+        OToken oToken             = OToken(_oToken);
+        if     (block.timestamp >= oToken.expiry()) revert OptionExpired();
 
         if (vault.collateralAsset != oToken.collateralAsset()) revert CollateralMismatch();
 
-        uint256 requiredCollateral = _getRequiredCollateral(oToken, vault.shortAmount + _amount);
+        uint requiredCollateral = _getRequiredCollateral(oToken, vault.shortAmount + _amount);
         if (vault.collateralAmount < requiredCollateral) revert InsufficientCollateral();
 
-        vault.shortOtoken = _oToken;
+                          vault.shortOtoken = _oToken;
         vault.shortAmount += _amount;
 
         oToken.mintOtoken(_to, _amount);
@@ -186,30 +206,37 @@ contract Controller is Initializable, UUPSUpgradeable {
         emit OTokenMinted(_owner, _vaultId, _oToken, _amount);
     }
 
-    function settleVault(address _owner, uint256 _vaultId) external onlyAuthorized(_owner) notFullyPaused {
+    function settleVault(address _owner, uint _vaultId)
+        external
+        onlyAuthorized(_owner)
+        notFullyPaused
+    {
         MarginVault.Vault storage vault = _getVault(_owner, _vaultId);
         if (vaultSettled[_owner][_vaultId]) revert VaultAlreadySettledError();
 
         OToken oToken = OToken(vault.shortOtoken);
         if (block.timestamp < oToken.expiry()) revert OptionNotExpired();
 
-        Oracle oracle = Oracle(addressBook.oracle());
-        (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(oToken.underlying(), oToken.expiry());
+        Oracle oracle                   = Oracle(addressBook.oracle());
+        (uint  expiryPrice, bool isSet) = oracle.getExpiryPrice(oToken.underlying(), oToken.expiry());
         if (!isSet) revert ExpiryPriceNotSet();
 
-        uint256 payout = _calculatePayout(oToken, vault.shortAmount, expiryPrice);
-        uint256 collateralToReturn = payout >= vault.collateralAmount ? 0 : vault.collateralAmount - payout;
+        uint payout             = _calculatePayout(oToken, vault.shortAmount, expiryPrice);
+        uint collateralToReturn = payout >= vault.collateralAmount ? 0 : vault.collateralAmount - payout;
 
         vaultSettled[_owner][_vaultId] = true;
 
-        if (collateralToReturn > 0) {
+        if (collateralToReturn > 0)  {
             MarginPool(addressBook.marginPool()).transferToUser(vault.collateralAsset, _owner, collateralToReturn);
         }
 
         emit VaultSettled(_owner, _vaultId, collateralToReturn);
     }
 
-    function redeem(address _oToken, uint256 _amount) external notFullyPaused {
+    function redeem(address _oToken, uint _amount)
+        external
+        notFullyPaused
+    {
         if (_amount == 0) revert NoOtokensToRedeem();
 
         Whitelist wl = Whitelist(addressBook.whitelist());
@@ -218,15 +245,15 @@ contract Controller is Initializable, UUPSUpgradeable {
         OToken oToken = OToken(_oToken);
         if (block.timestamp < oToken.expiry()) revert OptionNotExpired();
 
-        Oracle oracle = Oracle(addressBook.oracle());
-        (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(oToken.underlying(), oToken.expiry());
+        Oracle oracle                   = Oracle(addressBook.oracle());
+        (uint  expiryPrice, bool isSet) = oracle.getExpiryPrice(oToken.underlying(), oToken.expiry());
         if (!isSet) revert ExpiryPriceNotSet();
 
-        uint256 payout = _calculatePayout(oToken, _amount, expiryPrice);
+        uint payout = _calculatePayout(oToken, _amount, expiryPrice);
 
         oToken.burnOtoken(msg.sender, _amount);
 
-        if (payout > 0) {
+        if (payout > 0)  {
             address payoutAsset = oToken.collateralAsset();
             MarginPool(addressBook.marginPool()).transferToUser(payoutAsset, msg.sender, payout);
         }
@@ -236,29 +263,55 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     // --- View Functions ---
 
-    function getVault(address _owner, uint256 _vaultId) external view returns (MarginVault.Vault memory) {
+    function getVault(address _owner, uint _vaultId)
+        external
+        view
+        returns
+        (MarginVault.Vault
+        memory)
+    {
         return vaults[_owner][_vaultId];
     }
 
     // --- Internal ---
 
-    function _getVault(address _owner, uint256 _vaultId) internal view returns (MarginVault.Vault storage) {
+    function _getVault(address _owner, uint _vaultId)
+        internal
+        view
+        returns
+        (MarginVault.Vault
+        storage)
+    {
         if (_vaultId == 0 || _vaultId > vaultCount[_owner]) revert InvalidVault();
         return vaults[_owner][_vaultId];
     }
 
-    function _getRequiredCollateral(OToken oToken, uint256 _amount) internal view returns (uint256) {
-        if (oToken.isPut()) {
+    function _getRequiredCollateral(OToken oToken, uint _amount)
+        internal
+        view
+        returns
+        (uint)
+    {
+        if (oToken.isPut())  {
             return (_amount * oToken.strikePrice()) / 1e10;
         } else {
             return _amount * 1e10;
         }
     }
 
-    function _calculatePayout(OToken oToken, uint256 _amount, uint256 _expiryPrice) internal view returns (uint256) {
-        uint256 strike = oToken.strikePrice();
+    function _calculatePayout(
+        OToken oToken,
+        uint _amount,
+        uint _expiryPrice
+    )
+        internal
+        view
+        returns
+        (uint)
+    {
+        uint strike = oToken.strikePrice();
 
-        if (oToken.isPut()) {
+        if (oToken.isPut())  {
             if (_expiryPrice >= strike) return 0;
             return (_amount * strike) / 1e10;
         } else {
@@ -269,29 +322,37 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     // --- Pause Management ---
 
-    function setPartialPauser(address _pauser) external onlyOwner {
+    function setPartialPauser(address _pauser)
+        external
+        onlyOwner
+    {
         emit PartialPauserUpdated(partialPauser, _pauser);
         partialPauser = _pauser;
     }
 
-    function setSystemPartiallyPaused(bool _paused) external {
-        if (msg.sender != partialPauser && msg.sender != owner) {
+    function setSystemPartiallyPaused(bool _paused)
+        external
+    {
+        if (msg.sender != partialPauser && msg.sender != owner)  {
             revert OnlyPartialPauser();
         }
 
         systemPartiallyPaused = _paused;
 
-        if (_paused) {
+        if (_paused)  {
             emit SystemPartiallyPaused(msg.sender);
         } else {
             emit SystemUnpaused(msg.sender);
         }
     }
 
-    function setSystemFullyPaused(bool _paused) external onlyOwner {
+    function setSystemFullyPaused(bool _paused)
+        external
+        onlyOwner
+    {
         systemFullyPaused = _paused;
 
-        if (_paused) {
+        if (_paused)  {
             emit SystemFullyPaused(msg.sender);
         } else {
             emit SystemUnpaused(msg.sender);
@@ -303,26 +364,28 @@ contract Controller is Initializable, UUPSUpgradeable {
     /// @dev    Marks the vault as settled to prevent double-claims.
     ///         Burns outstanding oTokens from BatchSettler and clears
     ///         the MM's custodied balance to prevent phantom redemption.
-    function emergencyWithdrawVault(uint256 _vaultId) external {
+    function emergencyWithdrawVault(uint _vaultId)
+        external
+    {
         if (!systemFullyPaused) revert SystemNotFullyPaused();
 
         MarginVault.Vault storage vault = _getVault(msg.sender, _vaultId);
-        if (vaultSettled[msg.sender][_vaultId]) {
+        if (vaultSettled[msg.sender][_vaultId])  {
             revert VaultAlreadySettledError();
         }
         if (vault.collateralAmount == 0) revert NoCollateral();
 
-        uint256 amount = vault.collateralAmount;
-        address asset = vault.collateralAsset;
+        uint    amount = vault.collateralAmount;
+        address asset  = vault.collateralAsset;
 
         // Burn oTokens and clear MM ledger to prevent phantom redemption
-        if (vault.shortOtoken != address(0) && vault.shortAmount > 0) {
-            address settler = addressBook.batchSettler();
-            if (settler != address(0)) {
-                OToken ot = OToken(vault.shortOtoken);
-                uint256 settlerBal = ot.balanceOf(settler);
-                uint256 toBurn = vault.shortAmount < settlerBal ? vault.shortAmount : settlerBal;
-                if (toBurn > 0) {
+        if      (vault.shortOtoken != address(0) && vault.shortAmount > 0)  {
+            address settler              = addressBook.batchSettler();
+            if      (settler != address(0))  {
+                OToken  ot                   = OToken(vault.shortOtoken);
+                uint    settlerBal           = ot.balanceOf(settler);
+                uint    toBurn               = vault.shortAmount < settlerBal ? vault.shortAmount: settlerBal;
+                if (toBurn > 0)  {
                     ot.burnOtoken(settler, toBurn);
                 }
                 IBatchSettlerClearance(settler)
@@ -346,20 +409,29 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     error OnlyPendingOwner();
 
-    function transferOwnership(address _newOwner) external onlyOwner {
+    function transferOwnership(address _newOwner)
+        external
+        onlyOwner
+    {
         if (_newOwner == address(0)) revert InvalidAddress();
-        pendingOwner = _newOwner;
+           pendingOwner = _newOwner;
         emit OwnershipTransferStarted(owner, _newOwner);
     }
 
-    function acceptOwnership() external {
+    function acceptOwnership()
+        external
+    {
         if (msg.sender != pendingOwner) revert OnlyPendingOwner();
         emit OwnershipTransferred(owner, msg.sender);
-        owner = msg.sender;
+        owner        = msg.sender;
         pendingOwner = address(0);
     }
 
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    function _authorizeUpgrade(address)
+        internal
+        override
+        onlyOwner
+        {}
 
-    uint256[43] private __gap;
+    uint[43] private __gap;
 }

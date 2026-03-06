@@ -23,36 +23,61 @@ contract MarginPool is Initializable, UUPSUpgradeable {
     error Unauthorized();
     error InvalidAddress();
 
-    modifier onlyController() {
+    modifier onlyController()  {
         if (msg.sender != addressBook.controller()) revert OnlyController();
         _;
     }
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
+    constructor()  {
         _disableInitializers();
     }
 
-    function initialize(address _addressBook) external initializer {
+    function initialize(address _addressBook)
+        external
+        initializer
+    {
         if (_addressBook == address(0)) revert InvalidAddress();
-        addressBook = AddressBook(_addressBook);
+           addressBook   = AddressBook(_addressBook);
     }
 
-    function transferToPool(address _asset, address _from, uint256 _amount) external onlyController {
+    function transferToPool(
+        address _asset,
+        address _from,
+        uint _amount
+    )
+        external
+        onlyController
+    {
         IERC20(_asset).safeTransferFrom(_from, address(this), _amount);
     }
 
-    function transferToUser(address _asset, address _to, uint256 _amount) external onlyController {
+    function transferToUser(
+        address _asset,
+        address _to,
+        uint _amount
+    )
+        external
+        onlyController
+    {
         IERC20(_asset).safeTransfer(_to, _amount);
     }
 
-    function getStoredBalance(address _asset) external view returns (uint256) {
+    function getStoredBalance(address _asset)
+        external
+        view
+        returns
+        (uint)
+    {
         return IERC20(_asset).balanceOf(address(this));
     }
 
-    function _authorizeUpgrade(address) internal override {
+    function _authorizeUpgrade(address)
+        internal
+        override
+    {
         if (msg.sender != addressBook.owner()) revert Unauthorized();
     }
 
-    uint256[49] private __gap;
+    uint[49] private __gap;
 }

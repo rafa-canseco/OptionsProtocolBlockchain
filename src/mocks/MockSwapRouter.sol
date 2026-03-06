@@ -22,27 +22,27 @@ contract MockSwapRouter is ISwapRouter {
     address public immutable weth;
     address public immutable usdc;
 
-    constructor(address _priceFeed, address _weth, address _usdc) {
+    constructor(address _priceFeed, address _weth, address _usdc)  {
         require(_priceFeed != address(0) && _weth != address(0) && _usdc != address(0), "Zero address");
         priceFeed = MockChainlinkFeed(_priceFeed);
-        weth = _weth;
-        usdc = _usdc;
+        weth      = _weth;
+        usdc      = _usdc;
     }
 
     function exactOutputSingle(ExactOutputSingleParams calldata params)
         external
         payable
         override
-        returns (uint256 amountIn)
+        returns (uint amountIn)
     {
         require(params.tokenOut == weth || params.tokenOut == usdc, "MockSwapRouter: unsupported tokenOut");
-        require(params.tokenIn == weth || params.tokenIn == usdc, "MockSwapRouter: unsupported tokenIn");
+        require(params.tokenIn  == weth || params.tokenIn == usdc,  "MockSwapRouter: unsupported tokenIn");
 
         (, int256 rawPrice,,,) = priceFeed.latestRoundData();
         require(rawPrice > 0, "MockSwapRouter: invalid price");
-        uint256 ethPrice = uint256(rawPrice); // 8 decimals (e.g., 2500e8)
+        uint ethPrice = uint(rawPrice); // 8 decimals (e.g., 2500e8)
 
-        if (params.tokenOut == weth) {
+        if (params.tokenOut == weth)  {
             // Buying WETH (18 dec) with USDC (6 dec)
             // amountIn (USDC 6 dec) = amountOut (WETH 18 dec) * price (8 dec) / 1e20
             amountIn = (params.amountOut * ethPrice) / 1e20;

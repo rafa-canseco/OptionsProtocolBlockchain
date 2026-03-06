@@ -15,12 +15,12 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 contract MockAavePool is IPool {
     using SafeERC20 for IERC20;
 
-    uint256 public constant FLASH_LOAN_FEE_BPS = 5; // 0.05%
+    uint public constant FLASH_LOAN_FEE_BPS = 5; // 0.05%
 
     function flashLoanSimple(
         address receiverAddress,
         address asset,
-        uint256 amount,
+        uint amount,
         bytes calldata params,
         uint16 /* referralCode */
     )
@@ -34,7 +34,7 @@ contract MockAavePool is IPool {
         IERC20(asset).safeTransfer(receiverAddress, amount);
 
         // Calculate fee
-        uint256 premium = (amount * FLASH_LOAN_FEE_BPS) / 10_000;
+        uint premium = (amount * FLASH_LOAN_FEE_BPS) / 10_000;
 
         // Call receiver's callback (initiator = msg.sender, matching real Aave V3)
         bool success =
