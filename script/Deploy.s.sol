@@ -15,24 +15,28 @@ import "../src/core/BatchSettler.sol";
  * @title Deploy
  * @notice Deploys the full options protocol (UUPS proxied).
  *
- *         Usage:
+ *         Usage (Ledger):
  *         forge script script/Deploy.s.sol:Deploy \
- *           --rpc-url base \
- *           --broadcast \
- *           --verify \
- *           -vvvv
+ *           --rpc-url $BASE_MAINNET_RPC_URL \
+ *           --ledger --sender $DEPLOYER_ADDRESS \
+ *           --broadcast --slow -vvvv
+ *
+ *         Usage (Keystore):
+ *         forge script script/Deploy.s.sol:Deploy \
+ *           --rpc-url $BASE_MAINNET_RPC_URL \
+ *           --account deployer --sender $DEPLOYER_ADDRESS \
+ *           --broadcast --slow -vvvv
  */
 contract Deploy is Script {
     function run() external {
-        // Load config from environment
-        uint256 deployerKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerKey);
+        // Load config from environment (no private keys — use --ledger or --account)
         address operator = vm.envAddress("OPERATOR_ADDRESS");
         address weth = vm.envAddress("WETH_ADDRESS");
         address usdc = vm.envAddress("USDC_ADDRESS");
         address chainlinkEthUsd = vm.envAddress("CHAINLINK_ETH_USD_FEED");
 
-        vm.startBroadcast(deployerKey);
+        vm.startBroadcast();
+        address deployer = msg.sender;
 
         // 1. Deploy AddressBook (central registry)
         AddressBook addressBook = AddressBook(
