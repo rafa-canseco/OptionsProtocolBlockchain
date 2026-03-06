@@ -528,7 +528,20 @@ contract UpgradeTest is Test {
     function test_transferOwnership_Controller() public {
         address newOwner = address(0x1234);
         controller.transferOwnership(newOwner);
+        // Two-step: owner unchanged until accepted
+        assertEq(controller.owner(), owner);
+        assertEq(controller.pendingOwner(), newOwner);
+
+        // Non-pending cannot accept
+        vm.prank(address(0x9999));
+        vm.expectRevert(Controller.OnlyPendingOwner.selector);
+        controller.acceptOwnership();
+
+        // Pending owner accepts
+        vm.prank(newOwner);
+        controller.acceptOwnership();
         assertEq(controller.owner(), newOwner);
+        assertEq(controller.pendingOwner(), address(0));
 
         // Old owner can no longer call owner-only functions
         vm.expectRevert(Controller.OnlyOwner.selector);
@@ -537,12 +550,19 @@ contract UpgradeTest is Test {
         // New owner can
         vm.prank(newOwner);
         controller.transferOwnership(owner);
+        vm.prank(owner);
+        controller.acceptOwnership();
         assertEq(controller.owner(), owner);
     }
 
     function test_transferOwnership_Oracle() public {
         address newOwner = address(0x1234);
         oracle.transferOwnership(newOwner);
+        assertEq(oracle.owner(), owner);
+        assertEq(oracle.pendingOwner(), newOwner);
+
+        vm.prank(newOwner);
+        oracle.acceptOwnership();
         assertEq(oracle.owner(), newOwner);
 
         vm.expectRevert(Oracle.OnlyOwner.selector);
@@ -556,6 +576,11 @@ contract UpgradeTest is Test {
     function test_transferOwnership_Whitelist() public {
         address newOwner = address(0x1234);
         whitelist.transferOwnership(newOwner);
+        assertEq(whitelist.owner(), owner);
+        assertEq(whitelist.pendingOwner(), newOwner);
+
+        vm.prank(newOwner);
+        whitelist.acceptOwnership();
         assertEq(whitelist.owner(), newOwner);
 
         vm.expectRevert(Whitelist.OnlyOwner.selector);
@@ -569,6 +594,11 @@ contract UpgradeTest is Test {
     function test_transferOwnership_BatchSettler() public {
         address newOwner = address(0x1234);
         settler.transferOwnership(newOwner);
+        assertEq(settler.owner(), owner);
+        assertEq(settler.pendingOwner(), newOwner);
+
+        vm.prank(newOwner);
+        settler.acceptOwnership();
         assertEq(settler.owner(), newOwner);
 
         vm.expectRevert(BatchSettler.OnlyOwner.selector);
