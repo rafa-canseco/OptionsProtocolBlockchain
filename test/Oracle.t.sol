@@ -76,7 +76,13 @@ contract OracleTest is Test {
         oracle.getPrice(address(0xDEAD));
     }
 
+    function test_cannotSetExpiryPriceBeforeExpiry() public {
+        vm.expectRevert(Oracle.ExpiryNotReached.selector);
+        oracle.setExpiryPrice(weth, expiry, 2100e8);
+    }
+
     function test_setExpiryPrice() public {
+        vm.warp(expiry);
         oracle.setExpiryPrice(weth, expiry, 2100e8);
 
         (uint256 price, bool isSet) = oracle.getExpiryPrice(weth, expiry);
@@ -91,6 +97,7 @@ contract OracleTest is Test {
     }
 
     function test_cannotSetExpiryPriceTwice() public {
+        vm.warp(expiry);
         oracle.setExpiryPrice(weth, expiry, 2100e8);
 
         vm.expectRevert(Oracle.PriceAlreadySet.selector);
@@ -115,6 +122,7 @@ contract OracleTest is Test {
     }
 
     function test_differentExpiriesDifferentPrices() public {
+        vm.warp(expiry + 7 days);
         oracle.setExpiryPrice(weth, expiry, 2100e8);
         oracle.setExpiryPrice(weth, expiry + 7 days, 2200e8);
 
@@ -139,6 +147,7 @@ contract OracleTest is Test {
     }
 
     function test_boundsCheckSkippedWhenThresholdZero() public {
+        vm.warp(expiry);
         // threshold=0 (default) → no check, any price accepted
         oracle.setExpiryPrice(weth, expiry, 9999e8);
         (uint256 price,) = oracle.getExpiryPrice(weth, expiry);
@@ -146,6 +155,7 @@ contract OracleTest is Test {
     }
 
     function test_boundsCheckSkippedWhenNoFeed() public {
+        vm.warp(expiry);
         oracle.setPriceDeviationThreshold(1000); // 10%
         address noFeedAsset = address(0xAAAA);
         // No feed set for this asset → skip check
@@ -155,6 +165,7 @@ contract OracleTest is Test {
     }
 
     function test_expiryPriceWithinThresholdAccepted() public {
+        vm.warp(expiry);
         // Feed = 2087e8, threshold = 20% (2000 bps)
         // 2087 * 1.20 = 2504.4, 2087 * 0.80 = 1669.6
         oracle.setPriceDeviationThreshold(2000);
@@ -164,6 +175,7 @@ contract OracleTest is Test {
     }
 
     function test_expiryPriceAtExactThresholdAccepted() public {
+        vm.warp(expiry);
         // Feed = 2087e8, threshold = 2000 bps (20%)
         // Deviation = |2087 - 2504| / 2087 ≈ 19.98% → within 20%
         oracle.setPriceDeviationThreshold(2000);
@@ -173,6 +185,7 @@ contract OracleTest is Test {
     }
 
     function test_expiryPriceExceedingThresholdReverts() public {
+        vm.warp(expiry);
         // Feed = 2087e8, threshold = 10% (1000 bps)
         // diff = 313e8, deviation = 313e8 * 10000 / 2087e8 = 1499 bps
         oracle.setPriceDeviationThreshold(1000);
@@ -181,6 +194,7 @@ contract OracleTest is Test {
     }
 
     function test_expiryPriceBelowThresholdReverts() public {
+        vm.warp(expiry);
         // Feed = 2087e8, threshold = 10% (1000 bps)
         // diff = 587e8, deviation = 587e8 * 10000 / 2087e8 = 2812 bps
         oracle.setPriceDeviationThreshold(1000);
@@ -189,6 +203,7 @@ contract OracleTest is Test {
     }
 
     function test_fatFingerPriceRejected() public {
+        vm.warp(expiry);
         // Feed = 2087e8, threshold = 20%
         // diff = 1879e8, deviation = 1879e8 * 10000 / 2087e8 = 9003 bps
         oracle.setPriceDeviationThreshold(2000);
@@ -197,6 +212,7 @@ contract OracleTest is Test {
     }
 
     function test_wrongDecimalsPriceRejected() public {
+        vm.warp(expiry);
         // Feed = 2087e8, threshold = 20%
         // diff = 206613e6, deviation = 206613e6 * 10000 / 2087e8 = 9900 bps
         oracle.setPriceDeviationThreshold(2000);
@@ -241,6 +257,7 @@ contract OracleTest is Test {
     }
 
     function test_setExpiryPriceRevertsWhenStale() public {
+        vm.warp(expiry);
         oracle.setMaxOracleStaleness(3600);
         oracle.setPriceDeviationThreshold(1000);
         ethFeed.setUpdatedAt(block.timestamp - 7200);
@@ -266,6 +283,7 @@ contract OracleTest is Test {
     }
 
     function test_deviationRevertsWhenChainlinkAnswerZero() public {
+        vm.warp(expiry);
         oracle.setPriceDeviationThreshold(1000);
         ethFeed.setPrice(0);
 
@@ -274,6 +292,7 @@ contract OracleTest is Test {
     }
 
     function test_deviationRevertsWhenChainlinkAnswerNegative() public {
+        vm.warp(expiry);
         oracle.setPriceDeviationThreshold(1000);
         ethFeed.setPrice(-100);
 
