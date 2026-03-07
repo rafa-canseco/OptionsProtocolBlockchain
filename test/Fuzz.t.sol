@@ -298,6 +298,7 @@ contract OracleFuzzTest is Test {
         vm.assume(price > 0);
         address asset = address(0x1111);
 
+        vm.warp(1700000000);
         oracle.setExpiryPrice(asset, 1700000000, price);
 
         (uint256 stored, bool isSet) = oracle.getExpiryPrice(asset, 1700000000);

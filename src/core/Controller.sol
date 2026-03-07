@@ -82,6 +82,7 @@ contract Controller is Initializable, UUPSUpgradeable {
     error OnlyPartialPauser();
     error NoCollateral();
     error SystemNotFullyPaused();
+    error OTokensAlreadyRedeemed();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -321,10 +322,14 @@ contract Controller is Initializable, UUPSUpgradeable {
             if (settler != address(0)) {
                 OToken ot = OToken(vault.shortOtoken);
                 uint256 settlerBal = ot.balanceOf(settler);
-                uint256 toBurn = vault.shortAmount < settlerBal ? vault.shortAmount : settlerBal;
-                if (toBurn > 0) {
-                    ot.burnOtoken(settler, toBurn);
-                }
+
+                // Block if any oTokens were already redeemed (payout already
+                // extracted from MarginPool). Allowing withdrawal here would
+                // over-draw the pool at other vault owners' expense.
+                if (settlerBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
+
+                ot.burnOtoken(settler, vault.shortAmount);
+
                 IBatchSettlerClearance(settler)
                     .clearMMBalanceForVault(msg.sender, _vaultId, vault.shortOtoken, vault.shortAmount);
             }
