@@ -19,6 +19,13 @@
   },
   {
     "type": "function",
+    "name": "acceptOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "addressBook",
     "inputs": [],
     "outputs": [
@@ -203,6 +210,19 @@
   {
     "type": "function",
     "name": "partialPauser",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pendingOwner",
     "inputs": [],
     "outputs": [
       {
@@ -548,6 +568,25 @@
   },
   {
     "type": "event",
+    "name": "OwnershipTransferStarted",
+    "inputs": [
+      {
+        "name": "previousOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "OwnershipTransferred",
     "inputs": [
       {
@@ -795,12 +834,22 @@
   },
   {
     "type": "error",
+    "name": "OTokensAlreadyRedeemed",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OnlyOwner",
     "inputs": []
   },
   {
     "type": "error",
     "name": "OnlyPartialPauser",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyPendingOwner",
     "inputs": []
   },
   {

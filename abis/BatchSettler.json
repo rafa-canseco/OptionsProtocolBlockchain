@@ -19,6 +19,19 @@
   },
   {
     "type": "function",
+    "name": "MIN_ESCAPE_DELAY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "QUOTE_TYPEHASH",
     "inputs": [],
     "outputs": [
@@ -66,6 +79,39 @@
         "name": "maxCollateralSpent",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "mm",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "_redeemForMM",
+    "inputs": [
+      {
+        "name": "mm",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "oToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "ctrl",
+        "type": "address",
+        "internalType": "contract Controller"
       }
     ],
     "outputs": [],
@@ -111,6 +157,13 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "acceptOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -161,6 +214,11 @@
         "name": "maxCollateralSpents",
         "type": "uint256[]",
         "internalType": "uint256[]"
+      },
+      {
+        "name": "mms",
+        "type": "address[]",
+        "internalType": "address[]"
       }
     ],
     "outputs": [],
@@ -227,6 +285,47 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "clearMMBalanceForVault",
+    "inputs": [
+      {
+        "name": "vaultOwner",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "vaultId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "oToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "escapeDelay",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -470,6 +569,48 @@
   },
   {
     "type": "function",
+    "name": "mmOTokenBalance",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "mmSelfRedeem",
+    "inputs": [
+      {
+        "name": "oToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "operator",
     "inputs": [],
     "outputs": [
@@ -483,7 +624,43 @@
   },
   {
     "type": "function",
+    "name": "operatorRedeemForMM",
+    "inputs": [
+      {
+        "name": "mm",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "oTokens",
+        "type": "address[]",
+        "internalType": "address[]"
+      },
+      {
+        "name": "amounts",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "owner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pendingOwner",
     "inputs": [],
     "outputs": [
       {
@@ -517,6 +694,11 @@
         "name": "maxCollateralSpent",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "mm",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -580,6 +762,19 @@
         "name": "_aavePool",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setEscapeDelay",
+    "inputs": [
+      {
+        "name": "_delay",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -740,6 +935,64 @@
   },
   {
     "type": "function",
+    "name": "vaultMM",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "verifyLedgerSync",
+    "inputs": [
+      {
+        "name": "mm",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "oToken",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "ledgerBalance",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actualBalance",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "inSync",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "whitelistedMMs",
     "inputs": [
       {
@@ -759,6 +1012,25 @@
   },
   {
     "type": "event",
+    "name": "EscapeDelayUpdated",
+    "inputs": [
+      {
+        "name": "oldDelay",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "newDelay",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Initialized",
     "inputs": [
       {
@@ -766,6 +1038,62 @@
         "type": "uint64",
         "indexed": false,
         "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MMBalanceCleared",
+    "inputs": [
+      {
+        "name": "mm",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "oToken",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MMSelfRedeem",
+    "inputs": [
+      {
+        "name": "mm",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "oToken",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "payout",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -890,6 +1218,25 @@
   },
   {
     "type": "event",
+    "name": "OwnershipTransferStarted",
+    "inputs": [
+      {
+        "name": "previousOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "OwnershipTransferred",
     "inputs": [
       {
@@ -971,6 +1318,25 @@
   },
   {
     "type": "event",
+    "name": "ProtocolFeeBpsUpdated",
+    "inputs": [
+      {
+        "name": "oldFeeBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "newFeeBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "QuoteCancelSkipped",
     "inputs": [
       {
@@ -1028,6 +1394,25 @@
         "type": "bytes",
         "indexed": false,
         "internalType": "bytes"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SwapFeeTierUpdated",
+    "inputs": [
+      {
+        "name": "oldFeeTier",
+        "type": "uint24",
+        "indexed": false,
+        "internalType": "uint24"
+      },
+      {
+        "name": "newFeeTier",
+        "type": "uint24",
+        "indexed": false,
+        "internalType": "uint24"
       }
     ],
     "anonymous": false
@@ -1114,6 +1499,16 @@
   },
   {
     "type": "error",
+    "name": "EscapeDelayTooShort",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EscapeNotReady",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ExpiryPriceNotSet",
     "inputs": []
   },
@@ -1130,6 +1525,11 @@
   {
     "type": "error",
     "name": "FlashLoanUnauthorized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InsufficientMMBalance",
     "inputs": []
   },
   {
@@ -1174,12 +1574,22 @@
   },
   {
     "type": "error",
+    "name": "OnlyController",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OnlyOperator",
     "inputs": []
   },
   {
     "type": "error",
     "name": "OnlyOwner",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyPendingOwner",
     "inputs": []
   },
   {

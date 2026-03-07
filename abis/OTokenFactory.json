@@ -320,11 +320,6 @@
   },
   {
     "type": "error",
-    "name": "AssetNotWhitelisted",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "ERC1967InvalidImplementation",
     "inputs": [
       {
