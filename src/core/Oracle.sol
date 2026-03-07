@@ -44,6 +44,7 @@ contract Oracle is Initializable, UUPSUpgradeable {
     error InvalidAddress();
     error PriceDeviationTooHigh(uint256 submitted, uint256 chainlink, uint256 deviationBps);
     error StaleOraclePrice(uint256 updatedAt, uint256 maxAge);
+    error ExpiryNotReached();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -70,6 +71,7 @@ contract Oracle is Initializable, UUPSUpgradeable {
     function setExpiryPrice(address _asset, uint256 _expiry, uint256 _price) external onlyOwner {
         if (_asset == address(0)) revert InvalidAddress();
         if (_price == 0) revert InvalidPrice();
+        if (block.timestamp < _expiry) revert ExpiryNotReached();
         if (expiryPriceSet[_asset][_expiry]) revert PriceAlreadySet();
 
         _validatePriceDeviation(_asset, _price);
