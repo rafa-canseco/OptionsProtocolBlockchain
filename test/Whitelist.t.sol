@@ -68,15 +68,16 @@ contract WhitelistTest is Test {
         assertTrue(whitelist.isWhitelistedOToken(oToken));
     }
 
-    function test_factoryCannotWhitelistOToken() public {
+    function test_factoryCanWhitelistOToken() public {
+        address oToken = address(0xAAAA);
         vm.prank(factory);
-        vm.expectRevert(Whitelist.OnlyOwner.selector);
-        whitelist.whitelistOToken(address(0xAAAA));
+        whitelist.whitelistOToken(oToken);
+        assertTrue(whitelist.isWhitelistedOToken(oToken));
     }
 
     function test_randomCannotWhitelistOToken() public {
         vm.prank(address(0xBEEF));
-        vm.expectRevert(Whitelist.OnlyOwner.selector);
+        vm.expectRevert(Whitelist.OnlyOwnerOrFactory.selector);
         whitelist.whitelistOToken(address(0xAAAA));
     }
 

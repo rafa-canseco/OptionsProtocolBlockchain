@@ -115,10 +115,40 @@ contract OracleTest is Test {
         oracle.setPriceFeed(weth, address(ethFeed));
     }
 
-    function test_onlyOwnerCanSetExpiryPrice() public {
+    function test_onlyOwnerOrOperatorCanSetExpiryPrice() public {
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(Oracle.OnlyOwnerOrOperator.selector);
+        oracle.setExpiryPrice(weth, expiry, 2100e8);
+    }
+
+    function test_operatorCanSetExpiryPrice() public {
+        address op = address(0x0BE);
+        oracle.setOperator(op);
+
+        vm.warp(expiry);
+        vm.prank(op);
+        oracle.setExpiryPrice(weth, expiry, 2100e8);
+
+        (uint256 price, bool isSet) = oracle.getExpiryPrice(weth, expiry);
+        assertEq(price, 2100e8);
+        assertTrue(isSet);
+    }
+
+    function test_setOperator() public {
+        address op = address(0x0BE);
+        oracle.setOperator(op);
+        assertEq(oracle.operator(), op);
+    }
+
+    function test_onlyOwnerCanSetOperator() public {
         vm.prank(address(0xBEEF));
         vm.expectRevert(Oracle.OnlyOwner.selector);
-        oracle.setExpiryPrice(weth, expiry, 2100e8);
+        oracle.setOperator(address(0x0BE));
+    }
+
+    function test_cannotSetZeroOperator() public {
+        vm.expectRevert(Oracle.InvalidAddress.selector);
+        oracle.setOperator(address(0));
     }
 
     function test_differentExpiriesDifferentPrices() public {

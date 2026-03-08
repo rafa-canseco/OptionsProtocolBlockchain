@@ -33,11 +33,16 @@ contract Oracle is Initializable, UUPSUpgradeable {
     ///         0 = disabled. e.g. 3600 = 1 hour.
     uint256 public maxOracleStaleness;
 
+    /// @notice Address authorized to set expiry prices (bot/operator)
+    address public operator;
+
     event PriceFeedSet(address indexed asset, address indexed feed);
     event ExpiryPriceSet(address indexed asset, uint256 indexed expiry, uint256 price);
     event PriceDeviationThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
     event MaxOracleStalenessUpdated(uint256 oldStaleness, uint256 newStaleness);
+    event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
     error OnlyOwner();
+    error OnlyOwnerOrOperator();
     error PriceAlreadySet();
     error FeedNotSet();
     error InvalidPrice();
@@ -68,7 +73,16 @@ contract Oracle is Initializable, UUPSUpgradeable {
         emit PriceFeedSet(_asset, _feed);
     }
 
-    function setExpiryPrice(address _asset, uint256 _expiry, uint256 _price) external onlyOwner {
+    function setOperator(address _operator) external onlyOwner {
+        if (_operator == address(0)) revert InvalidAddress();
+        emit OperatorUpdated(operator, _operator);
+        operator = _operator;
+    }
+
+    function setExpiryPrice(address _asset, uint256 _expiry, uint256 _price) external {
+        if (msg.sender != owner && msg.sender != operator) {
+            revert OnlyOwnerOrOperator();
+        }
         if (_asset == address(0)) revert InvalidAddress();
         if (_price == 0) revert InvalidPrice();
         if (block.timestamp < _expiry) revert ExpiryNotReached();
@@ -161,7 +175,7 @@ contract Oracle is Initializable, UUPSUpgradeable {
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[42] private __gap;
+    uint256[41] private __gap;
 }
 
 interface IChainlinkAggregator {
