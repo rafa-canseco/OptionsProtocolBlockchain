@@ -33,6 +33,7 @@ contract Whitelist is Initializable, UUPSUpgradeable {
     event OTokenWhitelisted(address indexed oToken);
 
     error OnlyOwner();
+    error OnlyOwnerOrFactory();
     error InvalidAddress();
 
     modifier onlyOwner() {
@@ -84,7 +85,10 @@ contract Whitelist is Initializable, UUPSUpgradeable {
         return isWhitelistedProduct[productHash];
     }
 
-    function whitelistOToken(address _oToken) external onlyOwner {
+    function whitelistOToken(address _oToken) external {
+        if (msg.sender != owner && msg.sender != addressBook.oTokenFactory()) {
+            revert OnlyOwnerOrFactory();
+        }
         if (_oToken == address(0)) revert InvalidAddress();
         isWhitelistedOToken[_oToken] = true;
         emit OTokenWhitelisted(_oToken);

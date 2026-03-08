@@ -104,6 +104,7 @@ contract ControllerFuzzTest is Test {
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
+        factory.setOperator(address(this));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
 
@@ -313,12 +314,13 @@ contract OracleFuzzTest is Test {
     }
 
     /// @notice Non-owner can never set prices
-    function testFuzz_nonOwnerCannotSetExpiryPrice(address caller, uint256 price) public {
+    function testFuzz_nonOwnerOrOperatorCannotSetExpiryPrice(address caller, uint256 price) public {
         vm.assume(caller != address(this));
+        vm.assume(caller != oracle.operator());
         vm.assume(price > 0);
 
         vm.prank(caller);
-        vm.expectRevert(Oracle.OnlyOwner.selector);
+        vm.expectRevert(Oracle.OnlyOwnerOrOperator.selector);
         oracle.setExpiryPrice(address(0x1111), 1700000000, price);
     }
 }
@@ -408,6 +410,7 @@ contract BatchSettlerFuzzTest is Test {
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
+        factory.setOperator(address(this));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
@@ -789,6 +792,7 @@ contract PhysicalRedeemFuzzTest is Test {
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
+        factory.setOperator(address(this));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
@@ -1114,6 +1118,7 @@ contract ProtocolFeeFuzzTest is Test {
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
+        factory.setOperator(address(this));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
