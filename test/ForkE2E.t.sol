@@ -122,6 +122,7 @@ contract ForkE2E is Test {
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
+        factory.setOperator(address(this));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));

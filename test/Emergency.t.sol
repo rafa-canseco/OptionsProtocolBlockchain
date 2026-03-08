@@ -11,6 +11,34 @@ import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
 import "../src/core/Whitelist.sol";
 
+contract MockSettler {
+    mapping(address => mapping(uint256 => address)) public vaultMM;
+    mapping(address => mapping(address => uint256)) public mmOTokenBalance;
+
+    function setVaultMM(address _owner, uint256 _vaultId, address _mm) external {
+        vaultMM[_owner][_vaultId] = _mm;
+    }
+
+    function setMMBalance(address _mm, address _oToken, uint256 _bal) external {
+        mmOTokenBalance[_mm][_oToken] = _bal;
+    }
+
+    function clearMMBalanceForVault(
+        address _vaultOwner,
+        uint256 _vaultId,
+        address _oToken,
+        uint256 _amount
+    ) external {
+        address mm = vaultMM[_vaultOwner][_vaultId];
+        if (mm == address(0)) return;
+        uint256 balance = mmOTokenBalance[mm][_oToken];
+        uint256 toClear = _amount < balance ? _amount : balance;
+        if (toClear > 0) {
+            mmOTokenBalance[mm][_oToken] = balance - toClear;
+        }
+    }
+}
+
 contract MockERC20E is ERC20 {
     uint8 private _dec;
 
@@ -95,6 +123,7 @@ contract EmergencyTest is Test {
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
+        factory.setOperator(admin);
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
 
@@ -613,5 +642,102 @@ contract EmergencyTest is Test {
         vm.prank(pauser);
         vm.expectRevert(Controller.OnlyPartialPauser.selector);
         controller.setSystemPartiallyPaused(true);
+    }
+
+    // ==========================================
+    // NM-001: Cross-Vault Double-Claim Prevention
+    // ==========================================
+
+    function test_emergencyWithdraw_blocksAfterMMRedemption() public {
+        address oToken = _createPut();
+        address alice = address(0xA11CE);
+        address bob = address(0xB0B);
+        address mm1 = address(0xAA01);
+        address mm2 = address(0xAA02);
+
+        MockSettler mockSettler = new MockSettler();
+        addressBook.setBatchSettler(address(mockSettler));
+
+        usdc.mint(alice, 2000e6);
+        usdc.mint(bob, 2000e6);
+        vm.prank(alice);
+        usdc.approve(address(pool), type(uint256).max);
+        vm.prank(bob);
+        usdc.approve(address(pool), type(uint256).max);
+
+        // Alice opens vault, deposits, mints oTokens to settler
+        vm.startPrank(alice);
+        uint256 vaultA = controller.openVault(alice);
+        controller.depositCollateral(alice, vaultA, address(usdc), 2000e6);
+        controller.mintOtoken(alice, vaultA, oToken, 1e8, address(mockSettler));
+        vm.stopPrank();
+
+        // Bob opens vault, deposits, mints oTokens to settler
+        vm.startPrank(bob);
+        uint256 vaultB = controller.openVault(bob);
+        controller.depositCollateral(bob, vaultB, address(usdc), 2000e6);
+        controller.mintOtoken(bob, vaultB, oToken, 1e8, address(mockSettler));
+        vm.stopPrank();
+
+        // Configure mock settler: vault→MM mappings and balances
+        mockSettler.setVaultMM(alice, vaultA, mm1);
+        mockSettler.setVaultMM(bob, vaultB, mm2);
+        mockSettler.setMMBalance(mm1, oToken, 1e8);
+        mockSettler.setMMBalance(mm2, oToken, 1e8);
+
+        // settler holds 2e8 oTokens, MarginPool holds 4000 USDC
+        assertEq(OToken(oToken).balanceOf(address(mockSettler)), 2e8);
+        assertEq(usdc.balanceOf(address(pool)), 4000e6);
+
+        // Option expires ITM (put: expiryPrice < strike)
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        // Simulate operatorRedeemForMM: redeem MM1's oTokens
+        vm.prank(address(mockSettler));
+        controller.redeem(oToken, 1e8);
+        // settler now has 1e8 oTokens (Bob's), pool paid 2000 USDC
+        mockSettler.setMMBalance(mm1, oToken, 0);
+
+        assertEq(OToken(oToken).balanceOf(address(mockSettler)), 1e8);
+        assertEq(usdc.balanceOf(address(pool)), 2000e6);
+
+        // System fully paused
+        controller.setSystemFullyPaused(true);
+
+        // Alice tries emergency withdraw — BLOCKED by per-MM check
+        // (MM1's balance is 0, shortAmount is 1e8)
+        vm.prank(alice);
+        vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
+        controller.emergencyWithdrawVault(vaultA);
+
+        // Bob can still withdraw — MM2's balance is intact
+        vm.prank(bob);
+        controller.emergencyWithdrawVault(vaultB);
+        assertEq(usdc.balanceOf(bob), 2000e6);
+    }
+
+    function test_emergencyWithdraw_preMigrationVaultFallsBack() public {
+        // Pre-migration vault: vaultMM returns address(0)
+        // Falls back to aggregate balance check
+        address oToken = _createPut();
+        MockSettler mockSettler = new MockSettler();
+        addressBook.setBatchSettler(address(mockSettler));
+
+        usdc.mint(user, 2000e6);
+
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, address(mockSettler));
+        vm.stopPrank();
+
+        // vaultMM not set → returns address(0) (pre-migration)
+        // settler holds 1e8 oTokens → aggregate check passes
+        controller.setSystemFullyPaused(true);
+
+        vm.prank(user);
+        controller.emergencyWithdrawVault(vaultId);
+        assertTrue(controller.vaultSettled(user, vaultId));
     }
 }

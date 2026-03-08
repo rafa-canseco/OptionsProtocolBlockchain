@@ -182,6 +182,7 @@ contract InvariantTest is Test {
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
+        factory.setOperator(address(this));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
 
@@ -384,6 +385,7 @@ contract BatchRedeemInvariantTest is Test {
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
+        factory.setOperator(address(this));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
@@ -1012,6 +1014,7 @@ contract FullLifecycleInvariantTest is Test {
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
+        factory.setOperator(address(this));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
@@ -1498,6 +1501,7 @@ contract PauseEmergencyInvariantTest is Test {
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
+        factory.setOperator(address(this));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));

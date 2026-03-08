@@ -13,6 +13,8 @@ import "../interfaces/IMarginVault.sol";
 
 interface IBatchSettlerClearance {
     function clearMMBalanceForVault(address owner, uint256 vaultId, address oToken, uint256 amount) external;
+    function vaultMM(address owner, uint256 vaultId) external view returns (address);
+    function mmOTokenBalance(address mm, address oToken) external view returns (uint256);
 }
 
 /**
@@ -321,12 +323,19 @@ contract Controller is Initializable, UUPSUpgradeable {
             address settler = addressBook.batchSettler();
             if (settler != address(0)) {
                 OToken ot = OToken(vault.shortOtoken);
-                uint256 settlerBal = ot.balanceOf(settler);
 
-                // Block if any oTokens were already redeemed (payout already
-                // extracted from MarginPool). Allowing withdrawal here would
-                // over-draw the pool at other vault owners' expense.
-                if (settlerBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
+                // Use per-MM balance check (not aggregate settlerBal) to
+                // prevent cross-vault double-claim. Aggregate balanceOf
+                // includes oTokens from OTHER vaults, masking redemptions.
+                address mm = IBatchSettlerClearance(settler).vaultMM(msg.sender, _vaultId);
+                if (mm != address(0)) {
+                    uint256 mmBal = IBatchSettlerClearance(settler).mmOTokenBalance(mm, vault.shortOtoken);
+                    if (mmBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
+                } else {
+                    // Pre-migration vault (no MM attribution): aggregate check
+                    uint256 settlerBal = ot.balanceOf(settler);
+                    if (settlerBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
+                }
 
                 ot.burnOtoken(settler, vault.shortAmount);
 

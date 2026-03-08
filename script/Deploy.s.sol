@@ -108,34 +108,39 @@ contract Deploy is Script {
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
 
-        // 4. Whitelist MM
-        settler.setWhitelistedMM(operator, true);
+        // 4. Set operator roles on factory and oracle
+        factory.setOperator(operator);
+        oracle.setOperator(operator);
 
-        // 5. Whitelist assets and products (ETH only for MVP)
+        // 5. Whitelist MM (same as operator in founder-operated phase)
+        address mmAddress = vm.envOr("MM_ADDRESS", operator);
+        settler.setWhitelistedMM(mmAddress, true);
+
+        // 6. Whitelist assets and products (ETH only for MVP)
         whitelist.whitelistUnderlying(weth);
         whitelist.whitelistCollateral(usdc);
         whitelist.whitelistCollateral(weth);
         whitelist.whitelistProduct(weth, usdc, usdc, true); // ETH PUT (USDC collateral)
         whitelist.whitelistProduct(weth, usdc, weth, false); // ETH CALL (WETH collateral)
 
-        // 6. Set Chainlink price feed for WETH
+        // 7. Set Chainlink price feed for WETH
         oracle.setPriceFeed(weth, chainlinkEthUsd);
 
-        // 7. Configure protocol fee
+        // 8. Configure protocol fee
         _configureProtocolFee(settler);
 
-        // 8. Configure physical delivery infrastructure (Aave V3 + Uniswap V3)
+        // 9. Configure physical delivery infrastructure (Aave V3 + Uniswap V3)
         _configurePhysicalDelivery(settler);
 
-        // 9. Configure oracle safety bounds
+        // 10. Configure oracle safety bounds
         _configureOracleSafety(oracle);
 
-        // 10. Configure escape hatch delay for MMs
+        // 11. Configure escape hatch delay for MMs
         uint256 escapeDelay = vm.envOr("ESCAPE_DELAY", uint256(3 days));
         settler.setEscapeDelay(escapeDelay);
         console.log("Escape Delay (s):", escapeDelay);
 
-        // 11. Set partial pauser (operator can pause new positions)
+        // 12. Set partial pauser (operator can pause new positions)
         controller.setPartialPauser(operator);
 
         vm.stopBroadcast();
@@ -144,6 +149,7 @@ contract Deploy is Script {
         console.log("\n=== Deployment Complete ===");
         console.log("Chain:", vm.envOr("CHAIN_LABEL", string("Base")));
         console.log("Operator:", operator);
+        console.log("MM:", mmAddress);
         console.log("WETH:", weth);
         console.log("USDC:", usdc);
         console.log("Chainlink ETH/USD:", chainlinkEthUsd);

@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import "./OToken.sol";
 import "./AddressBook.sol";
+import "./Whitelist.sol";
 
 /**
  * @title OTokenFactory
@@ -24,6 +25,9 @@ contract OTokenFactory is Initializable, UUPSUpgradeable {
     /// @notice Lookup: parameters hash → oToken address (prevents duplicates)
     mapping(bytes32 => address) public getOToken;
 
+    /// @notice Authorized operator that can create oTokens
+    address public operator;
+
     event OTokenCreated(
         address indexed oToken,
         address indexed underlying,
@@ -33,6 +37,8 @@ contract OTokenFactory is Initializable, UUPSUpgradeable {
         uint256 expiry,
         bool isPut
     );
+
+    event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
 
     error OTokenAlreadyExists();
     error InvalidExpiry();
@@ -50,6 +56,13 @@ contract OTokenFactory is Initializable, UUPSUpgradeable {
         addressBook = AddressBook(_addressBook);
     }
 
+    function setOperator(address _operator) external {
+        if (msg.sender != addressBook.owner()) revert Unauthorized();
+        if (_operator == address(0)) revert InvalidAddress();
+        emit OperatorUpdated(operator, _operator);
+        operator = _operator;
+    }
+
     function createOToken(
         address _underlying,
         address _strikeAsset,
@@ -58,6 +71,7 @@ contract OTokenFactory is Initializable, UUPSUpgradeable {
         uint256 _expiry,
         bool _isPut
     ) external returns (address) {
+        if (msg.sender != operator) revert Unauthorized();
         if (_underlying == address(0) || _strikeAsset == address(0) || _collateralAsset == address(0)) {
             revert InvalidAddress();
         }
@@ -80,6 +94,8 @@ contract OTokenFactory is Initializable, UUPSUpgradeable {
         oTokens.push(oTokenAddress);
         isOToken[oTokenAddress] = true;
         getOToken[paramsHash] = oTokenAddress;
+
+        Whitelist(addressBook.whitelist()).whitelistOToken(oTokenAddress);
 
         emit OTokenCreated(oTokenAddress, _underlying, _strikeAsset, _collateralAsset, _strikePrice, _expiry, _isPut);
 
@@ -121,5 +137,5 @@ contract OTokenFactory is Initializable, UUPSUpgradeable {
         if (msg.sender != addressBook.owner()) revert Unauthorized();
     }
 
-    uint256[46] private __gap;
+    uint256[45] private __gap;
 }

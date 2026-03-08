@@ -103,6 +103,8 @@ contract ControllerTest is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
 
+        factory.setOperator(address(this));
+
         // Whitelist assets and products
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
@@ -382,14 +384,14 @@ contract ControllerTest is Test {
     }
 
     function test_cannotMintUnwhitelistedOToken() public {
-        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        address fakeOToken = address(0xBAAD);
 
         vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
         controller.depositCollateral(user, vaultId, address(usdc), 2000e6);
 
         vm.expectRevert(Controller.OTokenNotWhitelisted.selector);
-        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        controller.mintOtoken(user, vaultId, fakeOToken, 1e8, user);
         vm.stopPrank();
     }
 
@@ -560,14 +562,13 @@ contract ControllerTest is Test {
     // --- Redeem whitelist check ---
 
     function test_cannotRedeemUnwhitelistedOToken() public {
-        // Create but do NOT whitelist
-        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
+        address fakeOToken = address(0xBAAD);
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
         vm.prank(user);
         vm.expectRevert(Controller.OTokenNotWhitelisted.selector);
-        controller.redeem(oToken, 1e8);
+        controller.redeem(fakeOToken, 1e8);
     }
 }
