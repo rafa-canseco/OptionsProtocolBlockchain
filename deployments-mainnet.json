@@ -1,0 +1,40 @@
+{
+  "network": "Base Mainnet",
+  "chainId": 8453,
+  "deployedAt": "2026-03-09",
+  "deployer": "0xC217A5B774cd17388a7C2782f0Cc3F4aaf8a29a7",
+  "proxies": {
+    "AddressBook": "0x48FE24a69417038a2D3d46B2B6B9De03b884eD72",
+    "Controller": "0x2Ab6D1c41f0863Bc2324b392f1D8cF073cF42624",
+    "MarginPool": "0xa1e04873F6d112d84824C88c9D6937bE38811657",
+    "OTokenFactory": "0x0701b7De84eC23a3CaDa763bCA7A9E324486F6D7",
+    "Oracle": "0x09daa0194A3AF59b46C5443aF9C20fAd98347671",
+    "Whitelist": "0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A",
+    "BatchSettler": "0xd281ADdB8b5574360Fd6BFC245B811ad5C582a3B"
+  },
+  "implementations": {
+    "AddressBook": "0x40D39d9531c4dDcC0b4CE2542170ea06BfEfaee2",
+    "Controller": "0x31F59C93Ce1161839CAB8b41B08ADD51347a80Cb",
+    "MarginPool": "0x800854b05871F5026291D61cE3e40696B538A3d9",
+    "OTokenFactory": "0xC02828aB769edE49548315cb60d15189faB510A5",
+    "Oracle": "0x14987C5e3D74206CF3e417FC181Cda01543351c2",
+    "Whitelist": "0x5F3b652b2b258e36bc88C3Bdf3c4e1EcF04BCF00",
+    "BatchSettler": "0x397024aF9899A1e74779Adf5ED93C70070830b55"
+  },
+  "config": {
+    "operator": "0x0bbD599cEB63b4603c2F007c5122e33f7b12364c",
+    "treasury": "0x0744e5Abb82A0337B2F6ac65aC83D1e9861C9740",
+    "protocolFeeBps": 400,
+    "escapeDelay": 259200,
+    "swapFeeTier": 3000,
+    "priceDeviationThresholdBps": 1000,
+    "maxOracleStaleness": 3600
+  },
+  "externalAddresses": {
+    "WETH": "0x4200000000000000000000000000000000000006",
+    "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "ChainlinkETHUSD": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+    "AaveV3Pool": "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+    "UniswapSwapRouter": "0x2626664c2603336E57B271c5C0b26F421741e481"
+  }
+}
