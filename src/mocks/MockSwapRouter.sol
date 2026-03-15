@@ -62,4 +62,38 @@ contract MockSwapRouter is ISwapRouter {
 
         return amountIn;
     }
+
+    function exactInputSingle(ExactInputSingleParams calldata params)
+        external
+        payable
+        override
+        returns (uint256 amountOut)
+    {
+        require(params.tokenIn == weth || params.tokenIn == usdc, "MockSwapRouter: unsupported tokenIn");
+        require(params.tokenOut == weth || params.tokenOut == usdc, "MockSwapRouter: unsupported tokenOut");
+
+        (, int256 rawPrice,,,) = priceFeed.latestRoundData();
+        require(rawPrice > 0, "MockSwapRouter: invalid price");
+        uint256 ethPrice = uint256(rawPrice); // 8 decimals (e.g., 2500e8)
+
+        if (params.tokenIn == weth) {
+            // Selling WETH (18 dec) for USDC (6 dec)
+            // amountOut (USDC 6 dec) = amountIn (WETH 18 dec) * price (8 dec) / 1e20
+            amountOut = (params.amountIn * ethPrice) / 1e20;
+        } else {
+            // Selling USDC (6 dec) for WETH (18 dec)
+            // amountOut (WETH 18 dec) = amountIn (USDC 6 dec) * 1e20 / price (8 dec)
+            amountOut = (params.amountIn * 1e20) / ethPrice;
+        }
+
+        require(amountOut >= params.amountOutMinimum, "Too much slippage");
+
+        // Pull input tokens from caller
+        IERC20(params.tokenIn).safeTransferFrom(msg.sender, address(this), params.amountIn);
+
+        // Mint output tokens to recipient (no real liquidity needed)
+        MockERC20(params.tokenOut).mint(params.recipient, amountOut);
+
+        return amountOut;
+    }
 }
