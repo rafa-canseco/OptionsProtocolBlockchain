@@ -1177,6 +1177,27 @@ contract MockSwapRouter {
 
         return amountIn;
     }
+
+    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params)
+        external
+        returns (uint256 amountOut)
+    {
+        // Compute amountOut from amountIn using mock price
+        if (params.amountIn > 1e12) {
+            // Large amountIn -> WETH (18 decimals), output is USDC
+            amountOut = (params.amountIn * mockEthPriceUsdc) / 1e18;
+        } else {
+            // Small amountIn -> USDC (6 decimals), output is WETH
+            amountOut = (params.amountIn * 1e18) / mockEthPriceUsdc;
+        }
+
+        require(amountOut >= params.amountOutMinimum, "Too much slippage");
+
+        IERC20(params.tokenIn).safeTransferFrom(msg.sender, address(this), params.amountIn);
+        IERC20(params.tokenOut).safeTransfer(params.recipient, amountOut);
+
+        return amountOut;
+    }
 }
 
 // =============================================================================
@@ -1324,8 +1345,9 @@ contract PhysicalRedeemTest is BatchSettlerTestBase {
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
 
         // Physical delivery: alice should receive $2000 USDC (strike amount)
+        // slippageParam = minAmountOut for calls (min USDC from swap)
         vm.prank(operatorBot);
-        settler.physicalRedeem(oToken, alice, 1e8, 1e18, mm);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
 
         // Alice received strikePrice USDC
         assertEq(usdc.balanceOf(alice), aliceUsdcBefore + 2000e6);

@@ -241,14 +241,38 @@ contract ForkPhysicalRedeemTest is Test {
         uint256 expectedUsdc = (amount * callStrike) / 1e10;
 
         vm.prank(mm);
-        settler.physicalRedeem(callOToken, user, amount, collateral, mm);
+        settler.physicalRedeem(callOToken, user, amount, expectedUsdc, mm);
 
         assertEq(IERC20(USDC).balanceOf(user) - before_, expectedUsdc, "Exact USDC");
         assertEq(IERC20(USDC).balanceOf(address(settler)), 0, "Settler 0 USDC");
         assertEq(IERC20(WETH).balanceOf(address(settler)), 0, "Settler 0 WETH");
     }
 
-    // --- Surplus goes to operator (MM), not user ---
+    // --- Surplus goes to MM as USDC, not WETH ---
+
+    function test_physicalDelivery_call_surplusInUsdc() public onlyFork {
+        uint256 amount = 1e8;
+        uint256 collateral = amount * 1e10;
+
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(callOToken);
+        vm.prank(user);
+        uint256 vaultId = settler.executeOrder(q, sig, amount, collateral);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(WETH, expiry, 2200e8);
+        _settleVault(user, vaultId);
+
+        uint256 mmUsdcBefore = IERC20(USDC).balanceOf(mm);
+        uint256 mmWethBefore = IERC20(WETH).balanceOf(mm);
+        uint256 expectedUsdc = (amount * callStrike) / 1e10;
+
+        vm.prank(mm);
+        settler.physicalRedeem(callOToken, user, amount, expectedUsdc, mm);
+
+        assertGt(IERC20(USDC).balanceOf(mm) - mmUsdcBefore, 0, "MM gets USDC surplus");
+        assertEq(IERC20(WETH).balanceOf(mm), mmWethBefore, "MM gets no WETH");
+        assertEq(IERC20(WETH).balanceOf(address(settler)), 0, "Settler 0 WETH");
+    }
 
     function test_physicalDelivery_put_surplusGoesToOperator() public onlyFork {
         uint256 amount = 1e8;
