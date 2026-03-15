@@ -1178,10 +1178,7 @@ contract MockSwapRouter {
         return amountIn;
     }
 
-    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params)
-        external
-        returns (uint256 amountOut)
-    {
+    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params) external returns (uint256 amountOut) {
         // Compute amountOut from amountIn using mock price
         if (params.amountIn > 1e12) {
             // Large amountIn -> WETH (18 decimals), output is USDC
@@ -1698,6 +1695,50 @@ contract PhysicalRedeemTest is BatchSettlerTestBase {
         vm.prank(operatorBot);
         vm.expectRevert(); // "Too much slippage" from MockSwapRouter
         settler.physicalRedeem(oToken, alice, 1e8, 1e6, mm);
+    }
+
+    function test_physicalRedeem_callRevertsOnSlippageExceeded() public {
+        address oToken = _createCall(strikePrice);
+        _setupCallPosition(alice, oToken, 1e8);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2500e8);
+        mockRouter.setMockPrice(2500e6);
+
+        address[] memory owners = new address[](1);
+        uint256[] memory ids = new uint256[](1);
+        owners[0] = alice;
+        ids[0] = 1;
+        vm.prank(operatorBot);
+        settler.batchSettleVaults(owners, ids);
+
+        // minAmountOut = type(uint256).max (impossible to satisfy)
+        vm.prank(operatorBot);
+        vm.expectRevert(); // "Too much slippage" from MockSwapRouter
+        settler.physicalRedeem(oToken, alice, 1e8, type(uint256).max, mm);
+    }
+
+    function test_physicalRedeem_callRevertsOnInsufficientSwapOutput() public {
+        address oToken = _createCall(strikePrice);
+        _setupCallPosition(alice, oToken, 1e8);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2500e8);
+
+        // Set mock price very low so swap output < repayAmount
+        mockRouter.setMockPrice(100e6);
+
+        address[] memory owners = new address[](1);
+        uint256[] memory ids = new uint256[](1);
+        owners[0] = alice;
+        ids[0] = 1;
+        vm.prank(operatorBot);
+        settler.batchSettleVaults(owners, ids);
+
+        // slippageParam = 0 (no min), but swap output will be tiny
+        vm.prank(operatorBot);
+        vm.expectRevert(BatchSettler.InsufficientSwapOutput.selector);
+        settler.physicalRedeem(oToken, alice, 1e8, 0, mm);
     }
 
     // ===== Fee tier validation =====

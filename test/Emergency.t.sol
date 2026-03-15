@@ -23,12 +23,7 @@ contract MockSettler {
         mmOTokenBalance[_mm][_oToken] = _bal;
     }
 
-    function clearMMBalanceForVault(
-        address _vaultOwner,
-        uint256 _vaultId,
-        address _oToken,
-        uint256 _amount
-    ) external {
+    function clearMMBalanceForVault(address _vaultOwner, uint256 _vaultId, address _oToken, uint256 _amount) external {
         address mm = vaultMM[_vaultOwner][_vaultId];
         if (mm == address(0)) return;
         uint256 balance = mmOTokenBalance[mm][_oToken];

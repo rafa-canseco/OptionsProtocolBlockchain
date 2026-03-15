@@ -149,6 +149,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     error EscapeNotReady();
     error EscapeDelayTooShort();
     error OnlyController();
+    error InsufficientSwapOutput();
 
     // Panic(uint256) selector: 0x4e487b71
     bytes4 private constant _PANIC_SELECTOR = 0x4e487b71;
@@ -488,17 +489,18 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         if (isPut) {
             // Put: collateral=USDC, contra=WETH. Swap just enough USDC
             // for exact WETH repayment. Surplus stays as USDC.
-            collateralUsed = ISwapRouter(swapRouter).exactOutputSingle(
-                ISwapRouter.ExactOutputSingleParams({
-                    tokenIn: collateralAsset,
-                    tokenOut: contraAsset,
-                    fee: swapFeeTier,
-                    recipient: address(this),
-                    amountOut: repayAmount,
-                    amountInMaximum: slippageParam,
-                    sqrtPriceLimitX96: 0
-                })
-            );
+            collateralUsed = ISwapRouter(swapRouter)
+                .exactOutputSingle(
+                    ISwapRouter.ExactOutputSingleParams({
+                        tokenIn: collateralAsset,
+                        tokenOut: contraAsset,
+                        fee: swapFeeTier,
+                        recipient: address(this),
+                        amountOut: repayAmount,
+                        amountInMaximum: slippageParam,
+                        sqrtPriceLimitX96: 0
+                    })
+                );
 
             uint256 surplus = collateralReceived - collateralUsed;
             if (surplus > 0) {
@@ -508,18 +510,20 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
             // Call: collateral=WETH, contra=USDC. Swap ALL WETH to USDC.
             // Surplus delivered as USDC to MM.
             collateralUsed = collateralReceived;
-            uint256 amountOut = ISwapRouter(swapRouter).exactInputSingle(
-                ISwapRouter.ExactInputSingleParams({
-                    tokenIn: collateralAsset,
-                    tokenOut: contraAsset,
-                    fee: swapFeeTier,
-                    recipient: address(this),
-                    amountIn: collateralReceived,
-                    amountOutMinimum: slippageParam,
-                    sqrtPriceLimitX96: 0
-                })
-            );
+            uint256 amountOut = ISwapRouter(swapRouter)
+                .exactInputSingle(
+                    ISwapRouter.ExactInputSingleParams({
+                        tokenIn: collateralAsset,
+                        tokenOut: contraAsset,
+                        fee: swapFeeTier,
+                        recipient: address(this),
+                        amountIn: collateralReceived,
+                        amountOutMinimum: slippageParam,
+                        sqrtPriceLimitX96: 0
+                    })
+                );
 
+            if (amountOut < repayAmount) revert InsufficientSwapOutput();
             uint256 surplus = amountOut - repayAmount;
             if (surplus > 0) {
                 IERC20(contraAsset).safeTransfer(mm, surplus);
@@ -537,8 +541,8 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         address[] calldata mms
     ) external onlyOperator {
         if (
-            oTokens.length != users.length || users.length != amounts.length
-                || amounts.length != slippageParams.length || amounts.length != mms.length
+            oTokens.length != users.length || users.length != amounts.length || amounts.length != slippageParams.length
+                || amounts.length != mms.length
         ) revert LengthMismatch();
         if (oTokens.length == 0) revert EmptyArray();
 
@@ -561,13 +565,9 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         _executePhysicalRedeem(oToken, user, amount, slippageParam, mm);
     }
 
-    function _executePhysicalRedeem(
-        address oToken,
-        address user,
-        uint256 amount,
-        uint256 slippageParam,
-        address mm
-    ) private {
+    function _executePhysicalRedeem(address oToken, address user, uint256 amount, uint256 slippageParam, address mm)
+        private
+    {
         if (oToken == address(0)) revert InvalidAddress();
         if (user == address(0)) revert InvalidAddress();
         if (mm == address(0)) revert InvalidAddress();

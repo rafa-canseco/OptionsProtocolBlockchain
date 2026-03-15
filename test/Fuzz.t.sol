@@ -698,10 +698,7 @@ contract FuzzMockSwapRouter {
         return amountIn;
     }
 
-    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params)
-        external
-        returns (uint256 amountOut)
-    {
+    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params) external returns (uint256 amountOut) {
         if (params.tokenIn == weth) {
             // Selling WETH for USDC: amountOut (USDC) = amountIn (WETH) * price / 1e18
             amountOut = (params.amountIn * mockEthPriceUsdc) / 1e18;
