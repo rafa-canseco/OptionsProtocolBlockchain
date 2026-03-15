@@ -19,7 +19,7 @@
     "OTokenFactory": "0xC02828aB769edE49548315cb60d15189faB510A5",
     "Oracle": "0x14987C5e3D74206CF3e417FC181Cda01543351c2",
     "Whitelist": "0x5F3b652b2b258e36bc88C3Bdf3c4e1EcF04BCF00",
-    "BatchSettler": "0x397024aF9899A1e74779Adf5ED93C70070830b55"
+    "BatchSettler": "0x615f08b7Bc3fE3E95631DBdC3ed48Fe3dF9db813"
   },
   "config": {
     "operator": "0x0bbD599cEB63b4603c2F007c5122e33f7b12364c",

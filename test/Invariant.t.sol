@@ -745,8 +745,8 @@ contract FullLifecycleHandler is Test {
         uint256 expectedContra = isPut ? amount * 1e10 : (amount * strikePrice) / 1e10;
         uint256 userContraBefore = IERC20(contraAsset).balanceOf(u);
 
-        // maxCollateralSpent: put=USDC collateral, call=WETH collateral
-        uint256 maxSpent = isPut ? (amount * strikePrice) / 1e10 : amount * 1e10;
+        // slippageParam: put=maxCollateralSpent (USDC), call=minAmountOut (USDC)
+        uint256 maxSpent = (amount * strikePrice) / 1e10;
 
         vm.prank(mm);
         settler.physicalRedeem(token, u, amount, maxSpent, mm);

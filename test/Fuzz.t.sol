@@ -697,6 +697,23 @@ contract FuzzMockSwapRouter {
 
         return amountIn;
     }
+
+    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params) external returns (uint256 amountOut) {
+        if (params.tokenIn == weth) {
+            // Selling WETH for USDC: amountOut (USDC) = amountIn (WETH) * price / 1e18
+            amountOut = (params.amountIn * mockEthPriceUsdc) / 1e18;
+        } else {
+            // Selling USDC for WETH: amountOut (WETH) = amountIn (USDC) * 1e18 / price
+            amountOut = (params.amountIn * 1e18) / mockEthPriceUsdc;
+        }
+
+        require(amountOut >= params.amountOutMinimum, "Too much slippage");
+
+        IERC20(params.tokenIn).safeTransferFrom(msg.sender, address(this), params.amountIn);
+        IERC20(params.tokenOut).safeTransfer(params.recipient, amountOut);
+
+        return amountOut;
+    }
 }
 
 // =============================================================================
@@ -927,9 +944,10 @@ contract PhysicalRedeemFuzzTest is Test {
 
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
 
-        // Physical delivery
+        // Physical delivery — slippageParam = minAmountOut for calls
+        uint256 minOut = (amount * strikePrice) / 1e10;
         vm.prank(mm);
-        settler.physicalRedeem(oToken, alice, amount, collateral, mm);
+        settler.physicalRedeem(oToken, alice, amount, minOut, mm);
 
         // User receives exactly (amount * strikePrice) / 1e10 USDC
         assertEq(usdc.balanceOf(alice), aliceUsdcBefore + (amount * strikePrice) / 1e10);
@@ -1019,9 +1037,10 @@ contract PhysicalRedeemFuzzTest is Test {
 
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
 
-        // Physical delivery
+        // Physical delivery — slippageParam = minAmountOut for calls
+        uint256 minOut = (amount * strikePrice) / 1e10;
         vm.prank(mm);
-        settler.physicalRedeem(oToken, alice, amount, collateral, mm);
+        settler.physicalRedeem(oToken, alice, amount, minOut, mm);
 
         // User receives exactly (amount * strikePrice) / 1e10 USDC
         assertEq(usdc.balanceOf(alice), aliceUsdcBefore + (amount * strikePrice) / 1e10);
