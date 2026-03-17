@@ -83,11 +83,7 @@ contract MockSwapRouter is ISwapRouter {
         return amountOut;
     }
 
-    function _resolveSwap(address tokenIn, address tokenOut)
-        internal
-        view
-        returns (address asset, uint256 price)
-    {
+    function _resolveSwap(address tokenIn, address tokenOut) internal view returns (address asset, uint256 price) {
         require(tokenIn == usdc || tokenOut == usdc, "MockSwapRouter: one token must be USDC");
         asset = tokenIn == usdc ? tokenOut : tokenIn;
 
