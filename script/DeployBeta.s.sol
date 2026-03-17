@@ -32,7 +32,9 @@ contract DeployBeta is Script {
     // Store addresses as state to avoid stack-too-deep
     MockERC20 leth;
     MockERC20 lusd;
+    MockERC20 lbtc;
     MockChainlinkFeed ethFeed;
+    MockChainlinkFeed btcFeed;
     MockAavePool mockAave;
     MockSwapRouter mockRouter;
     AddressBook addressBook;
@@ -62,9 +64,13 @@ contract DeployBeta is Script {
     function _deployMocks() internal {
         leth = new MockERC20("Loot ETH", "LETH", 18);
         lusd = new MockERC20("Loot USD", "LUSD", 6);
+        lbtc = new MockERC20("Loot BTC", "LBTC", 8);
         ethFeed = new MockChainlinkFeed(2500e8);
+        btcFeed = new MockChainlinkFeed(90_000e8);
         mockAave = new MockAavePool();
-        mockRouter = new MockSwapRouter(address(ethFeed), address(leth), address(lusd));
+        mockRouter = new MockSwapRouter(address(lusd));
+        mockRouter.setPriceFeed(address(leth), address(ethFeed));
+        mockRouter.setPriceFeed(address(lbtc), address(btcFeed));
     }
 
     function _deployProtocol(address deployer) internal {
@@ -129,15 +135,22 @@ contract DeployBeta is Script {
         // Whitelist deployer as MM
         settler.setWhitelistedMM(deployer, true);
 
-        // Whitelist tokens and products
+        // Whitelist tokens and products — ETH
         whitelist.whitelistUnderlying(address(leth));
         whitelist.whitelistCollateral(address(lusd));
         whitelist.whitelistCollateral(address(leth));
-        whitelist.whitelistProduct(address(leth), address(lusd), address(lusd), true); // PUT
-        whitelist.whitelistProduct(address(leth), address(lusd), address(leth), false); // CALL
+        whitelist.whitelistProduct(address(leth), address(lusd), address(lusd), true); // ETH PUT
+        whitelist.whitelistProduct(address(leth), address(lusd), address(leth), false); // ETH CALL
 
-        // Oracle price feed
+        // Whitelist tokens and products — BTC
+        whitelist.whitelistUnderlying(address(lbtc));
+        whitelist.whitelistCollateral(address(lbtc));
+        whitelist.whitelistProduct(address(lbtc), address(lusd), address(lusd), true); // BTC PUT
+        whitelist.whitelistProduct(address(lbtc), address(lusd), address(lbtc), false); // BTC CALL
+
+        // Oracle price feeds
         oracle.setPriceFeed(address(leth), address(ethFeed));
+        oracle.setPriceFeed(address(lbtc), address(btcFeed));
 
         // BatchSettler: mock infra + fees
         settler.setAavePool(address(mockAave));
@@ -155,10 +168,12 @@ contract DeployBeta is Script {
         // Mint initial tokens to deployer
         lusd.mint(deployer, 1_000_000e6);
         leth.mint(deployer, 1_000e18);
+        lbtc.mint(deployer, 100e8);
 
         // MM approvals: deployer approves MarginPool to pull collateral
         lusd.approve(address(pool), type(uint256).max);
         leth.approve(address(pool), type(uint256).max);
+        lbtc.approve(address(pool), type(uint256).max);
 
         // MM approvals: deployer approves BatchSettler to pull premium
         lusd.approve(address(settler), type(uint256).max);
@@ -167,7 +182,9 @@ contract DeployBeta is Script {
     function _logAddresses() internal view {
         console.log("DEPLOYED:LETH:%s", address(leth));
         console.log("DEPLOYED:LUSD:%s", address(lusd));
-        console.log("DEPLOYED:MockChainlinkFeed:%s", address(ethFeed));
+        console.log("DEPLOYED:LBTC:%s", address(lbtc));
+        console.log("DEPLOYED:MockChainlinkFeedETH:%s", address(ethFeed));
+        console.log("DEPLOYED:MockChainlinkFeedBTC:%s", address(btcFeed));
         console.log("DEPLOYED:MockAavePool:%s", address(mockAave));
         console.log("DEPLOYED:MockSwapRouter:%s", address(mockRouter));
         console.log("DEPLOYED:AddressBook:%s", address(addressBook));
