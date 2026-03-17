@@ -3,6 +3,7 @@ pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "./AddressBook.sol";
 import "./MarginPool.sol";
 import "./OToken.sol";
@@ -85,6 +86,7 @@ contract Controller is Initializable, UUPSUpgradeable {
     error NoCollateral();
     error SystemNotFullyPaused();
     error OTokensAlreadyRedeemed();
+    error UnsupportedDecimals();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -251,22 +253,28 @@ contract Controller is Initializable, UUPSUpgradeable {
     }
 
     function _getRequiredCollateral(OToken oToken, uint256 _amount) internal view returns (uint256) {
+        uint256 cd = IERC20Metadata(oToken.collateralAsset()).decimals();
         if (oToken.isPut()) {
-            return (_amount * oToken.strikePrice()) / 1e10;
+            if (cd > 16) revert UnsupportedDecimals();
+            return (_amount * oToken.strikePrice()) / (10 ** (16 - cd));
         } else {
-            return _amount * 1e10;
+            if (cd < 8) revert UnsupportedDecimals();
+            return _amount * (10 ** (cd - 8));
         }
     }
 
     function _calculatePayout(OToken oToken, uint256 _amount, uint256 _expiryPrice) internal view returns (uint256) {
         uint256 strike = oToken.strikePrice();
+        uint256 cd = IERC20Metadata(oToken.collateralAsset()).decimals();
 
         if (oToken.isPut()) {
+            if (cd > 16) revert UnsupportedDecimals();
             if (_expiryPrice >= strike) return 0;
-            return (_amount * strike) / 1e10;
+            return (_amount * strike) / (10 ** (16 - cd));
         } else {
+            if (cd < 8) revert UnsupportedDecimals();
             if (_expiryPrice <= strike) return 0;
-            return _amount * 1e10;
+            return _amount * (10 ** (cd - 8));
         }
     }
 

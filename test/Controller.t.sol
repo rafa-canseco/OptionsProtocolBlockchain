@@ -37,12 +37,14 @@ contract ControllerTest is Test {
 
     MockERC20 public weth;
     MockERC20 public usdc;
+    MockERC20 public wbtc;
 
     address public user = address(0xBEEF);
     address public buyer = address(0xCAFE);
     address public attacker = address(0xDEAD);
 
     uint256 public strikePrice = 2000e8; // $2000
+    uint256 public btcStrikePrice = 90_000e8; // $90,000
     uint256 public expiry;
 
     function setUp() public {
@@ -51,6 +53,7 @@ contract ControllerTest is Test {
         // Deploy tokens
         weth = new MockERC20("Wrapped ETH", "WETH", 18);
         usdc = new MockERC20("USD Coin", "USDC", 6);
+        wbtc = new MockERC20("Wrapped BTC", "WBTC", 8);
 
         // Deploy protocol (behind UUPS proxies)
         addressBook = AddressBook(
@@ -107,21 +110,27 @@ contract ControllerTest is Test {
 
         // Whitelist assets and products
         whitelist.whitelistUnderlying(address(weth));
+        whitelist.whitelistUnderlying(address(wbtc));
         whitelist.whitelistCollateral(address(usdc));
         whitelist.whitelistCollateral(address(weth));
-        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true); // PUT
-        whitelist.whitelistProduct(address(weth), address(usdc), address(weth), false); // CALL
+        whitelist.whitelistCollateral(address(wbtc));
+        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true); // ETH PUT
+        whitelist.whitelistProduct(address(weth), address(usdc), address(weth), false); // ETH CALL
+        whitelist.whitelistProduct(address(wbtc), address(usdc), address(usdc), true); // BTC PUT
+        whitelist.whitelistProduct(address(wbtc), address(usdc), address(wbtc), false); // BTC CALL
 
         // Set expiry
         uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
         expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
 
         // Fund user
-        usdc.mint(user, 100_000e6);
+        usdc.mint(user, 1_000_000e6);
         weth.mint(user, 100e18);
+        wbtc.mint(user, 100e8);
         vm.startPrank(user);
         usdc.approve(address(pool), type(uint256).max);
         weth.approve(address(pool), type(uint256).max);
+        wbtc.approve(address(pool), type(uint256).max);
         vm.stopPrank();
     }
 
@@ -135,6 +144,19 @@ contract ControllerTest is Test {
 
     function _createCall() internal returns (address) {
         address oToken = factory.createOToken(address(weth), address(usdc), address(weth), strikePrice, expiry, false);
+        whitelist.whitelistOToken(oToken);
+        return oToken;
+    }
+
+    function _createBtcPut() internal returns (address) {
+        address oToken = factory.createOToken(address(wbtc), address(usdc), address(usdc), btcStrikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+        return oToken;
+    }
+
+    function _createBtcCall() internal returns (address) {
+        address oToken =
+            factory.createOToken(address(wbtc), address(usdc), address(wbtc), btcStrikePrice, expiry, false);
         whitelist.whitelistOToken(oToken);
         return oToken;
     }
@@ -222,7 +244,7 @@ contract ControllerTest is Test {
 
         vm.prank(user);
         controller.settleVault(user, vaultId);
-        assertEq(usdc.balanceOf(user), 100_000e6);
+        assertEq(usdc.balanceOf(user), 1_000_000e6);
 
         vm.prank(buyer);
         controller.redeem(oToken, 1e8);
@@ -245,7 +267,7 @@ contract ControllerTest is Test {
         // Physical settlement: ITM put → user gets 0 collateral back
         vm.prank(user);
         controller.settleVault(user, vaultId);
-        assertEq(usdc.balanceOf(user), 98_000e6); // 100_000 - 2000 deposited, 0 returned
+        assertEq(usdc.balanceOf(user), 998_000e6); // 1_000_000 - 2000 deposited, 0 returned
 
         // Buyer redeems full collateral (physical settlement payout)
         vm.prank(buyer);
@@ -491,7 +513,7 @@ contract ControllerTest is Test {
         vm.prank(user);
         controller.settleVault(user, vaultId);
 
-        assertEq(usdc.balanceOf(user), 100_000e6 - 1e6); // deposited 1 USDC, got 0 back
+        assertEq(usdc.balanceOf(user), 1_000_000e6 - 1e6); // deposited 1 USDC, got 0 back
     }
 
     // --- Collateral Asset Validation (Finding 1 fix) ---
@@ -570,5 +592,126 @@ contract ControllerTest is Test {
         vm.prank(user);
         vm.expectRevert(Controller.OTokenNotWhitelisted.selector);
         controller.redeem(fakeOToken, 1e8);
+    }
+
+    // --- WBTC (8-decimal underlying): PUT Lifecycle ---
+
+    function test_btcPutLifecycle_expireOTM() public {
+        address oToken = _createBtcPut();
+
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 90_000e6);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        OToken(oToken).transfer(buyer, 1e8);
+        vm.stopPrank();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(wbtc), expiry, 95_000e8);
+
+        vm.prank(user);
+        controller.settleVault(user, vaultId);
+        assertEq(usdc.balanceOf(user), 1_000_000e6); // 90k returned
+
+        vm.prank(buyer);
+        controller.redeem(oToken, 1e8);
+        assertEq(usdc.balanceOf(buyer), 0);
+    }
+
+    function test_btcPutLifecycle_expireITM() public {
+        address oToken = _createBtcPut();
+
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(usdc), 90_000e6);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        OToken(oToken).transfer(buyer, 1e8);
+        vm.stopPrank();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(wbtc), expiry, 80_000e8);
+
+        vm.prank(user);
+        controller.settleVault(user, vaultId);
+        assertEq(usdc.balanceOf(user), 910_000e6); // 1M - 90k deposited, 0 returned
+
+        vm.prank(buyer);
+        controller.redeem(oToken, 1e8);
+        assertEq(usdc.balanceOf(buyer), 90_000e6);
+    }
+
+    // --- WBTC (8-decimal underlying): CALL Lifecycle ---
+
+    function test_btcCallLifecycle_expireOTM() public {
+        address oToken = _createBtcCall();
+
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        // 1 WBTC = 1e8 (8 decimals). 1 option requires 1 WBTC.
+        controller.depositCollateral(user, vaultId, address(wbtc), 1e8);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        OToken(oToken).transfer(buyer, 1e8);
+        vm.stopPrank();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(wbtc), expiry, 85_000e8);
+
+        vm.prank(user);
+        controller.settleVault(user, vaultId);
+        assertEq(wbtc.balanceOf(user), 100e8); // 1 WBTC returned
+
+        vm.prank(buyer);
+        controller.redeem(oToken, 1e8);
+        assertEq(wbtc.balanceOf(buyer), 0);
+    }
+
+    function test_btcCallLifecycle_expireITM() public {
+        address oToken = _createBtcCall();
+
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(wbtc), 1e8);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        OToken(oToken).transfer(buyer, 1e8);
+        vm.stopPrank();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(wbtc), expiry, 100_000e8);
+
+        vm.prank(user);
+        controller.settleVault(user, vaultId);
+        assertEq(wbtc.balanceOf(user), 99e8); // 100 - 1, 0 returned
+
+        vm.prank(buyer);
+        controller.redeem(oToken, 1e8);
+        assertEq(wbtc.balanceOf(buyer), 1e8);
+    }
+
+    // --- WBTC: Collateral math edge cases ---
+
+    function test_btcCallRequiresExact1BtcPerOption() public {
+        address oToken = _createBtcCall();
+
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        // Deposit 0.99 WBTC — should fail (needs exactly 1e8)
+        controller.depositCollateral(user, vaultId, address(wbtc), 99e6);
+
+        vm.expectRevert(Controller.InsufficientCollateral.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        vm.stopPrank();
+    }
+
+    function test_btcCallFractionalOption() public {
+        address oToken = _createBtcCall();
+
+        vm.startPrank(user);
+        uint256 vaultId = controller.openVault(user);
+        // 0.5 BTC option needs 0.5 BTC collateral = 5e7
+        controller.depositCollateral(user, vaultId, address(wbtc), 5e7);
+        controller.mintOtoken(user, vaultId, oToken, 5e7, user);
+        vm.stopPrank();
+
+        assertEq(OToken(oToken).balanceOf(user), 5e7);
     }
 }
