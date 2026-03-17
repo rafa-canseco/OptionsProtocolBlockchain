@@ -490,6 +490,11 @@
   },
   {
     "type": "error",
+    "name": "OnlyOwnerOrFactory",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OnlyPendingOwner",
     "inputs": []
   },

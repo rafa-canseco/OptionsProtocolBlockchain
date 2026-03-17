@@ -132,6 +132,10 @@ contract DeployBeta is Script {
     }
 
     function _configure(address deployer) internal {
+        // Set deployer as operator on factory and oracle
+        factory.setOperator(deployer);
+        oracle.setOperator(deployer);
+
         // Whitelist deployer as MM
         settler.setWhitelistedMM(deployer, true);
 
