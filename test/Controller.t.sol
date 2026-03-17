@@ -714,4 +714,79 @@ contract ControllerTest is Test {
 
         assertEq(OToken(oToken).balanceOf(user), 5e7);
     }
+
+    // --- UnsupportedDecimals guard tests ---
+
+    function test_revertPutCollateralTooFewDecimals() public {
+        MockERC20 lowDec = new MockERC20("Low", "LOW", 5);
+        whitelist.whitelistUnderlying(address(weth));
+        whitelist.whitelistCollateral(address(lowDec));
+        whitelist.whitelistProduct(address(weth), address(usdc), address(lowDec), true);
+        address oToken = factory.createOToken(address(weth), address(usdc), address(lowDec), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        lowDec.mint(user, 1_000_000e5);
+        vm.startPrank(user);
+        lowDec.approve(address(pool), type(uint256).max);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(lowDec), 1_000_000e5);
+        vm.expectRevert(Controller.UnsupportedDecimals.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        vm.stopPrank();
+    }
+
+    function test_revertPutCollateralTooManyDecimals() public {
+        MockERC20 highDec = new MockERC20("High", "HIGH", 17);
+        whitelist.whitelistCollateral(address(highDec));
+        whitelist.whitelistProduct(address(weth), address(usdc), address(highDec), true);
+        address oToken = factory.createOToken(address(weth), address(usdc), address(highDec), strikePrice, expiry, true);
+        whitelist.whitelistOToken(oToken);
+
+        highDec.mint(user, 1_000_000e17);
+        vm.startPrank(user);
+        highDec.approve(address(pool), type(uint256).max);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(highDec), 1_000_000e17);
+        vm.expectRevert(Controller.UnsupportedDecimals.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        vm.stopPrank();
+    }
+
+    function test_revertCallCollateralTooFewDecimals() public {
+        MockERC20 lowDec = new MockERC20("Low", "LOW", 7);
+        whitelist.whitelistUnderlying(address(lowDec));
+        whitelist.whitelistCollateral(address(lowDec));
+        whitelist.whitelistProduct(address(lowDec), address(usdc), address(lowDec), false);
+        address oToken =
+            factory.createOToken(address(lowDec), address(usdc), address(lowDec), strikePrice, expiry, false);
+        whitelist.whitelistOToken(oToken);
+
+        lowDec.mint(user, 1_000_000e7);
+        vm.startPrank(user);
+        lowDec.approve(address(pool), type(uint256).max);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(lowDec), 1_000_000e7);
+        vm.expectRevert(Controller.UnsupportedDecimals.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        vm.stopPrank();
+    }
+
+    function test_revertCallCollateralTooManyDecimals() public {
+        MockERC20 highDec = new MockERC20("High", "HIGH", 19);
+        whitelist.whitelistUnderlying(address(highDec));
+        whitelist.whitelistCollateral(address(highDec));
+        whitelist.whitelistProduct(address(highDec), address(usdc), address(highDec), false);
+        address oToken =
+            factory.createOToken(address(highDec), address(usdc), address(highDec), strikePrice, expiry, false);
+        whitelist.whitelistOToken(oToken);
+
+        highDec.mint(user, 1_000_000e19);
+        vm.startPrank(user);
+        highDec.approve(address(pool), type(uint256).max);
+        uint256 vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, address(highDec), 1_000_000e19);
+        vm.expectRevert(Controller.UnsupportedDecimals.selector);
+        controller.mintOtoken(user, vaultId, oToken, 1e8, user);
+        vm.stopPrank();
+    }
 }

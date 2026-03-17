@@ -597,12 +597,12 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         if (ot.isPut()) {
             contraAsset = ot.underlying();
             uint256 ud = IERC20Metadata(contraAsset).decimals();
-            if (ud < 8) revert UnsupportedDecimals();
+            if (ud < 8 || ud > 18) revert UnsupportedDecimals();
             contraAmount = amount * (10 ** (ud - 8));
         } else {
             contraAsset = ot.strikeAsset();
             uint256 sd = IERC20Metadata(contraAsset).decimals();
-            if (sd > 16) revert UnsupportedDecimals();
+            if (sd < 6 || sd > 16) revert UnsupportedDecimals();
             contraAmount = (amount * strike) / (10 ** (16 - sd));
         }
 

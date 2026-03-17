@@ -255,10 +255,10 @@ contract Controller is Initializable, UUPSUpgradeable {
     function _getRequiredCollateral(OToken oToken, uint256 _amount) internal view returns (uint256) {
         uint256 cd = IERC20Metadata(oToken.collateralAsset()).decimals();
         if (oToken.isPut()) {
-            if (cd > 16) revert UnsupportedDecimals();
+            if (cd < 6 || cd > 16) revert UnsupportedDecimals();
             return (_amount * oToken.strikePrice()) / (10 ** (16 - cd));
         } else {
-            if (cd < 8) revert UnsupportedDecimals();
+            if (cd < 8 || cd > 18) revert UnsupportedDecimals();
             return _amount * (10 ** (cd - 8));
         }
     }
@@ -268,11 +268,11 @@ contract Controller is Initializable, UUPSUpgradeable {
         uint256 cd = IERC20Metadata(oToken.collateralAsset()).decimals();
 
         if (oToken.isPut()) {
-            if (cd > 16) revert UnsupportedDecimals();
+            if (cd < 6 || cd > 16) revert UnsupportedDecimals();
             if (_expiryPrice >= strike) return 0;
             return (_amount * strike) / (10 ** (16 - cd));
         } else {
-            if (cd < 8) revert UnsupportedDecimals();
+            if (cd < 8 || cd > 18) revert UnsupportedDecimals();
             if (_expiryPrice <= strike) return 0;
             return _amount * (10 ** (cd - 8));
         }
