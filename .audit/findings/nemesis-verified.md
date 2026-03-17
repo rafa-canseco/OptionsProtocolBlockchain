@@ -1,277 +1,342 @@
-# N E M E S I S — Verified Findings (Post-Operator-Role Audit)
-
-**Date:** 2026-03-08
-**Commit:** `fix/access-control-operator-roles` branch (post-operator fix)
-**Auditor:** Nemesis (Feynman + State Inconsistency iterative loop)
+# N E M E S I S — Verified Findings
 
 ## Scope
 
 - **Language:** Solidity 0.8.24
 - **Modules analyzed:** AddressBook, BatchSettler, Controller, MarginPool, Oracle, OToken, OTokenFactory, Whitelist
-- **Functions analyzed:** 62 external/public functions
-- **Coupled state pairs mapped:** 18
-- **Mutation paths traced:** 34
-- **Nemesis loop iterations:** 3 (Pass 1 Feynman → Pass 2 State → Pass 3 Feynman targeted)
+- **Functions analyzed:** 34
+- **Coupled state pairs mapped:** 11 (P1-P6 original + P7-P11 discovered)
+- **Mutation paths traced:** 42
+- **Nemesis loop iterations:** 4 (Pass 1 Feynman full, Pass 2 State full, Pass 3 Feynman targeted, Pass 4 State targeted -- converged)
+
+## Nemesis Map (Phase 1 Cross-Reference)
+
+| Coupled Pair | State A | State B | Invariant |
+|---|---|---|---|
+| P1 | vault.collateralAmount | MarginPool.balanceOf | sum(collateral) <= pool balance |
+| P2 | vault.shortAmount | oToken.totalSupply | sum(shortAmount) = totalSupply |
+| P3 | mmOTokenBalance | oToken.balanceOf(settler) | sum(mmBalances) <= actualBalance |
+| P4 | vaultSettled | collateral transfer | settled=true BEFORE transfer |
+| P5 | quoteState fills | mmOTokenBalance | each fill -> matching increment |
+| P6 | vaultMM | mmOTokenBalance | clearMMBalance targets correct MM |
+| P7 | pool.balanceOf | pending ITM payouts | pool >= sum(unredeemed ITM payouts) |
+| P8 | _calculatePayout | binary protocol type | payout is always 0 or full collateral |
+| P9 | systemFullyPaused | MM redemption paths | all redemption blocked when paused |
+| P10 | protocolFeeBps | treasury address | feeBps > 0 needs treasury != address(0) |
+| P11 | oToken.balanceOf(settler) | sum(mmOTokenBalance) | actual >= sum(ledger) always |
 
 ## Verification Summary
 
 | ID | Source | Coupled Pair | Breaking Op | Severity | Verdict |
 |----|--------|-------------|-------------|----------|---------|
-| NM-001 | Cross-feed P1→P2→P3 | mmOTokenBal ↔ settler aggregate bal | emergencyWithdrawVault | HIGH | TRUE POS |
-| NM-002 | Feynman-only | Oracle deviation config | setExpiryPrice | LOW | TRUE POS |
-| NM-003 | State-only | vault.shortAmount ghost | emergencyWithdrawVault | LOW | TRUE POS |
-| NM-004 | Feynman-only | setPartialPauser(0) | setPartialPauser | LOW | TRUE POS |
-| NM-005 | State-only | Product whitelist unused | — | INFO | TRUE POS |
-| NM-006 | State-only | No oToken de-whitelist | — | INFO | TRUE POS |
-
----
+| NM-001 | Feynman->State (P1->P2) | P1 + P7 | emergencyWithdrawVault | HIGH | TRUE POS |
+| NM-002 | State->Feynman (P2->P3) | P2 + P3 + P9 | ctrl.redeem notFullyPaused | MEDIUM | TRUE POS |
+| NM-003 | Feynman only | P1 | depositCollateral | MEDIUM | TRUE POS (conditional) |
+| NM-004 | Loop P2->P3 masking code | P3 + P6 | clearMMBalanceForVault | MEDIUM | TRUE POS |
+| NM-005 | Feynman only | P3 | mmSelfRedeem | LOW | TRUE POS |
 
 ## Verified Findings (TRUE POSITIVES only)
 
-### NM-001: Emergency Withdrawal Cross-Vault Double-Claim via Aggregate Balance Check
+---
+
+### Finding NM-001: Emergency withdrawal returns full collateral without deducting ITM value owed to market maker
 
 **Severity:** HIGH
-**Source:** Cross-feed — Feynman Pass 1 exposed the aggregate check assumption, State Pass 2 mapped the coupled pair gap, Feynman Pass 3 constructed the exploit sequence.
-**Verification:** Deep code trace + manual scenario walkthrough
+**Source:** Cross-feed Pass 1 (Feynman F-004) -> Pass 2 (State SI-002)
+**Verification:** Code trace (Controller.sol L318, L349 vs L204)
 
-**Coupled Pair:**
-- State A: `BatchSettler.mmOTokenBalance[mm][oToken]` — per-MM ledger
-- State B: `OToken.balanceOf(batchSettler)` — aggregate token balance
+**Coupled Pair:** P1 (vault.collateralAmount <-> pool balance) + P7 (pool balance <-> pending ITM payouts)
+**Invariant:** Collateral returned to vault writer should exclude ITM payout owed to option buyer
 
-**Invariant:** `sum(mmOTokenBalance[*][oToken]) == OToken.balanceOf(settler)`
+**Feynman Question that exposed it:**
+> "WHY does settleVault compute `collateralToReturn = collateralAmount - payout` but emergencyWithdrawVault uses `amount = vault.collateralAmount` (the full amount)?"
 
-**Root Cause:** `Controller.emergencyWithdrawVault()` at line 329 checks the **aggregate** `ot.balanceOf(settler)` against a single vault's `vault.shortAmount`. Because oTokens are fungible, the aggregate balance includes oTokens from ALL vaults for that series. When one vault's MM has already had its oTokens redeemed, the aggregate balance still includes other vaults' oTokens, masking the redemption.
+**State Mapper gap that confirmed it:**
+> settleVault deducts ITM value; emergencyWithdrawVault does not. Parallel path mismatch on P1+P7.
 
-**Breaking Operation:** `Controller.emergencyWithdrawVault()` at `Controller.sol:307`
-
-```solidity
-// Line 324-329 — THE BUG
-uint256 settlerBal = ot.balanceOf(settler);  // AGGREGATE balance
-if (settlerBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
-```
+**Breaking Operation:** `Controller.emergencyWithdrawVault` at `Controller.sol:309-352`
+- Sets `amount = vault.collateralAmount` (L318) -- full amount, no ITM deduction
+- Transfers full amount to vault owner (L349)
+- Burns MM's oTokens (L340) and clears MM ledger (L342) -- destroying the MM's claim
 
 **Trigger Sequence:**
-
-```
-Setup:
-  Vault A (Alice): shortAmount=100e8, collateral=100e18 WETH, vaultMM=MM1
-  Vault B (Bob):   shortAmount=100e8, collateral=100e18 WETH, vaultMM=MM2
-  BatchSettler holds 200e8 oTokens total
-  mmOTokenBalance[MM1]=100e8, mmOTokenBalance[MM2]=100e8
-  MarginPool holds 200e18 WETH
-
-Step 1: Option expires ITM (call, strike=3000, price=4000)
-Step 2: Oracle.setExpiryPrice() sets price
-
-Step 3: operatorRedeemForMM(MM1, [oToken], [100e8])
-  → mmOTokenBalance[MM1] = 0
-  → ctrl.redeem() burns 100e8 from settler (settler now has 100e8)
-  → Binary payout: 100e8 * 1e10 = 100e18 WETH
-  → MarginPool sends 100e18 WETH → settler → MM1
-  → MarginPool now has 100e18 WETH
-
-Step 4: Owner calls setSystemFullyPaused(true)
-
-Step 5: Alice calls emergencyWithdrawVault(1)
-  → settlerBal = ot.balanceOf(settler) = 100e8  (Bob's tokens!)
-  → 100e8 >= 100e8 = vault.shortAmount → CHECK PASSES
-  → Burns 100e8 from settler → settler has 0
-  → clearMMBalanceForVault: mm=MM1, balance=0, toClear=0 (no-op)
-  → MarginPool.transferToUser(WETH, Alice, 100e18)
-  → MarginPool now has 0 WETH
-
-Step 6: Bob calls emergencyWithdrawVault(1)
-  → settlerBal = 0 < 100e8 → revert OTokensAlreadyRedeemed
-  → Bob's 100e18 WETH is LOST
-```
+1. User writes a put option at strike $2000, deposits $2000 USDC as collateral
+2. MM buys the put via executeOrder (oTokens custodied at settler, MM pays premium)
+3. ETH drops to $1000 -- put is deep ITM
+4. Protocol owner calls `setSystemFullyPaused(true)` (legitimate emergency)
+5. User calls `emergencyWithdrawVault(vaultId)`
+6. User receives $2000 USDC back (should receive $0 for a fully ITM put)
+7. MM's oTokens are burned -- MM loses both the premium paid AND the $2000 ITM value
 
 **Consequence:**
-- Alice extracts 100e18 WETH (full collateral) despite her MM's oTokens being fully redeemed (payout already sent from MarginPool)
-- MarginPool drained of 200e18 WETH total: 100e18 to MM1 (redeem) + 100e18 to Alice (emergency)
-- Bob cannot withdraw his 100e18 WETH — funds stolen from his vault
-- Net: one vault owner profits at another's expense through cross-vault accounting gap
-
-**Preconditions:**
-1. Multiple vaults exist for the same oToken series
-2. Partial or full redemption of one vault's MM oTokens occurs (option must be expired + ITM)
-3. System gets fully paused AFTER the redemption
-4. The vault owner whose MM was redeemed calls emergencyWithdrawVault
+- Vault writer extracts collateral that rightfully belongs to option buyer (MM)
+- MM loses premium paid + ITM intrinsic value -- total economic loss
+- Once system is paused (even legitimately), ALL vault writers can exploit this for ANY ITM vault
+- The burned oTokens eliminate the MM's claim permanently -- cannot be recovered on unpause
 
 **Fix:**
-
-Replace the aggregate balance check with a per-MM balance check. The MM's `mmOTokenBalance` accurately tracks whether oTokens attributed to that MM have been redeemed:
-
 ```solidity
-// BEFORE (line 324-329):
-uint256 settlerBal = ot.balanceOf(settler);
-if (settlerBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
-
-// AFTER:
-address mm = IBatchSettler(settler).vaultMM(msg.sender, _vaultId);
-uint256 mmBal = IBatchSettler(settler).mmOTokenBalance(mm, vault.shortOtoken);
-if (mmBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
-```
-
-This check is conservative: if an MM has oTokens from multiple vaults and some were redeemed, the check blocks ALL that MM's vaults from emergency withdrawal (since we can't determine which vault's oTokens were redeemed due to fungibility). This is the safe behavior — it prevents over-extraction from MarginPool at the cost of potentially blocking some legitimate withdrawals.
-
-For the `mm == address(0)` (pre-migration vault) case, add a fallback to the aggregate check or skip the check entirely, since pre-migration vaults have no MM attribution.
-
----
-
-### NM-002: Oracle Price Deviation Validation Disabled by Default
-
-**Severity:** LOW
-**Source:** Feynman-only (Category 4: Assumptions)
-**Verification:** Code trace
-
-**Feynman Question:** "What is implicitly trusted about the operator when calling setExpiryPrice?"
-
-**Issue:** `Oracle._validatePriceDeviation()` returns immediately without validation in two cases:
-1. `priceDeviationThresholdBps == 0` (default after initialization)
-2. `priceFeed[_asset] == address(0)` (no Chainlink feed configured)
-
-```solidity
-// Oracle.sol:152-157
-function _validatePriceDeviation(address _asset, uint256 _price) internal view {
-    uint256 threshold = priceDeviationThresholdBps;
-    if (threshold == 0) return;           // DEFAULT — NO VALIDATION
-    address feed = priceFeed[_asset];
-    if (feed == address(0)) return;       // NO FEED — NO VALIDATION
-```
-
-**Consequence:** The operator (hot wallet bot) can submit ANY expiry price without Chainlink cross-validation until the owner explicitly configures the threshold and price feed. If the operator key is compromised, there are no on-chain guardrails.
-
-**Mitigation:** Owner must set `priceDeviationThresholdBps` (e.g., 1000 = 10%) and `priceFeed[asset]` for every traded asset BEFORE mainnet launch. Consider requiring non-zero threshold in `initialize()`.
-
----
-
-### NM-003: vault.shortAmount Not Zeroed After Emergency Withdrawal
-
-**Severity:** LOW
-**Source:** State-only (Pair 1 gap)
-**Verification:** Code trace
-
-**Issue:** `Controller.emergencyWithdrawVault()` burns oTokens from the settler and marks the vault as settled, but never zeros `vault.shortAmount` or `vault.collateralAmount`. These become ghost records.
-
-```solidity
-// Controller.sol:307-342
-// Burns oTokens (line 331), sets vaultSettled (line 338),
-// transfers collateral (line 340), but:
-// - vault.shortAmount remains unchanged
-// - vault.collateralAmount remains unchanged
-```
-
-**Impact:** LOW — The `vaultSettled` flag prevents any further operations on the vault, so the ghost data is not exploitable. However, off-chain systems reading `getVault()` may display stale data.
-
-**Fix (optional):** Add `vault.shortAmount = 0; vault.collateralAmount = 0;` before the settlement flag is set.
-
----
-
-### NM-004: setPartialPauser Accepts address(0)
-
-**Severity:** LOW
-**Source:** Feynman-only (Category 3: Consistency)
-**Verification:** Code trace
-
-**Feynman Question:** "WHY does setOperator validate against address(0) but setPartialPauser doesn't?"
-
-**Issue:** `Controller.setPartialPauser()` at line 273 accepts `address(0)`, which effectively disables the partial pauser role. Only the owner can then toggle partial pause.
-
-```solidity
-// Controller.sol:273-276
-function setPartialPauser(address _pauser) external onlyOwner {
-    emit PartialPauserUpdated(partialPauser, _pauser);
-    partialPauser = _pauser;  // No zero-address check
+// In emergencyWithdrawVault, compute payout like settleVault does:
+uint256 amount;
+if (vault.shortOtoken != address(0) && vault.shortAmount > 0) {
+    OToken oToken = OToken(vault.shortOtoken);
+    Oracle oracle = Oracle(addressBook.oracle());
+    (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(
+        oToken.underlying(), oToken.expiry()
+    );
+    if (isSet && block.timestamp >= oToken.expiry()) {
+        uint256 payout = _calculatePayout(oToken, vault.shortAmount, expiryPrice);
+        amount = payout >= vault.collateralAmount
+            ? 0
+            : vault.collateralAmount - payout;
+    } else {
+        // Pre-expiry or price not set: return full collateral
+        // (option not yet settleable, no ITM value determinable)
+        amount = vault.collateralAmount;
+    }
+    // ... burn oTokens, clear MM balance ...
+} else {
+    amount = vault.collateralAmount;
 }
 ```
 
-**Impact:** LOW — Owner can still toggle pause directly. This is likely acceptable behavior (disable partial pauser by setting to 0) but inconsistent with other setter patterns in the codebase.
+---
+
+### Finding NM-002: No MM redemption path exists when system is fully paused after settlement
+
+**Severity:** MEDIUM
+**Source:** Cross-feed Pass 2 (State SI-003) -- discovered via parallel path comparison
+**Verification:** Code trace (BatchSettler.sol L670 -> Controller.sol L215)
+
+**Coupled Pair:** P2 (vault.shortAmount <-> oToken.totalSupply) + P3 (mmOTokenBalance <-> balance) + P9 (systemFullyPaused <-> redemption availability)
+**Invariant:** If vault writers can extract during pause, option buyers should also have a path
+
+**Feynman Question that exposed it:**
+> "WHY does emergencyWithdrawVault work during full pause (vault writer path) but ALL MM redemption paths (mmSelfRedeem, operatorRedeemForMM) are blocked?"
+
+**State Mapper gap that confirmed it:**
+> All MM paths go through ctrl.redeem() which has `notFullyPaused`. No alternative redemption path exists for MMs during full pause.
+
+**Breaking Operation:** `Controller.redeem` at `Controller.sol:215` has `notFullyPaused` modifier
+- `mmSelfRedeem` -> `ctrl.redeem` -> blocked
+- `operatorRedeemForMM._redeemForMM` -> `ctrl.redeem` -> blocked
+
+**Trigger Sequence:**
+1. Option expires ITM
+2. Operator calls `batchSettleVaults` -- vault settled, ITM payout stays in MarginPool
+3. Owner calls `setSystemFullyPaused(true)` before MM can redeem
+4. MM tries `mmSelfRedeem` -> reverts (`notFullyPaused`)
+5. Operator tries `operatorRedeemForMM` -> reverts (same)
+6. MM's ITM payout locked in pool indefinitely until unpause
+
+**Consequence:**
+- MM's ITM payout is inaccessible during full pause (denial of access, not theft)
+- Asymmetry: vault writers have an emergency path (`emergencyWithdrawVault`), option buyers do not
+- If pause is extended (governance dispute, key loss), MM funds are locked indefinitely
+- Reverts on unpause, so funds are not permanently lost unless pause is permanent
+
+**Fix:**
+Add an emergency redemption path in BatchSettler that bypasses Controller.redeem during full pause, OR remove `notFullyPaused` from Controller.redeem (since settled vaults have already released their collateral, redemption during pause is safe).
 
 ---
 
-### NM-005: Product Whitelist Feature Is Dead Code
+### Finding NM-003: Fee-on-transfer tokens cause vault collateral over-accounting
 
-**Severity:** INFO
-**Source:** State-only (Pair 9 observation)
-**Verification:** Code trace + grep
+**Severity:** MEDIUM (conditional -- only exploitable if FOT token is whitelisted as collateral)
+**Source:** Feynman only (F-002)
+**Verification:** Code trace (Controller.sol L153, MarginPool.sol L42)
 
-**Issue:** `Whitelist.sol` has `whitelistProduct()` and `isProductWhitelisted()` functions, but nothing in the protocol calls `isProductWhitelisted()` during oToken creation or vault operations. The factory auto-whitelists oTokens via `whitelistOToken()`, and the Controller only checks `isWhitelistedOToken()`.
+**Coupled Pair:** P1 (vault.collateralAmount <-> MarginPool actual balance)
+**Invariant:** vault.collateralAmount must equal actual tokens received by pool
 
-The product whitelist is a defense-in-depth feature that is not wired into the system.
+**Breaking Operation:** `Controller.depositCollateral` at `Controller.sol:138-158`
+- Records `vault.collateralAmount += _amount` (L153) -- the requested amount
+- Pool receives `safeTransferFrom(_from, pool, _amount)` (MarginPool L42) -- actual amount may be less
 
----
+**Trigger Sequence:**
+1. Owner whitelists a fee-on-transfer token as collateral (configuration error)
+2. User deposits 100 tokens, 2% fee: pool receives 98
+3. `vault.collateralAmount` records 100
+4. Option expires OTM, `settleVault` returns `collateralToReturn = 100`
+5. Pool tries `safeTransfer(user, 100)` but only has 98 (from this vault)
+6. If pool has tokens from other vaults, it drains them; if not, reverts
 
-### NM-006: No Mechanism to De-Whitelist oTokens
+**Consequence:**
+- Pool insolvency: earlier settlers drain funds belonging to later settlers
+- Current deployment uses USDC/WETH (not FOT) -- no immediate risk
+- Risk materializes only if FOT token is whitelisted in the future
 
-**Severity:** INFO
-**Source:** State-only (Pair 9 observation)
-**Verification:** Code trace
-
-**Issue:** `Whitelist.whitelistOToken()` sets `isWhitelistedOToken[oToken] = true` but there is no function to set it back to `false`. Once whitelisted, an oToken remains whitelisted forever.
-
-**Impact:** If an oToken is created with incorrect parameters, it cannot be de-whitelisted. The partial pause mechanism can block new positions but cannot target specific oTokens.
-
----
-
-## Nemesis Loop Discovery Path
-
+**Fix:**
+```diff
+  function depositCollateral(...) external ... {
+      // ...
+-     vault.collateralAmount += _amount;
+-     MarginPool(addressBook.marginPool()).transferToPool(_asset, _owner, _amount);
++     uint256 balBefore = IERC20(_asset).balanceOf(addressBook.marginPool());
++     MarginPool(addressBook.marginPool()).transferToPool(_asset, _owner, _amount);
++     uint256 received = IERC20(_asset).balanceOf(addressBook.marginPool()) - balBefore;
++     vault.collateralAmount += received;
+  }
 ```
-Pass 1 (Feynman — full):
-  → Flagged emergencyWithdrawVault line 329 as SUSPECT
-    Q: "WHY does this check aggregate balanceOf instead of per-vault?"
-    Q: "What assumption does settlerBal >= vault.shortAmount encode?"
-    Answer: It assumes no oTokens from THIS vault have been redeemed.
-    But aggregate balance includes oTokens from OTHER vaults → masking.
-  → Flagged Oracle deviation bypass as LOW finding
-  → Flagged setPartialPauser(0) inconsistency
 
-Pass 2 (State — full, enriched by Pass 1):
-  → Mapped Pair 2: mmOTokenBalance ↔ OToken.balanceOf(settler)
-  → Traced all mutation points — found clearMMBalanceForVault only
-    updates ONE side (ledger), caller handles the other (burn)
-  → Cross-referenced with Feynman suspect: the aggregate check at
-    line 329 is the ROOT of the coupled pair gap
-  → Mapped Pair 1: vault.shortAmount ghost record
-  → Flagged product whitelist as dead code
+---
 
-Pass 3 (Feynman targeted — on Pass 2 gaps):
-  → Re-interrogated emergencyWithdrawVault with full state context:
-    Q: "Can an attacker CHOOSE a sequence to exploit the gap?"
-    → YES: constructed the 6-step trigger sequence (NM-001)
-    Q: "Does the aggregate check mask partial redemption?"
-    → YES: Bob's oTokens validate Alice's vault
-  → Verified with exact arithmetic: MarginPool drains to 0
-  → Proposed fix: per-MM balance check instead of aggregate
+### Finding NM-004: Cross-vault emergency withdrawal blocked by shared per-MM oToken balance
 
-CONVERGED: Pass 4 (State) produced no new findings.
+**Severity:** MEDIUM
+**Source:** Cross-feed Loop: Pass 2 masking code (min() in clearMMBalanceForVault) -> Pass 3 Feynman interrogation
+**Verification:** Code trace (Controller.sol L332-333, BatchSettler.sol L690-693)
+
+**Coupled Pair:** P3 (mmOTokenBalance <-> oToken.balanceOf(settler)) + P6 (vaultMM <-> mmOTokenBalance)
+**Invariant:** Each vault owner should be able to emergency withdraw independently
+
+**Feynman Question that exposed it:**
+> "WHY does clearMMBalanceForVault use `min(amount, balance)`? When would balance < amount?"
+
+**State Mapper gap that confirmed it:**
+> mmOTokenBalance is per-MM aggregate (not per-vault). Partial redemption from one vault's oTokens reduces the shared balance, blocking emergency withdrawal for another vault by the same MM.
+
+**Breaking Operation:** `Controller.emergencyWithdrawVault` at `Controller.sol:332-333`
+- Check: `mmBal = mmOTokenBalance[mm][oToken]; if (mmBal < vault.shortAmount) revert OTokensAlreadyRedeemed()`
+- mmBal is shared across ALL vaults for this MM+oToken combination
+
+**Trigger Sequence:**
+1. MM executes orders for vault A (100 oTokens) and vault B (100 oTokens), same oToken
+2. `mmOTokenBalance[mm][oToken]` = 200
+3. Operator redeems 50 via `operatorRedeemForMM` -> balance = 150
+4. System fully paused
+5. Vault A owner calls `emergencyWithdrawVault`: check passes (150 >= 100), burns 100, clears 100 -> balance = 50
+6. Vault B owner calls `emergencyWithdrawVault`: check FAILS (50 < 100) -> reverts with OTokensAlreadyRedeemed
+7. Vault B owner's collateral is locked
+
+**Consequence:**
+- Second vault owner cannot emergency withdraw even though their collateral is intact
+- Requires: same MM, same oToken, partial redemption before emergency, then multiple vault emergency withdrawals
+- Vault B owner must wait for unpause and normal settlement
+
+**Masking Code:**
+```solidity
+// BatchSettler.sol L691 -- the min() hides this:
+uint256 toClear = amount < balance ? amount : balance;
 ```
+
+**Fix:**
+Add per-vault-per-MM balance tracking:
+```solidity
+mapping(address => mapping(uint256 => mapping(address => uint256))) public vaultMMOTokenBalance;
+// Set in executeOrder: vaultMMOTokenBalance[owner][vaultId][oToken] = amount;
+// Use in clearMMBalanceForVault instead of aggregate mmOTokenBalance
+```
+
+---
+
+### Finding NM-005: De-whitelisted MM cannot self-redeem custodied oTokens
+
+**Severity:** LOW
+**Source:** Feynman only (F-007)
+**Verification:** Code trace (BatchSettler.sol L653)
+
+**Coupled Pair:** P3 (mmOTokenBalance stuck with no self-service exit)
+**Invariant:** MMs should always have a path to retrieve their custodied assets
+
+**Breaking Operation:** `BatchSettler.mmSelfRedeem` at `BatchSettler.sol:652`
+- First check: `if (!whitelistedMMs[msg.sender]) revert MMNotWhitelisted()`
+
+**Trigger Sequence:**
+1. MM is whitelisted, executes orders, oTokens custodied
+2. Owner calls `setWhitelistedMM(mm, false)` -- de-whitelists MM
+3. MM calls `mmSelfRedeem` after expiry + escapeDelay -> reverts
+4. MM depends on operator calling `operatorRedeemForMM` (no whitelist check)
+
+**Consequence:**
+- MM's funds require operator cooperation after de-whitelisting
+- Mitigated by `operatorRedeemForMM` which does NOT check whitelist status
+- If operator is uncooperative, MM's ITM payout is locked
+
+---
+
+## Feedback Loop Discoveries
+
+| ID | Found via | Description |
+|----|-----------|-------------|
+| NM-002 | State parallel path comparison (Pass 2) | Neither Feynman (focused on emergency) nor State alone (focused on coupled pairs) caught the asymmetry between writer emergency paths and buyer redemption paths. The parallel path comparison in Pass 2 revealed the mismatch. |
+| NM-004 | Pass 2 masking code -> Pass 3 Feynman "WHY" | The `min()` clamp in clearMMBalanceForVault was flagged as masking code by State Pass 2. Feynman Pass 3 interrogated "WHY would balance < amount?" and traced the cross-vault scenario where partial redemption blocks emergency withdrawal. |
 
 ## False Positives Eliminated
 
-| Candidate | Why Eliminated |
-|-----------|---------------|
-| quoteState fill advanced before mint | Solidity reverts entire tx on mint failure; fill counter rolls back atomically |
-| clearMMBalanceForVault one-sided mutation | By design — burn happens in caller (Controller). If clearMMBalanceForVault fails, entire emergencyWithdrawVault tx reverts |
-| vault.collateralAmount not zeroed after settle | vaultSettled flag prevents all re-operations; ghost data not actionable |
-| EIP-712 replay on chain fork | _domainSeparator recomputes on chain ID change (line 186-188) |
-| Flash loan callback manipulation | msg.sender == aavePool + initiator == address(this) checks sufficient; aavePool is owner-set |
-| OToken.transfer from settler by third party | No approvals granted; only code in settler controls token movement |
-| cancelQuote/cancelQuotes inconsistency | By design — documented in NatSpec. Single reverts on dup, batch skips |
+| ID | Original Claim | Reason for Elimination |
+|----|---------------|----------------------|
+| F-001 | Binary payout is a bug | By design -- protocol is binary options, not European |
+| F-003 | Stale vault.shortAmount | Mitigated by vaultSettled flag on all write paths |
+| F-006 | Shared pool cross-series drain | Under binary payout, each vault's collateral exactly covers max payout |
+| SI-001 | settleVault doesn't reserve payout in pool | Pool design is correct -- payout stays in pool implicitly |
+| SG-001 | Stale vault fields | View-only impact, gated by vaultSettled |
+| SG-002 | No per-series pool isolation | Correct under binary payout model |
+| SG-003 | Stuck unattributed oTokens | Self-harm only, no attacker benefit |
 
 ## Summary
 
-- **Total functions analyzed:** 62
-- **Coupled state pairs mapped:** 18
-- **Nemesis loop iterations:** 3
-- **Raw findings (pre-verification):** 0 C | 1 H | 0 M | 4 L/INFO
-- **Feedback loop discoveries:** 1 (NM-001 — found ONLY via Feynman→State→Feynman cross-feed)
-- **After verification:** 6 TRUE POSITIVE | 0 FALSE POSITIVE | 0 DOWNGRADED
-- **Final: 0 CRITICAL | 1 HIGH | 0 MEDIUM | 2 LOW | 2 INFO**
+- Total functions analyzed: 34
+- Coupled state pairs mapped: 11
+- Nemesis loop iterations: 4 (converged at Pass 4)
+- Raw findings (pre-verification): 1 HIGH | 4 MEDIUM | 2 LOW
+- Feedback loop discoveries: 2 (NM-002, NM-004 -- found ONLY via cross-feed)
+- After verification: 5 TRUE POSITIVE | 7 FALSE POSITIVE | 0 DOWNGRADED
+- **Final: 1 HIGH | 3 MEDIUM | 1 LOW**
 
 ---
 
-## Recommendation Priority
+## Addendum: PR #37 Decimal Scaling Verification (2026-03-17)
 
-1. **NM-001 (HIGH):** Fix the aggregate balance check in `emergencyWithdrawVault` before mainnet launch. Replace `ot.balanceOf(settler) >= vault.shortAmount` with a per-MM `mmOTokenBalance` check.
-2. **NM-002 (LOW):** Set `priceDeviationThresholdBps` and `priceFeed` for all traded assets before mainnet launch.
-3. **NM-003–006:** Address at convenience; not blocking for mainnet.
+**Scope:** Focused re-audit of Controller.sol and BatchSettler.sol decimal scaling changes introduced by PR #37 (WBTC support), plus re-verification of pre-existing emergencyWithdrawVault/settlement logic.
+
+**Branch:** `fix/b1n-182-controller-decimal-scaling`
+
+### PR #37 Changes Audited
+
+1. **Controller._getRequiredCollateral (L255-264):** Added bidirectional decimal bounds
+   - Put path: `if (cd < 6 || cd > 16) revert UnsupportedDecimals()`
+   - Call path: `if (cd < 8 || cd > 18) revert UnsupportedDecimals()`
+
+2. **Controller._calculatePayout (L266-279):** Same bounds added to payout calculation
+
+3. **BatchSettler._executePhysicalRedeem (L597-607):** Decimal-aware contra amount computation
+   - Put: `contraAmount = amount * (10 ** (ud - 8))` with `ud in [8,18]`
+   - Call: `contraAmount = (amount * strike) / (10 ** (16 - sd))` with `sd in [6,16]`
+
+### Numerical Verification Matrix
+
+| Scenario | Formula | Input | Result | Correct? |
+|---|---|---|---|---|
+| PUT collateral, USDC (6dec) | `(1e8 * 2500e8) / 10^10` | strike=$2500 | 2500e6 | Yes |
+| PUT collateral, 16dec token | `(1e8 * 2500e8) / 10^0` | strike=$2500 | 2.5e19 | Yes |
+| CALL collateral, WBTC (8dec) | `1e8 * 10^0` | 1 option | 1e8 (1 BTC) | Yes |
+| CALL collateral, WETH (18dec) | `1e8 * 10^10` | 1 option | 1e18 (1 ETH) | Yes |
+| Physical PUT contra, WETH (18dec) | `1e8 * 10^10` | 1 option | 1e18 (1 ETH) | Yes |
+| Physical PUT contra, WBTC (8dec) | `1e8 * 10^0` | 1 option | 1e8 (1 BTC) | Yes |
+| Physical CALL contra, USDC (6dec) | `(1e8 * 90000e8) / 10^10` | strike=$90k | 90000e6 | Yes |
+
+### Cross-Contract Consistency
+
+| Check | Controller | BatchSettler | Match? |
+|---|---|---|---|
+| Put collateral bounds | `cd in [6,16]` | N/A (collateral handled by Controller) | -- |
+| Call collateral bounds | `cd in [8,18]` | N/A (collateral handled by Controller) | -- |
+| Put contra (underlying) bounds | N/A | `ud in [8,18]` (same asset class as call collateral) | Yes |
+| Call contra (strike) bounds | N/A | `sd in [6,16]` (same asset class as put collateral) | Yes |
+| Put payout = put required collateral | `(amt*strike)/10^(16-cd)` | N/A | Identical formulas |
+| Call payout = call required collateral | `amt*10^(cd-8)` | N/A | Identical formulas |
+
+### Overflow Analysis
+
+- Max realistic `amount * strikePrice`: ~1e16 * 1e14 = 1e30 (well under 2^256)
+- Max `amount * 10^10`: ~1e16 * 1e10 = 1e26 (safe)
+- Exponent ranges: Put `[0,10]`, Call `[0,10]` -- no underflow possible within bounds
+
+### Previously Reported _revertOnPanic Bug: FALSE POSITIVE
+
+A previous analysis claimed `_revertOnPanic` (BatchSettler.sol:719-727) was bugged because `mload(add(reason, 32))` loads 32 bytes including the panic code argument. Re-analysis confirms: for all standard Solidity panic codes (0x00-0x51), the uint256 argument's high 28 bytes are zero. The first 32 bytes of ABI-encoded Panic data produce `0x4e487b71` followed by 28 zero bytes, which correctly matches `_PANIC_SELECTOR` after bytes4 extraction.
+
+### PR #37 Verdict
+
+**All decimal scaling changes are SOUND.** No new findings. All 5 pre-existing findings (NM-001 through NM-005) remain unchanged and unaffected by PR #37.

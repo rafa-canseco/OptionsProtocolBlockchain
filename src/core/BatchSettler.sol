@@ -10,6 +10,7 @@ import "./Oracle.sol";
 import "../interfaces/IFlashLoanSimple.sol";
 import "../interfaces/ISwapRouter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -150,6 +151,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     error EscapeDelayTooShort();
     error OnlyController();
     error InsufficientSwapOutput();
+    error UnsupportedDecimals();
 
     // Panic(uint256) selector: 0x4e487b71
     bytes4 private constant _PANIC_SELECTOR = 0x4e487b71;
@@ -594,10 +596,14 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         uint256 contraAmount;
         if (ot.isPut()) {
             contraAsset = ot.underlying();
-            contraAmount = amount * 1e10;
+            uint256 ud = IERC20Metadata(contraAsset).decimals();
+            if (ud < 8 || ud > 18) revert UnsupportedDecimals();
+            contraAmount = amount * (10 ** (ud - 8));
         } else {
             contraAsset = ot.strikeAsset();
-            contraAmount = (amount * strike) / 1e10;
+            uint256 sd = IERC20Metadata(contraAsset).decimals();
+            if (sd < 6 || sd > 16) revert UnsupportedDecimals();
+            contraAmount = (amount * strike) / (10 ** (16 - sd));
         }
 
         bytes memory params = abi.encode(oToken, user, amount, slippageParam, mm);

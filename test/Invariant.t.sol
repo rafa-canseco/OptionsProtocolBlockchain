@@ -956,7 +956,8 @@ contract FullLifecycleInvariantTest is Test {
         weth = new MockERC20("WETH", "WETH", 18);
         priceFeed = new MockChainlinkFeed(2000e8);
         aavePool = new MockAavePool();
-        swapRouter = new MockSwapRouter(address(priceFeed), address(weth), address(usdc));
+        swapRouter = new MockSwapRouter(address(usdc));
+        swapRouter.setPriceFeed(address(weth), address(priceFeed));
     }
 
     function _deployProtocol() private {
@@ -1447,7 +1448,8 @@ contract PauseEmergencyInvariantTest is Test {
         weth = new MockERC20("WETH", "WETH", 18);
         priceFeed = new MockChainlinkFeed(2000e8);
         aavePool = new MockAavePool();
-        swapRouter = new MockSwapRouter(address(priceFeed), address(weth), address(usdc));
+        swapRouter = new MockSwapRouter(address(usdc));
+        swapRouter.setPriceFeed(address(weth), address(priceFeed));
     }
 
     function _deployProtocol() private {

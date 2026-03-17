@@ -33,10 +33,7 @@ contract UpgradeBatchSettler is Script {
         console.log("New BatchSettler impl:", address(newImpl));
 
         // 2. Upgrade proxy (no reinitializer needed — no new state)
-        BatchSettler(BATCH_SETTLER_PROXY).upgradeToAndCall(
-            address(newImpl),
-            ""
-        );
+        BatchSettler(BATCH_SETTLER_PROXY).upgradeToAndCall(address(newImpl), "");
         console.log("BatchSettler proxy upgraded");
 
         vm.stopBroadcast();
