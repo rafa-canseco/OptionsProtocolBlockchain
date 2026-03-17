@@ -76,7 +76,7 @@
         "internalType": "uint256"
       },
       {
-        "name": "maxCollateralSpent",
+        "name": "slippageParam",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -211,7 +211,7 @@
         "internalType": "uint256[]"
       },
       {
-        "name": "maxCollateralSpents",
+        "name": "slippageParams",
         "type": "uint256[]",
         "internalType": "uint256[]"
       },
@@ -691,7 +691,7 @@
         "internalType": "uint256"
       },
       {
-        "name": "maxCollateralSpent",
+        "name": "slippageParam",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -1534,6 +1534,11 @@
   },
   {
     "type": "error",
+    "name": "InsufficientSwapOutput",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidAddress",
     "inputs": []
   },
@@ -1663,5 +1668,10 @@
         "internalType": "bytes32"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "UnsupportedDecimals",
+    "inputs": []
   }
 ]

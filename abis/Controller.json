@@ -900,6 +900,11 @@
   },
   {
     "type": "error",
+    "name": "UnsupportedDecimals",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "VaultAlreadyHasShort",
     "inputs": []
   },
