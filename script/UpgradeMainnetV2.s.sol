@@ -32,23 +32,16 @@ import "../src/core/Whitelist.sol";
  */
 contract UpgradeMainnetV2 is Script {
     // --- Proxy addresses (from deployments-mainnet.json) ---
-    address constant CONTROLLER_PROXY =
-        0x2Ab6D1c41f0863Bc2324b392f1D8cF073cF42624;
-    address constant BATCH_SETTLER_PROXY =
-        0xd281ADdB8b5574360Fd6BFC245B811ad5C582a3B;
-    address constant ORACLE_PROXY =
-        0x09daa0194A3AF59b46C5443aF9C20fAd98347671;
-    address constant WHITELIST_PROXY =
-        0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A;
+    address constant CONTROLLER_PROXY = 0x2Ab6D1c41f0863Bc2324b392f1D8cF073cF42624;
+    address constant BATCH_SETTLER_PROXY = 0xd281ADdB8b5574360Fd6BFC245B811ad5C582a3B;
+    address constant ORACLE_PROXY = 0x09daa0194A3AF59b46C5443aF9C20fAd98347671;
+    address constant WHITELIST_PROXY = 0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A;
 
     // --- External addresses (Base mainnet) ---
-    address constant CBBTC =
-        0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf;
-    address constant USDC =
-        0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+    address constant CBBTC = 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf;
+    address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
     // cbBTC/USD Chainlink feed on Base
-    address constant CHAINLINK_CBBTC_USD =
-        0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D;
+    address constant CHAINLINK_CBBTC_USD = 0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D;
 
     function run() external {
         vm.startBroadcast();
@@ -57,18 +50,14 @@ contract UpgradeMainnetV2 is Script {
         Controller controllerImpl = new Controller();
         console.log("New Controller impl:", address(controllerImpl));
 
-        Controller(CONTROLLER_PROXY).upgradeToAndCall(
-            address(controllerImpl), ""
-        );
+        Controller(CONTROLLER_PROXY).upgradeToAndCall(address(controllerImpl), "");
         console.log("Controller proxy upgraded");
 
         // --- 2. Upgrade BatchSettler ---
         BatchSettler settlerImpl = new BatchSettler();
         console.log("New BatchSettler impl:", address(settlerImpl));
 
-        BatchSettler(BATCH_SETTLER_PROXY).upgradeToAndCall(
-            address(settlerImpl), ""
-        );
+        BatchSettler(BATCH_SETTLER_PROXY).upgradeToAndCall(address(settlerImpl), "");
         console.log("BatchSettler proxy upgraded");
 
         // --- 3. Register cbBTC in Oracle ---
