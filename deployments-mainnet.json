@@ -19,7 +19,7 @@
     "OTokenFactory": "0xC02828aB769edE49548315cb60d15189faB510A5",
     "Oracle": "0x14987C5e3D74206CF3e417FC181Cda01543351c2",
     "Whitelist": "0x5F3b652b2b258e36bc88C3Bdf3c4e1EcF04BCF00",
-    "BatchSettler": "0xe007479b32078525312bB9744fa8AAaC7e6BDBA3"
+    "BatchSettler": "0xAA2bcAF585AAd5831e8fBc5E13CA9a9F8233fFc9"
   },
   "config": {
     "operator": "0x0bbD599cEB63b4603c2F007c5122e33f7b12364c",
@@ -27,6 +27,9 @@
     "protocolFeeBps": 400,
     "escapeDelay": 259200,
     "swapFeeTier": 3000,
+    "assetSwapFeeTiers": {
+      "cbBTC": 500
+    },
     "priceDeviationThresholdBps": 1000,
     "maxOracleStaleness": 3600
   },

@@ -256,7 +256,9 @@ contract Controller is Initializable, UUPSUpgradeable {
         uint256 cd = IERC20Metadata(oToken.collateralAsset()).decimals();
         if (oToken.isPut()) {
             if (cd < 6 || cd > 16) revert UnsupportedDecimals();
-            return (_amount * oToken.strikePrice()) / (10 ** (16 - cd));
+            uint256 required = (_amount * oToken.strikePrice()) / (10 ** (16 - cd));
+            if (required == 0 && _amount > 0) revert InsufficientCollateral();
+            return required;
         } else {
             if (cd < 8 || cd > 18) revert UnsupportedDecimals();
             return _amount * (10 ** (cd - 8));

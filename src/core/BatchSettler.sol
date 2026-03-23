@@ -121,6 +121,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     event MMBalanceCleared(address indexed mm, address indexed oToken, uint256 amount);
     event ProtocolFeeBpsUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event SwapFeeTierUpdated(uint24 oldFeeTier, uint24 newFeeTier);
+    event AssetSwapFeeTierUpdated(address indexed asset, uint24 oldFeeTier, uint24 newFeeTier);
 
     // ===== Errors =====
 
@@ -225,6 +226,15 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         }
         emit SwapFeeTierUpdated(swapFeeTier, _feeTier);
         swapFeeTier = _feeTier;
+    }
+
+    function setAssetSwapFeeTier(address _asset, uint24 _feeTier) external onlyOwner {
+        if (_asset == address(0)) revert InvalidAddress();
+        if (_feeTier != 0 && _feeTier != 100 && _feeTier != 500 && _feeTier != 3000 && _feeTier != 10000) {
+            revert InvalidFeeTier();
+        }
+        emit AssetSwapFeeTierUpdated(_asset, assetSwapFeeTier[_asset], _feeTier);
+        assetSwapFeeTier[_asset] = _feeTier;
     }
 
     uint256 public constant MIN_ESCAPE_DELAY = 3 days;
@@ -487,6 +497,10 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
         IERC20(collateralAsset).forceApprove(swapRouter, collateralReceived);
 
+        address underlying = OToken(oToken).underlying();
+        uint24 feeTier = assetSwapFeeTier[underlying];
+        if (feeTier == 0) feeTier = swapFeeTier;
+
         bool isPut = OToken(oToken).isPut();
         if (isPut) {
             // Put: collateral=USDC, contra=WETH. Swap just enough USDC
@@ -496,7 +510,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
                     ISwapRouter.ExactOutputSingleParams({
                         tokenIn: collateralAsset,
                         tokenOut: contraAsset,
-                        fee: swapFeeTier,
+                        fee: feeTier,
                         recipient: address(this),
                         amountOut: repayAmount,
                         amountInMaximum: slippageParam,
@@ -517,7 +531,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
                     ISwapRouter.ExactInputSingleParams({
                         tokenIn: collateralAsset,
                         tokenOut: contraAsset,
-                        fee: swapFeeTier,
+                        fee: feeTier,
                         recipient: address(this),
                         amountIn: collateralReceived,
                         amountOutMinimum: slippageParam,
@@ -750,5 +764,8 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[33] private __gap;
+    /// @notice Per-asset swap fee tier override. Key = underlying asset.
+    mapping(address => uint24) public assetSwapFeeTier;
+
+    uint256[32] private __gap;
 }
