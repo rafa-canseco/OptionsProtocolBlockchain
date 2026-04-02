@@ -27,10 +27,15 @@ contract MarginPool is Initializable, UUPSUpgradeable {
     mapping(address asset => bool) public isAaveEnabled;
 
     address public operator;
+    mapping(address asset => address aToken) internal _aTokens;
+    address[] internal _aaveAssets;
 
     error OnlyController();
     error Unauthorized();
     error InvalidAddress();
+    error AaveNotConfigured();
+    error AaveNotDrained(address asset, uint256 remaining);
+    error AaveNotFullyDrained(address asset, uint256 aTokenBalance);
 
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
 
@@ -39,6 +44,12 @@ contract MarginPool is Initializable, UUPSUpgradeable {
         address indexed to,
         uint256 requested,
         uint256 transferred
+    );
+
+    event YieldHarvested(
+        address indexed asset,
+        address indexed recipient,
+        uint256 amount
     );
 
     modifier onlyController() {
@@ -84,10 +95,11 @@ contract MarginPool is Initializable, UUPSUpgradeable {
                 address aToken = _getAToken(_asset);
                 uint256 aBalance = IERC20(aToken).balanceOf(address(this));
                 uint256 transferAmt = fromAave < aBalance ? fromAave : aBalance;
-                IERC20(aToken).safeTransfer(_to, transferAmt);
                 if (transferAmt < fromAave) {
+                    totalDeposited[_asset] += (fromAave - transferAmt);
                     emit ATokenFallback(_asset, _to, fromAave, transferAmt);
                 }
+                IERC20(aToken).safeTransfer(_to, transferAmt);
             }
         }
 
@@ -102,7 +114,7 @@ contract MarginPool is Initializable, UUPSUpgradeable {
         return totalDeposited[_asset] + IERC20(_asset).balanceOf(address(this));
     }
 
-    function getTotalBalance(address _asset) external view returns (uint256) {
+    function getATokenBalance(address _asset) external view returns (uint256) {
         address aToken = _getAToken(_asset);
         return IERC20(aToken).balanceOf(address(this));
     }
@@ -125,13 +137,32 @@ contract MarginPool is Initializable, UUPSUpgradeable {
         if (yield_ == 0) return;
 
         aavePool.withdraw(_asset, yield_, yieldRecipient);
+        emit YieldHarvested(_asset, yieldRecipient, yield_);
     }
 
     // --- Admin Functions ---
 
-    /// @notice Drain all Aave deposits before changing the pool address.
+    /// @notice Set the Aave V3 Pool address.
+    ///         If an existing pool is configured, all tracked assets
+    ///         must be fully drained first.
     function setAavePool(address _aavePool) external onlyOwner {
         if (_aavePool == address(0)) revert InvalidAddress();
+        if (address(aavePool) != address(0)) {
+            for (uint256 i; i < _aaveAssets.length; i++) {
+                address asset = _aaveAssets[i];
+                uint256 remaining = totalDeposited[asset];
+                if (remaining > 0) {
+                    revert AaveNotDrained(asset, remaining);
+                }
+                address aToken = _aTokens[asset];
+                if (aToken != address(0)) {
+                    uint256 aBal = IERC20(aToken).balanceOf(address(this));
+                    if (aBal > 0) {
+                        revert AaveNotFullyDrained(asset, aBal);
+                    }
+                }
+            }
+        }
         aavePool = IAaveV3Pool(_aavePool);
     }
 
@@ -147,7 +178,22 @@ contract MarginPool is Initializable, UUPSUpgradeable {
     }
 
     function setAaveEnabled(address _asset, bool _enabled) external onlyOwner {
+        if (_enabled && address(aavePool) == address(0)) {
+            revert AaveNotConfigured();
+        }
+        if (_enabled && !isAaveEnabled[_asset]) {
+            _aaveAssets.push(_asset);
+        }
         isAaveEnabled[_asset] = _enabled;
+    }
+
+    /// @notice Withdraw all funds from Aave back to the pool for a
+    ///         given asset. Use before disabling Aave or migrating pools.
+    function drainAave(address _asset) external onlyOwner {
+        uint256 deposited = totalDeposited[_asset];
+        if (deposited == 0) return;
+        aavePool.withdraw(_asset, deposited, address(this));
+        totalDeposited[_asset] = 0;
     }
 
     function approveAave(address _asset) external onlyOwner {
@@ -160,13 +206,14 @@ contract MarginPool is Initializable, UUPSUpgradeable {
 
     // --- Internal ---
 
-    mapping(address asset => address aToken) internal _aTokens;
-
     function _getAToken(address _asset) internal view returns (address) {
         return _aTokens[_asset];
     }
 
     function setAToken(address _asset, address _aToken) external onlyOwner {
+        if (_asset == address(0) || _aToken == address(0)) {
+            revert InvalidAddress();
+        }
         _aTokens[_asset] = _aToken;
     }
 

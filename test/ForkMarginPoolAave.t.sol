@@ -50,14 +50,20 @@ interface IAavePoolFull {
  * @title ForkMarginPoolAave
  * @notice Fork tests for MarginPool Aave V3 integration on Base mainnet.
  *         Tests deposit → yield accrual → settlement → harvest with real Aave.
+ *         Pinned to a known-good block where Aave V3 rate model is stable.
  *
  *         Run:
- *         forge test --match-contract ForkMarginPoolAave --fork-url $BASE_RPC_URL -vvv
+ *         forge test --match-contract ForkMarginPoolAave \
+ *           --fork-url $BASE_RPC_URL --fork-block-number 25000000 -vvv
  */
 contract ForkMarginPoolAave is Test {
     // --- Base mainnet addresses ---
     address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
     address constant AAVE_V3_POOL = 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5;
+
+    // Pin to block 25_000_000 (~Feb 2025). Aave V3 rate model overflows
+    // at certain recent blocks due to extreme reserve parameters.
+    uint256 constant FORK_BLOCK = 25_000_000;
 
     // --- Protocol ---
     AddressBook addressBook;
@@ -73,6 +79,15 @@ contract ForkMarginPoolAave is Test {
     address aUsdc;
 
     function setUp() public {
+        // Skip if no fork is active (run with --fork-url to enable)
+        try vm.activeFork() {}
+        catch {
+            vm.skip(true);
+        }
+
+        // Pin to known-good block for Aave V3 stability
+        vm.rollFork(FORK_BLOCK);
+
         // Get aUSDC address from Aave
         IAavePoolFull aavePoolFull = IAavePoolFull(AAVE_V3_POOL);
         aUsdc = aavePoolFull.getReserveData(USDC).aTokenAddress;
@@ -93,7 +108,7 @@ contract ForkMarginPoolAave is Test {
             )
         );
 
-        // Configure Aave
+        // Configure Aave (empty array — no prior pool)
         pool.setAavePool(AAVE_V3_POOL);
         pool.setYieldRecipient(operator);
         pool.setAToken(USDC, aUsdc);

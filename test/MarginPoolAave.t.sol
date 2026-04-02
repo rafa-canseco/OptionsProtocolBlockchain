@@ -124,7 +124,7 @@ contract MarginPoolAaveTest is Test {
         vm.prank(user);
         usdc.approve(address(pool), type(uint256).max);
 
-        // Configure Aave on MarginPool
+        // Configure Aave on MarginPool (empty array — no prior pool)
         pool.setAavePool(address(aavePool));
         pool.setOperator(operator);
         pool.setYieldRecipient(operator);
@@ -216,13 +216,13 @@ contract MarginPoolAaveTest is Test {
     //                    YIELD VIEW FUNCTIONS
     // ============================================================
 
-    function test_getTotalBalance_includesYield() public {
+    function test_getATokenBalance_includesYield() public {
         vm.prank(controller);
         pool.transferToPool(address(usdc), user, 1000e6);
 
         aavePool.simulateYield(address(usdc), address(pool), 50e6);
 
-        assertEq(pool.getTotalBalance(address(usdc)), 1050e6);
+        assertEq(pool.getATokenBalance(address(usdc)), 1050e6);
     }
 
     function test_getAccruedYield_returnsYieldDelta() public {
@@ -396,6 +396,42 @@ contract MarginPoolAaveTest is Test {
         vm.prank(user);
         vm.expectRevert(MarginPool.Unauthorized.selector);
         pool.setAavePool(address(0x1));
+    }
+
+    function test_setAavePool_revertsIfNotDrained() public {
+        vm.prank(controller);
+        pool.transferToPool(address(usdc), user, 1000e6);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MarginPool.AaveNotDrained.selector,
+                address(usdc),
+                1000e6
+            )
+        );
+        pool.setAavePool(address(0x1));
+    }
+
+    function test_setAaveEnabled_revertsIfPoolNotSet() public {
+        // Deploy fresh pool (no aavePool configured)
+        MarginPool freshPool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()),
+                    abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        vm.expectRevert(MarginPool.AaveNotConfigured.selector);
+        freshPool.setAaveEnabled(address(usdc), true);
+    }
+
+    function test_setAToken_revertsOnZeroAddress() public {
+        vm.expectRevert(MarginPool.InvalidAddress.selector);
+        pool.setAToken(address(usdc), address(0));
+
+        vm.expectRevert(MarginPool.InvalidAddress.selector);
+        pool.setAToken(address(0), address(aUsdc));
     }
 
     function test_approveAave_onlyOwner() public {
@@ -605,6 +641,9 @@ contract MarginPoolAaveTest is Test {
 
         // User got 800 aTokens (not 1000)
         assertEq(aUsdc.balanceOf(user), 800e6);
+
+        // FIX #1: totalDeposited restored by shortfall (200e6)
+        assertEq(pool.totalDeposited(address(usdc)), 200e6);
     }
 
     function test_aTokenFallback_noEventOnFullTransfer() public {
@@ -635,4 +674,85 @@ contract MarginPoolAaveTest is Test {
     // The dead error was removed from the contract. If it still
     // existed, adding a reference here would compile. Its absence
     // is verified by the build succeeding without it.
+
+    // ============================================================
+    //  PAV-1: Fallback accounting fix — totalDeposited restored
+    // ============================================================
+
+    function test_fallbackAccounting_restoresTotalDeposited() public {
+        vm.prank(controller);
+        pool.transferToPool(address(usdc), user, 1000e6);
+
+        // Simulate Aave loss: burn 600 aTokens so only 400 remain
+        aUsdc.burn(address(pool), 600e6);
+        aavePool.setShouldRevert(true);
+
+        vm.prank(controller);
+        pool.transferToUser(address(usdc), user, 1000e6);
+
+        // User got 400 aTokens (all that was available)
+        assertEq(aUsdc.balanceOf(user), 400e6);
+        // Shortfall of 600 restored to totalDeposited
+        assertEq(pool.totalDeposited(address(usdc)), 600e6);
+    }
+
+    // ============================================================
+    //  PAV-3: setAavePool checks all tracked assets automatically
+    // ============================================================
+
+    function test_setAavePool_checksAllTrackedAssets() public {
+        // Deposit into Aave
+        vm.prank(controller);
+        pool.transferToPool(address(usdc), user, 1000e6);
+
+        // Try to swap pool — should revert (USDC auto-tracked)
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MarginPool.AaveNotDrained.selector,
+                address(usdc),
+                1000e6
+            )
+        );
+        pool.setAavePool(address(0x1));
+    }
+
+    // ============================================================
+    //  PAV-6: drainAave withdraws all from Aave to pool
+    // ============================================================
+
+    function test_drainAave_withdrawsAll() public {
+        vm.prank(controller);
+        pool.transferToPool(address(usdc), user, 5000e6);
+
+        assertEq(pool.totalDeposited(address(usdc)), 5000e6);
+        assertEq(usdc.balanceOf(address(pool)), 0);
+
+        pool.drainAave(address(usdc));
+
+        assertEq(pool.totalDeposited(address(usdc)), 0);
+        assertEq(usdc.balanceOf(address(pool)), 5000e6);
+    }
+
+    function test_drainAave_thenMigrate() public {
+        vm.prank(controller);
+        pool.transferToPool(address(usdc), user, 5000e6);
+
+        // Drain first
+        pool.drainAave(address(usdc));
+        assertEq(pool.totalDeposited(address(usdc)), 0);
+
+        // Now migration succeeds
+        pool.setAavePool(address(0x1));
+    }
+
+    function test_drainAave_onlyOwner() public {
+        vm.prank(user);
+        vm.expectRevert(MarginPool.Unauthorized.selector);
+        pool.drainAave(address(usdc));
+    }
+
+    function test_drainAave_noop_whenZero() public {
+        pool.drainAave(address(usdc));
+        assertEq(pool.totalDeposited(address(usdc)), 0);
+    }
 }
