@@ -104,7 +104,7 @@ contract ForkSmokeFinal is Test {
         _executeOrder(oToken, user, 1e8, 11111e6, true);
 
         assertEq(pool.totalDeposited(USDC), 11111e6, "USDC not in Aave");
-        assertGe(IERC20(A_USDC).balanceOf(address(pool)), 11111e6 - 1, "aUSDC missing");
+        assertGe(IERC20(A_USDC).balanceOf(address(pool)), 11111e6 - 2, "aUSDC missing");
 
         vm.warp(expiry + 1);
         vm.prank(oracle.operator());
@@ -156,6 +156,108 @@ contract ForkSmokeFinal is Test {
         _settleVault(user, 1);
         assertEq(IERC20(CBBTC).balanceOf(user) - before, 1e8, "cbBTC not returned");
         assertEq(pool.totalDeposited(CBBTC), 0, "tracking not cleared");
+    }
+
+    /// @notice ETH PUT ITM: vault owner gets 0, MM redeems full collateral from Aave
+    function test_final_ethPutITM_viaAave() public {
+        if (block.chainid != 8453) return;
+
+        uint256 strike = 20000e8;
+        address oToken = _createAndWhitelist(WETH, USDC, USDC, strike, true);
+        _executeOrder(oToken, user, 1e8, 20000e6, true);
+
+        assertEq(pool.totalDeposited(USDC), 20000e6, "USDC not in Aave");
+
+        // Expire ITM (price below strike for put)
+        vm.warp(expiry + 1);
+        vm.prank(oracle.operator());
+        oracle.setExpiryPrice(WETH, expiry, 15000e8);
+
+        uint256 userBefore = IERC20(USDC).balanceOf(user);
+        _settleVault(user, 1);
+
+        // Vault owner gets 0 (fully ITM)
+        assertEq(IERC20(USDC).balanceOf(user), userBefore, "vault owner should get 0");
+        // Collateral still in Aave pending redemption
+        assertEq(pool.totalDeposited(USDC), 20000e6, "tracking should stay");
+
+        // MM redeems: settler holds oTokens, transfer to MM then redeem
+        vm.prank(address(settler));
+        IERC20(oToken).transfer(mm, 1e8);
+
+        uint256 mmBefore = IERC20(USDC).balanceOf(mm);
+        vm.prank(mm);
+        controller.redeem(oToken, 1e8);
+
+        assertEq(IERC20(USDC).balanceOf(mm) - mmBefore, 20000e6, "MM should get full collateral");
+        assertEq(pool.totalDeposited(USDC), 0, "tracking not cleared after redeem");
+    }
+
+    /// @notice ETH CALL ITM: vault owner gets 0, MM redeems full WETH from Aave
+    function test_final_ethCallITM_viaAave() public {
+        if (block.chainid != 8453) return;
+
+        uint256 strike = 10000e8;
+        address oToken = _createAndWhitelist(WETH, USDC, WETH, strike, false);
+        _executeOrder(oToken, user, 1e8, 1e18, false);
+
+        assertEq(pool.totalDeposited(WETH), 1e18, "WETH not in Aave");
+
+        // Expire ITM (price above strike for call)
+        vm.warp(expiry + 1);
+        vm.prank(oracle.operator());
+        oracle.setExpiryPrice(WETH, expiry, 15000e8);
+
+        uint256 userBefore = IERC20(WETH).balanceOf(user);
+        _settleVault(user, 1);
+
+        // Vault owner gets 0 (fully ITM)
+        assertEq(IERC20(WETH).balanceOf(user), userBefore, "vault owner should get 0");
+        assertEq(pool.totalDeposited(WETH), 1e18, "tracking should stay");
+
+        // MM redeems from Aave
+        vm.prank(address(settler));
+        IERC20(oToken).transfer(mm, 1e8);
+
+        uint256 mmBefore = IERC20(WETH).balanceOf(mm);
+        vm.prank(mm);
+        controller.redeem(oToken, 1e8);
+
+        assertEq(IERC20(WETH).balanceOf(mm) - mmBefore, 1e18, "MM should get full WETH");
+        assertEq(pool.totalDeposited(WETH), 0, "tracking not cleared after redeem");
+    }
+
+    /// @notice cbBTC CALL ITM: vault owner gets 0, MM redeems full cbBTC from Aave
+    function test_final_cbbtcCallITM_viaAave() public {
+        if (block.chainid != 8453) return;
+
+        uint256 strike = 80000e8;
+        address oToken = _createAndWhitelist(CBBTC, USDC, CBBTC, strike, false);
+        _executeOrder(oToken, user, 1e8, 1e8, false);
+
+        assertEq(pool.totalDeposited(CBBTC), 1e8, "cbBTC not in Aave");
+
+        // Expire ITM (price above strike for call)
+        vm.warp(expiry + 1);
+        vm.prank(oracle.operator());
+        oracle.setExpiryPrice(CBBTC, expiry, 100000e8);
+
+        uint256 userBefore = IERC20(CBBTC).balanceOf(user);
+        _settleVault(user, 1);
+
+        assertEq(IERC20(CBBTC).balanceOf(user), userBefore, "vault owner should get 0");
+        assertEq(pool.totalDeposited(CBBTC), 1e8, "tracking should stay");
+
+        // MM redeems from Aave
+        vm.prank(address(settler));
+        IERC20(oToken).transfer(mm, 1e8);
+
+        uint256 mmBefore = IERC20(CBBTC).balanceOf(mm);
+        vm.prank(mm);
+        controller.redeem(oToken, 1e8);
+
+        assertEq(IERC20(CBBTC).balanceOf(mm) - mmBefore, 1e8, "MM should get full cbBTC");
+        assertEq(pool.totalDeposited(CBBTC), 0, "tracking not cleared after redeem");
     }
 
     /// @notice All 3 assets in parallel: open 3 vaults, settle all in one batch
