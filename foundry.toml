@@ -20,7 +20,9 @@ depth = 100
 [rpc_endpoints]
 base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
 base = "${BASE_RPC_URL}"
+xlayer_testnet = "${XLAYER_TESTNET_RPC_URL}"
 
 [etherscan]
 base_sepolia = { key = "${ETHERSCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api" }
 base = { key = "${ETHERSCAN_API_KEY}", url = "https://api.basescan.org/api" }
+xlayer_testnet = { key = "any", url = "https://www.okx.com/web3/explorer/xlayer-test/api" }
