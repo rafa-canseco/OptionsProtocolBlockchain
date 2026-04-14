@@ -55,7 +55,7 @@ echo "$DEPLOY_OUTPUT" | grep "DEPLOYED:" || true
 # --- 5. Parse deployed addresses ---
 echo "[..] Parsing addresses..."
 ADDR_FILE=$(mktemp)
-echo "$DEPLOY_OUTPUT" | grep "DEPLOYED:" | sed 's/.*DEPLOYED://' > "$ADDR_FILE"
+echo "$DEPLOY_OUTPUT" | grep -oE 'DEPLOYED:[A-Za-z]+:0x[0-9a-fA-F]+' | sed 's/DEPLOYED://' > "$ADDR_FILE"
 
 get_addr() {
     grep "^$1:" "$ADDR_FILE" | cut -d: -f2
