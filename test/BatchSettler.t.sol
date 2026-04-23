@@ -1118,9 +1118,9 @@ contract MockAavePool {
         // Calculate fee
         uint256 premium = (amount * FLASH_LOAN_FEE_BPS) / 10_000;
 
-        // Call executeOperation on receiver
+        // Match real Aave V3: initiator is msg.sender, not receiverAddress.
         bool success =
-            IFlashLoanSimpleReceiver(receiverAddress).executeOperation(asset, amount, premium, receiverAddress, params);
+            IFlashLoanSimpleReceiver(receiverAddress).executeOperation(asset, amount, premium, msg.sender, params);
         require(success, "Flash loan callback failed");
 
         // Pull repayment
@@ -1580,7 +1580,7 @@ contract PhysicalRedeemTest is BatchSettlerTestBase {
         settler.setSwapRouter(address(0x1));
     }
 
-    function test_physicalRedeem_revertsOnAavePoolNotSet() public {
+    function test_physicalRedeem_succeedsWithoutAavePool() public {
         // Deploy a fresh settler without aavePool configured
         BatchSettler freshSettler = BatchSettler(
             address(
@@ -1596,13 +1596,22 @@ contract PhysicalRedeemTest is BatchSettlerTestBase {
         freshSettler.setSwapFeeTier(500);
 
         address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
         vm.prank(operatorBot);
-        vm.expectRevert(BatchSettler.AavePoolNotSet.selector);
+        freshSettler.batchSettleVaults(owners, vaultIds);
+
+        uint256 aliceWethBefore = weth.balanceOf(alice);
+        vm.prank(operatorBot);
         freshSettler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
+        assertEq(weth.balanceOf(alice), aliceWethBefore + 1e18);
 
         // Restore original settler
         addressBook.setBatchSettler(address(settler));
@@ -1667,6 +1676,14 @@ contract PhysicalRedeemTest is BatchSettlerTestBase {
         vm.prank(address(mockAave)); // correct sender
         vm.expectRevert(BatchSettler.FlashLoanUnauthorized.selector);
         settler.executeOperation(address(weth), 1e18, 0, address(0xBAD), ""); // wrong initiator
+    }
+
+    function test_executeOperation_revertsOnExternalFlashLoan() public {
+        bytes memory fakeParams = abi.encode(address(0x1), alice, uint256(1e8), uint256(2000e6), mm);
+
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.FlashLoanUnauthorized.selector);
+        mockAave.flashLoanSimple(address(settler), address(weth), 1e18, fakeParams, 0);
     }
 
     // ===== Self-call guard =====
@@ -1742,6 +1759,32 @@ contract PhysicalRedeemTest is BatchSettlerTestBase {
         vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.InsufficientSwapOutput.selector);
         settler.physicalRedeem(oToken, alice, 1e8, 0, mm);
+    }
+
+    function test_physicalRedeem_revertsWhenRedeemReturnsZero() public {
+        address oToken = _createPut(strikePrice);
+
+        vm.prank(alice);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 1);
+
+        vm.prank(alice);
+        settler.executeOrder(q, sig, 1, 1);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(operatorBot);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        vm.prank(operatorBot);
+        vm.expectRevert(BatchSettler.RedeemReturnedZero.selector);
+        settler.physicalRedeem(oToken, alice, 1, 1, mm);
     }
 
     // ===== Fee tier validation =====

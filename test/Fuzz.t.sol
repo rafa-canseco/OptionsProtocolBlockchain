@@ -652,7 +652,7 @@ contract FuzzMockAavePool {
         IERC20(asset).safeTransfer(receiverAddress, amount);
         uint256 premium = (amount * FLASH_LOAN_FEE_BPS) / 10_000;
         bool success =
-            IFlashLoanSimpleReceiver(receiverAddress).executeOperation(asset, amount, premium, receiverAddress, params);
+            IFlashLoanSimpleReceiver(receiverAddress).executeOperation(asset, amount, premium, msg.sender, params);
         require(success, "Flash loan callback failed");
         IERC20(asset).safeTransferFrom(receiverAddress, address(this), amount + premium);
     }
@@ -959,9 +959,7 @@ contract PhysicalRedeemFuzzTest is Test {
 
     /// @notice PUT ITM: physicalRedeem succeeds for any ITM expiry price
     function testFuzz_physicalRedeem_putITM_expiryPrice(uint256 expiryPrice) public {
-        // Upper bound leaves margin for Aave flash loan fee (5 bps).
-        // At expiryPrice ≈ strike, swap cost ≈ collateral + flash loan fee > collateral → reverts.
-        expiryPrice = bound(expiryPrice, 1e8, strikePrice * 9990 / 10000);
+        expiryPrice = bound(expiryPrice, 1e8, strikePrice - 1);
 
         address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
@@ -1005,9 +1003,7 @@ contract PhysicalRedeemFuzzTest is Test {
 
     /// @notice CALL ITM: physicalRedeem succeeds for any ITM expiry price
     function testFuzz_physicalRedeem_callITM_expiryPrice(uint256 expiryPrice) public {
-        // Lower bound leaves margin for Aave flash loan fee (5 bps).
-        // At expiryPrice ≈ strike, swap cost ≈ collateral + flash loan fee > collateral → reverts.
-        expiryPrice = bound(expiryPrice, strikePrice * 10010 / 10000, 100_000e8);
+        expiryPrice = bound(expiryPrice, strikePrice + 1, 100_000e8);
 
         address oToken = factory.createOToken(address(weth), address(usdc), address(weth), strikePrice, expiry, false);
         whitelist.whitelistOToken(oToken);
