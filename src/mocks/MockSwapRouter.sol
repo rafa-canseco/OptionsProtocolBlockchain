@@ -9,24 +9,28 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title MockSwapRouter
- * @notice Mock Uniswap V3 SwapRouter that implements ISwapRouter.exactOutputSingle().
- *         Uses MockChainlinkFeed for realistic ETH/USD conversion rates.
- *         Mints output tokens via MockERC20.mint() — no pre-funded liquidity needed.
- *         Only supports swaps between the configured WETH and USDC pair.
- * @dev The fee tier parameter is ignored — all swaps use the single Chainlink price feed.
+ * @notice Mock Uniswap V3 SwapRouter for testing.
+ *         Supports any asset/USDC pair via per-asset Chainlink price feeds.
+ *         Mints output tokens via MockERC20.mint() — no pre-funded liquidity.
+ * @dev Fee tier parameter is ignored — swaps use registered price feeds.
+ *      All swaps must have USDC on one side.
  */
 contract MockSwapRouter is ISwapRouter {
     using SafeERC20 for IERC20;
 
-    MockChainlinkFeed public immutable priceFeed;
-    address public immutable weth;
     address public immutable usdc;
 
-    constructor(address _priceFeed, address _weth, address _usdc) {
-        require(_priceFeed != address(0) && _weth != address(0) && _usdc != address(0), "Zero address");
-        priceFeed = MockChainlinkFeed(_priceFeed);
-        weth = _weth;
+    /// @notice asset → Chainlink feed (USD price, 8 decimals)
+    mapping(address => address) public priceFeeds;
+
+    constructor(address _usdc) {
+        require(_usdc != address(0), "Zero address");
         usdc = _usdc;
+    }
+
+    function setPriceFeed(address _asset, address _feed) external {
+        require(_asset != address(0) && _feed != address(0), "Zero address");
+        priceFeeds[_asset] = _feed;
     }
 
     function exactOutputSingle(ExactOutputSingleParams calldata params)
@@ -35,29 +39,20 @@ contract MockSwapRouter is ISwapRouter {
         override
         returns (uint256 amountIn)
     {
-        require(params.tokenOut == weth || params.tokenOut == usdc, "MockSwapRouter: unsupported tokenOut");
-        require(params.tokenIn == weth || params.tokenIn == usdc, "MockSwapRouter: unsupported tokenIn");
+        (address asset, uint256 price) = _resolveSwap(params.tokenIn, params.tokenOut);
+        uint256 scale = 10 ** (MockERC20(asset).decimals() + 2);
 
-        (, int256 rawPrice,,,) = priceFeed.latestRoundData();
-        require(rawPrice > 0, "MockSwapRouter: invalid price");
-        uint256 ethPrice = uint256(rawPrice); // 8 decimals (e.g., 2500e8)
-
-        if (params.tokenOut == weth) {
-            // Buying WETH (18 dec) with USDC (6 dec)
-            // amountIn (USDC 6 dec) = amountOut (WETH 18 dec) * price (8 dec) / 1e20
-            amountIn = (params.amountOut * ethPrice) / 1e20;
+        if (params.tokenOut == usdc) {
+            // Selling asset for exact USDC output
+            amountIn = (params.amountOut * scale) / price;
         } else {
-            // Buying USDC (6 dec) with WETH (18 dec)
-            // amountIn (WETH 18 dec) = amountOut (USDC 6 dec) * 1e20 / price (8 dec)
-            amountIn = (params.amountOut * 1e20) / ethPrice;
+            // Buying asset with USDC
+            amountIn = (params.amountOut * price) / scale;
         }
 
         require(amountIn <= params.amountInMaximum, "Too much slippage");
 
-        // Pull input tokens from caller
         IERC20(params.tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
-
-        // Mint output tokens to recipient (no real liquidity needed)
         MockERC20(params.tokenOut).mint(params.recipient, params.amountOut);
 
         return amountIn;
@@ -69,31 +64,33 @@ contract MockSwapRouter is ISwapRouter {
         override
         returns (uint256 amountOut)
     {
-        require(params.tokenIn == weth || params.tokenIn == usdc, "MockSwapRouter: unsupported tokenIn");
-        require(params.tokenOut == weth || params.tokenOut == usdc, "MockSwapRouter: unsupported tokenOut");
+        (address asset, uint256 price) = _resolveSwap(params.tokenIn, params.tokenOut);
+        uint256 scale = 10 ** (MockERC20(asset).decimals() + 2);
 
-        (, int256 rawPrice,,,) = priceFeed.latestRoundData();
-        require(rawPrice > 0, "MockSwapRouter: invalid price");
-        uint256 ethPrice = uint256(rawPrice); // 8 decimals (e.g., 2500e8)
-
-        if (params.tokenIn == weth) {
-            // Selling WETH (18 dec) for USDC (6 dec)
-            // amountOut (USDC 6 dec) = amountIn (WETH 18 dec) * price (8 dec) / 1e20
-            amountOut = (params.amountIn * ethPrice) / 1e20;
+        if (params.tokenIn == usdc) {
+            // Buying asset with USDC
+            amountOut = (params.amountIn * scale) / price;
         } else {
-            // Selling USDC (6 dec) for WETH (18 dec)
-            // amountOut (WETH 18 dec) = amountIn (USDC 6 dec) * 1e20 / price (8 dec)
-            amountOut = (params.amountIn * 1e20) / ethPrice;
+            // Selling asset for USDC
+            amountOut = (params.amountIn * price) / scale;
         }
 
         require(amountOut >= params.amountOutMinimum, "Too much slippage");
 
-        // Pull input tokens from caller
         IERC20(params.tokenIn).safeTransferFrom(msg.sender, address(this), params.amountIn);
-
-        // Mint output tokens to recipient (no real liquidity needed)
         MockERC20(params.tokenOut).mint(params.recipient, amountOut);
 
         return amountOut;
+    }
+
+    function _resolveSwap(address tokenIn, address tokenOut) internal view returns (address asset, uint256 price) {
+        require(tokenIn == usdc || tokenOut == usdc, "MockSwapRouter: one token must be USDC");
+        asset = tokenIn == usdc ? tokenOut : tokenIn;
+
+        address feed = priceFeeds[asset];
+        require(feed != address(0), "MockSwapRouter: no price feed");
+        (, int256 rawPrice,,,) = MockChainlinkFeed(feed).latestRoundData();
+        require(rawPrice > 0, "MockSwapRouter: invalid price");
+        price = uint256(rawPrice);
     }
 }

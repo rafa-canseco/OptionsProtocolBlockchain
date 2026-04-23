@@ -88,7 +88,9 @@ deployment = {
     'contracts': {
         'LETH': addrs.get('LETH', ''),
         'LUSD': addrs.get('LUSD', ''),
-        'MockChainlinkFeed': addrs.get('MockChainlinkFeed', ''),
+        'LBTC': addrs.get('LBTC', ''),
+        'MockChainlinkFeedETH': addrs.get('MockChainlinkFeedETH', ''),
+        'MockChainlinkFeedBTC': addrs.get('MockChainlinkFeedBTC', ''),
         'MockAavePool': addrs.get('MockAavePool', ''),
         'MockSwapRouter': addrs.get('MockSwapRouter', ''),
         'AddressBook': addrs.get('AddressBook', ''),
@@ -103,6 +105,7 @@ deployment = {
         'protocolFeeBps': 400,
         'swapFeeTier': 500,
         'initialEthPrice': '2500e8',
+        'initialBtcPrice': '90000e8',
         'priceDeviationThresholdBps': 1000,
     }
 }
@@ -137,7 +140,9 @@ verify_contract() {
 
 verify_contract "$(get_addr LETH)" "src/mocks/MockERC20.sol:MockERC20"
 verify_contract "$(get_addr LUSD)" "src/mocks/MockERC20.sol:MockERC20"
-verify_contract "$(get_addr MockChainlinkFeed)" "src/mocks/MockChainlinkFeed.sol:MockChainlinkFeed"
+verify_contract "$(get_addr LBTC)" "src/mocks/MockERC20.sol:MockERC20"
+verify_contract "$(get_addr MockChainlinkFeedETH)" "src/mocks/MockChainlinkFeed.sol:MockChainlinkFeed"
+verify_contract "$(get_addr MockChainlinkFeedBTC)" "src/mocks/MockChainlinkFeed.sol:MockChainlinkFeed"
 verify_contract "$(get_addr MockAavePool)" "src/mocks/MockAavePool.sol:MockAavePool"
 verify_contract "$(get_addr MockSwapRouter)" "src/mocks/MockSwapRouter.sol:MockSwapRouter"
 verify_contract "$(get_addr AddressBook)" "src/core/AddressBook.sol:AddressBook"

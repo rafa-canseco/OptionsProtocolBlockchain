@@ -1118,9 +1118,9 @@ contract MockAavePool {
         // Calculate fee
         uint256 premium = (amount * FLASH_LOAN_FEE_BPS) / 10_000;
 
-        // Call executeOperation on receiver
+        // Match real Aave V3: initiator is msg.sender, not receiverAddress.
         bool success =
-            IFlashLoanSimpleReceiver(receiverAddress).executeOperation(asset, amount, premium, receiverAddress, params);
+            IFlashLoanSimpleReceiver(receiverAddress).executeOperation(asset, amount, premium, msg.sender, params);
         require(success, "Flash loan callback failed");
 
         // Pull repayment
@@ -1135,6 +1135,7 @@ contract MockSwapRouter {
     // For USDC->WETH: rate = ethPrice (e.g., 1800e6 USDC per 1e18 WETH -> set as 1e18 * 1e18 / 1800e6)
     // Simpler: we set a fixed price and compute amountIn from amountOut
     uint256 public mockEthPriceUsdc; // e.g., 1800e6 = $1800 per ETH
+    uint24 public lastFeeTier;
 
     constructor(uint256 _mockEthPriceUsdc) {
         mockEthPriceUsdc = _mockEthPriceUsdc;
@@ -1148,6 +1149,7 @@ contract MockSwapRouter {
         external
         returns (uint256 amountIn)
     {
+        lastFeeTier = params.fee;
         // Determine the direction: USDC->WETH or WETH->USDC
         // We compute amountIn based on the mock price
         // For USDC->WETH (put delivery): amountIn (USDC) = amountOut (WETH) * price / 1e18
@@ -1179,6 +1181,7 @@ contract MockSwapRouter {
     }
 
     function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params) external returns (uint256 amountOut) {
+        lastFeeTier = params.fee;
         // Compute amountOut from amountIn using mock price
         if (params.amountIn > 1e12) {
             // Large amountIn -> WETH (18 decimals), output is USDC
@@ -1577,7 +1580,7 @@ contract PhysicalRedeemTest is BatchSettlerTestBase {
         settler.setSwapRouter(address(0x1));
     }
 
-    function test_physicalRedeem_revertsOnAavePoolNotSet() public {
+    function test_physicalRedeem_succeedsWithoutAavePool() public {
         // Deploy a fresh settler without aavePool configured
         BatchSettler freshSettler = BatchSettler(
             address(
@@ -1593,13 +1596,22 @@ contract PhysicalRedeemTest is BatchSettlerTestBase {
         freshSettler.setSwapFeeTier(500);
 
         address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
         vm.prank(operatorBot);
-        vm.expectRevert(BatchSettler.AavePoolNotSet.selector);
+        freshSettler.batchSettleVaults(owners, vaultIds);
+
+        uint256 aliceWethBefore = weth.balanceOf(alice);
+        vm.prank(operatorBot);
         freshSettler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
+        assertEq(weth.balanceOf(alice), aliceWethBefore + 1e18);
 
         // Restore original settler
         addressBook.setBatchSettler(address(settler));
@@ -1664,6 +1676,14 @@ contract PhysicalRedeemTest is BatchSettlerTestBase {
         vm.prank(address(mockAave)); // correct sender
         vm.expectRevert(BatchSettler.FlashLoanUnauthorized.selector);
         settler.executeOperation(address(weth), 1e18, 0, address(0xBAD), ""); // wrong initiator
+    }
+
+    function test_executeOperation_revertsOnExternalFlashLoan() public {
+        bytes memory fakeParams = abi.encode(address(0x1), alice, uint256(1e8), uint256(2000e6), mm);
+
+        vm.prank(alice);
+        vm.expectRevert(BatchSettler.FlashLoanUnauthorized.selector);
+        mockAave.flashLoanSimple(address(settler), address(weth), 1e18, fakeParams, 0);
     }
 
     // ===== Self-call guard =====
@@ -1739,6 +1759,32 @@ contract PhysicalRedeemTest is BatchSettlerTestBase {
         vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.InsufficientSwapOutput.selector);
         settler.physicalRedeem(oToken, alice, 1e8, 0, mm);
+    }
+
+    function test_physicalRedeem_revertsWhenRedeemReturnsZero() public {
+        address oToken = _createPut(strikePrice);
+
+        vm.prank(alice);
+        IERC20(oToken).approve(address(settler), type(uint256).max);
+
+        (BatchSettler.Quote memory q, bytes memory sig) = _signQuote(oToken, 70e6, block.timestamp + 1 hours, 1);
+
+        vm.prank(alice);
+        settler.executeOrder(q, sig, 1, 1);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(operatorBot);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        vm.prank(operatorBot);
+        vm.expectRevert(BatchSettler.RedeemReturnedZero.selector);
+        settler.physicalRedeem(oToken, alice, 1, 1, mm);
     }
 
     // ===== Fee tier validation =====
@@ -1847,6 +1893,108 @@ contract PhysicalRedeemTest is BatchSettlerTestBase {
         vm.prank(operatorBot);
         vm.expectRevert(BatchSettler.OptionNotITM.selector);
         settler.physicalRedeem(oToken, alice, 1e8, 1e18, mm);
+    }
+
+    // ===== Per-asset swap fee tier =====
+
+    function test_setAssetSwapFeeTier() public {
+        settler.setAssetSwapFeeTier(address(weth), 500);
+        assertEq(settler.assetSwapFeeTier(address(weth)), 500);
+
+        settler.setAssetSwapFeeTier(address(weth), 3000);
+        assertEq(settler.assetSwapFeeTier(address(weth)), 3000);
+
+        // Setting to 0 clears the override
+        settler.setAssetSwapFeeTier(address(weth), 0);
+        assertEq(settler.assetSwapFeeTier(address(weth)), 0);
+    }
+
+    function test_setAssetSwapFeeTier_revertsOnInvalidTier() public {
+        vm.expectRevert(BatchSettler.InvalidFeeTier.selector);
+        settler.setAssetSwapFeeTier(address(weth), 300);
+    }
+
+    function test_setAssetSwapFeeTier_revertsOnZeroAddress() public {
+        vm.expectRevert(BatchSettler.InvalidAddress.selector);
+        settler.setAssetSwapFeeTier(address(0), 500);
+    }
+
+    function test_setAssetSwapFeeTier_revertsOnNonOwner() public {
+        vm.prank(operatorBot);
+        vm.expectRevert(BatchSettler.OnlyOwner.selector);
+        settler.setAssetSwapFeeTier(address(weth), 500);
+    }
+
+    function test_physicalRedeem_usesAssetFeeTier() public {
+        // Global = 500 (set in setUp), asset override = 3000
+        settler.setAssetSwapFeeTier(address(weth), 3000);
+
+        address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(operatorBot);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        vm.prank(operatorBot);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
+
+        // MockSwapRouter records lastFeeTier — should be 3000 (asset), not 500 (global)
+        assertEq(mockRouter.lastFeeTier(), 3000);
+    }
+
+    function test_physicalRedeem_fallsBackToGlobalFeeTier() public {
+        // No asset override set — should use global (500)
+        assertEq(settler.assetSwapFeeTier(address(weth)), 0);
+
+        address oToken = _createPut(strikePrice);
+        _setupPutPosition(alice, oToken, 1e8);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(operatorBot);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        vm.prank(operatorBot);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
+
+        // Should fall back to global fee tier (500)
+        assertEq(mockRouter.lastFeeTier(), 500);
+    }
+
+    function test_physicalRedeem_callUsesAssetFeeTier() public {
+        settler.setAssetSwapFeeTier(address(weth), 10000);
+
+        address oToken = _createCall(strikePrice);
+        _setupCallPosition(alice, oToken, 1e8);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2500e8);
+        mockRouter.setMockPrice(2500e6);
+
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = alice;
+        vaultIds[0] = 1;
+        vm.prank(operatorBot);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        vm.prank(operatorBot);
+        settler.physicalRedeem(oToken, alice, 1e8, 2000e6, mm);
+
+        // CALL path: should use asset override (10000), not global (500)
+        assertEq(mockRouter.lastFeeTier(), 10000);
     }
 }
 

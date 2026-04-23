@@ -10,6 +10,7 @@ import "./Oracle.sol";
 import "../interfaces/IFlashLoanSimple.sol";
 import "../interfaces/ISwapRouter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -120,6 +121,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     event MMBalanceCleared(address indexed mm, address indexed oToken, uint256 amount);
     event ProtocolFeeBpsUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event SwapFeeTierUpdated(uint24 oldFeeTier, uint24 newFeeTier);
+    event AssetSwapFeeTierUpdated(address indexed asset, uint24 oldFeeTier, uint24 newFeeTier);
 
     // ===== Errors =====
 
@@ -150,6 +152,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     error EscapeDelayTooShort();
     error OnlyController();
     error InsufficientSwapOutput();
+    error UnsupportedDecimals();
 
     // Panic(uint256) selector: 0x4e487b71
     bytes4 private constant _PANIC_SELECTOR = 0x4e487b71;
@@ -223,6 +226,15 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         }
         emit SwapFeeTierUpdated(swapFeeTier, _feeTier);
         swapFeeTier = _feeTier;
+    }
+
+    function setAssetSwapFeeTier(address _asset, uint24 _feeTier) external onlyOwner {
+        if (_asset == address(0)) revert InvalidAddress();
+        if (_feeTier != 0 && _feeTier != 100 && _feeTier != 500 && _feeTier != 3000 && _feeTier != 10000) {
+            revert InvalidFeeTier();
+        }
+        emit AssetSwapFeeTierUpdated(_asset, assetSwapFeeTier[_asset], _feeTier);
+        assetSwapFeeTier[_asset] = _feeTier;
     }
 
     uint256 public constant MIN_ESCAPE_DELAY = 3 days;
@@ -440,33 +452,28 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         _executePhysicalRedeem(oToken, user, amount, slippageParam, mm);
     }
 
-    function executeOperation(address asset, uint256 amount, uint256 premium, address initiator, bytes calldata params)
+    function executeOperation(
+        address, /* asset */
+        uint256, /* amount */
+        uint256, /* premium */
+        address initiator,
+        bytes calldata /* params */
+    )
         external
         override
         returns (bool)
     {
         if (msg.sender != aavePool) revert FlashLoanUnauthorized();
         if (initiator != address(this)) revert FlashLoanUnauthorized();
-
-        (address oToken, address user, uint256 oTokenAmount, uint256 slippageParam, address mm) =
-            abi.decode(params, (address, address, uint256, uint256, address));
-
-        IERC20(asset).safeTransfer(user, amount);
-
-        uint256 collateralUsed = _redeemAndSwap(oToken, oTokenAmount, asset, amount + premium, slippageParam, mm);
-
-        IERC20(asset).forceApprove(aavePool, amount + premium);
-
-        emit PhysicalDelivery(oToken, user, amount, collateralUsed);
-
-        return true;
+        revert FlashLoanUnauthorized();
     }
 
     function _redeemAndSwap(
         address oToken,
+        address user,
         uint256 oTokenAmount,
         address contraAsset,
-        uint256 repayAmount,
+        uint256 contraAmount,
         uint256 slippageParam,
         address mm
     ) private returns (uint256 collateralUsed) {
@@ -485,18 +492,23 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
         IERC20(collateralAsset).forceApprove(swapRouter, collateralReceived);
 
+        address underlying = OToken(oToken).underlying();
+        uint24 feeTier = assetSwapFeeTier[underlying];
+        if (feeTier == 0) feeTier = swapFeeTier;
+        if (feeTier == 0) revert InvalidFeeTier();
+
         bool isPut = OToken(oToken).isPut();
         if (isPut) {
-            // Put: collateral=USDC, contra=WETH. Swap just enough USDC
-            // for exact WETH repayment. Surplus stays as USDC.
+            // Put: collateral=USDC, contra=WETH. Buy the exact underlying
+            // owed to the user and route leftover collateral to the MM.
             collateralUsed = ISwapRouter(swapRouter)
                 .exactOutputSingle(
                     ISwapRouter.ExactOutputSingleParams({
                         tokenIn: collateralAsset,
                         tokenOut: contraAsset,
-                        fee: swapFeeTier,
-                        recipient: address(this),
-                        amountOut: repayAmount,
+                        fee: feeTier,
+                        recipient: user,
+                        amountOut: contraAmount,
                         amountInMaximum: slippageParam,
                         sqrtPriceLimitX96: 0
                     })
@@ -507,15 +519,16 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
                 IERC20(collateralAsset).safeTransfer(mm, surplus);
             }
         } else {
-            // Call: collateral=WETH, contra=USDC. Swap ALL WETH to USDC.
-            // Surplus delivered as USDC to MM.
+            // Call: collateral=WETH, contra=USDC. Swap all redeemed
+            // collateral, pay the exact strike amount owed to the user,
+            // and route surplus proceeds to the MM.
             collateralUsed = collateralReceived;
             uint256 amountOut = ISwapRouter(swapRouter)
                 .exactInputSingle(
                     ISwapRouter.ExactInputSingleParams({
                         tokenIn: collateralAsset,
                         tokenOut: contraAsset,
-                        fee: swapFeeTier,
+                        fee: feeTier,
                         recipient: address(this),
                         amountIn: collateralReceived,
                         amountOutMinimum: slippageParam,
@@ -523,8 +536,9 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
                     })
                 );
 
-            if (amountOut < repayAmount) revert InsufficientSwapOutput();
-            uint256 surplus = amountOut - repayAmount;
+            if (amountOut < contraAmount) revert InsufficientSwapOutput();
+            IERC20(contraAsset).safeTransfer(user, contraAmount);
+            uint256 surplus = amountOut - contraAmount;
             if (surplus > 0) {
                 IERC20(contraAsset).safeTransfer(mm, surplus);
             }
@@ -571,7 +585,6 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         if (oToken == address(0)) revert InvalidAddress();
         if (user == address(0)) revert InvalidAddress();
         if (mm == address(0)) revert InvalidAddress();
-        if (aavePool == address(0)) revert AavePoolNotSet();
         if (swapRouter == address(0)) revert SwapRouterNotSet();
         if (amount == 0) revert InvalidAmount();
         if (mmOTokenBalance[mm][oToken] < amount) revert InsufficientMMBalance();
@@ -594,14 +607,19 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         uint256 contraAmount;
         if (ot.isPut()) {
             contraAsset = ot.underlying();
-            contraAmount = amount * 1e10;
+            uint256 ud = IERC20Metadata(contraAsset).decimals();
+            if (ud < 8 || ud > 18) revert UnsupportedDecimals();
+            contraAmount = amount * (10 ** (ud - 8));
         } else {
             contraAsset = ot.strikeAsset();
-            contraAmount = (amount * strike) / 1e10;
+            uint256 sd = IERC20Metadata(contraAsset).decimals();
+            if (sd < 6 || sd > 16) revert UnsupportedDecimals();
+            contraAmount = (amount * strike) / (10 ** (16 - sd));
         }
+        if (contraAmount == 0) revert InvalidAmount();
 
-        bytes memory params = abi.encode(oToken, user, amount, slippageParam, mm);
-        IPool(aavePool).flashLoanSimple(address(this), contraAsset, contraAmount, params, 0);
+        uint256 collateralUsed = _redeemAndSwap(oToken, user, amount, contraAsset, contraAmount, slippageParam, mm);
+        emit PhysicalDelivery(oToken, user, contraAmount, collateralUsed);
     }
 
     // ===== Operator-Triggered MM Redemption (cash settlement) =====
@@ -744,5 +762,8 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[33] private __gap;
+    /// @notice Per-asset swap fee tier override. Key = underlying asset.
+    mapping(address => uint24) public assetSwapFeeTier;
+
+    uint256[32] private __gap;
 }
