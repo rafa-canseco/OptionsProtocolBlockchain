@@ -495,6 +495,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         address underlying = OToken(oToken).underlying();
         uint24 feeTier = assetSwapFeeTier[underlying];
         if (feeTier == 0) feeTier = swapFeeTier;
+        if (feeTier == 0) revert InvalidFeeTier();
 
         bool isPut = OToken(oToken).isPut();
         if (isPut) {
@@ -615,6 +616,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
             if (sd < 6 || sd > 16) revert UnsupportedDecimals();
             contraAmount = (amount * strike) / (10 ** (16 - sd));
         }
+        if (contraAmount == 0) revert InvalidAmount();
 
         uint256 collateralUsed = _redeemAndSwap(oToken, user, amount, contraAsset, contraAmount, slippageParam, mm);
         emit PhysicalDelivery(oToken, user, contraAmount, collateralUsed);
