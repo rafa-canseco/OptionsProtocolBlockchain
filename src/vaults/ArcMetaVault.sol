@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
+contract ArcMetaVault is Initializable, UUPSUpgradeable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 public constant ACC_PREMIUM_PRECISION = 1e18;
@@ -25,9 +26,11 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
         uint256 shares;
     }
 
-    IERC20 public immutable USDC;
-    uint256 public immutable ASSET_TO_SHARE_SCALE;
+    IERC20 public usdc;
+    uint256 public assetToShareScale;
 
+    address public owner;
+    address public pendingOwner;
     address public operator;
     address public agent;
 
@@ -42,6 +45,7 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
     uint256 public totalPendingAssets;
     uint256 public totalClaimablePremium;
     uint256 public totalClaimableWithdrawals;
+    uint256 public totalLockedWithdrawalShares;
     uint256 public totalDeployedAssets;
     uint256 public totalAccountedAssets;
     uint256 public accPremiumPerShare;
@@ -82,7 +86,10 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
     event DeploymentRecorded(
         bytes32 indexed intentId, address indexed destination, uint256 indexed epoch, uint256 assets
     );
+    event DeploymentReturnRecorded(bytes32 indexed intentId, uint256 indexed epoch, uint256 assets);
     event EpochStarted(uint256 indexed epoch, uint64 startedAt);
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event AgentUpdated(address indexed oldAgent, address indexed newAgent);
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
     event PolicyUpdated(
@@ -107,24 +114,40 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
     error InsufficientShares();
     error InsufficientLiquidAssets();
     error InsufficientUnaccountedAssets();
+    error OnlyOwner();
+    error OnlyPendingOwner();
     error OnlyAgentOrOperator();
+
+    modifier onlyOwner() {
+        _checkOwner();
+        _;
+    }
 
     modifier onlyAgentOrOperator() {
         _checkAgentOrOperator();
         _;
     }
 
-    constructor(address usdc_, address initialOwner, address operator_, address agent_, uint64 epochDuration_)
-        Ownable(initialOwner)
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address usdc_, address initialOwner, address operator_, address agent_, uint64 epochDuration_)
+        external
+        initializer
     {
-        if (usdc_ == address(0) || operator_ == address(0) || agent_ == address(0)) revert InvalidAddress();
+        if (usdc_ == address(0) || initialOwner == address(0) || operator_ == address(0) || agent_ == address(0)) {
+            revert InvalidAddress();
+        }
         if (epochDuration_ == 0) revert InvalidConfig();
 
         uint8 assetDecimals = IERC20Metadata(usdc_).decimals();
         if (assetDecimals > 18) revert InvalidConfig();
 
-        USDC = IERC20(usdc_);
-        ASSET_TO_SHARE_SCALE = 10 ** (18 - assetDecimals);
+        usdc = IERC20(usdc_);
+        assetToShareScale = 10 ** (18 - assetDecimals);
+        owner = initialOwner;
         operator = operator_;
         agent = agent_;
         epochDuration = epochDuration_;
@@ -139,7 +162,7 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
         _validateDeposit(assets, receiver);
 
         shares = _assetsToShares(assets);
-        USDC.safeTransferFrom(msg.sender, address(this), assets);
+        usdc.safeTransferFrom(msg.sender, address(this), assets);
         totalAccountedAssets += assets;
         _queuePendingShares(receiver, currentEpoch + 1, assets, shares);
 
@@ -153,8 +176,7 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
         returns (uint256 shares)
     {
         if (intentId == bytes32(0)) revert InvalidConfig();
-        if (receiver == address(0)) revert InvalidAddress();
-        if (assets == 0) revert InvalidAmount();
+        _validateDeposit(assets, receiver);
         _markIntentProcessed(intentId);
         _requireUnaccountedAssets(assets);
 
@@ -200,7 +222,7 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
         if (assets == 0) revert InvalidAmount();
         if (totalActiveShares == 0) revert NoActiveShares();
 
-        USDC.safeTransferFrom(msg.sender, address(this), assets);
+        usdc.safeTransferFrom(msg.sender, address(this), assets);
         totalAccountedAssets += assets;
         accPremiumPerShare += (assets * ACC_PREMIUM_PRECISION) / totalActiveShares;
 
@@ -223,7 +245,7 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
             emit PremiumAutoCompounded(msg.sender, currentEpoch + 1, assets, shares);
         } else {
             totalAccountedAssets -= assets;
-            USDC.safeTransfer(receiver, assets);
+            usdc.safeTransfer(receiver, assets);
             emit PremiumClaimed(msg.sender, receiver, assets);
         }
     }
@@ -235,6 +257,7 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
         if (shares > available) revert InsufficientShares();
 
         lockedWithdrawalShares[msg.sender] += shares;
+        totalLockedWithdrawalShares += shares;
         withdrawalRequests[msg.sender] =
             WithdrawalRequest({requestedEpoch: currentEpoch, shares: lockedWithdrawalShares[msg.sender]});
 
@@ -252,6 +275,7 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
         totalActiveShares -= request.shares;
         totalActivePrincipal -= assets;
         lockedWithdrawalShares[user] = 0;
+        totalLockedWithdrawalShares -= request.shares;
         delete withdrawalRequests[user];
         rewardDebt[user] = _premiumDebt(user);
 
@@ -270,7 +294,7 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
         claimableWithdrawals[msg.sender] = 0;
         totalClaimableWithdrawals -= assets;
         totalAccountedAssets -= assets;
-        USDC.safeTransfer(receiver, assets);
+        usdc.safeTransfer(receiver, assets);
 
         emit WithdrawalClaimed(msg.sender, receiver, assets);
     }
@@ -289,9 +313,26 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
         _requireDeployableAssets(assets);
 
         totalDeployedAssets += assets;
-        USDC.safeTransfer(destination, assets);
+        usdc.safeTransfer(destination, assets);
 
         emit DeploymentRecorded(intentId, destination, currentEpoch, assets);
+    }
+
+    function recordDeploymentReturn(bytes32 intentId, uint256 assets)
+        external
+        onlyAgentOrOperator
+        whenNotPaused
+        nonReentrant
+    {
+        if (intentId == bytes32(0)) revert InvalidConfig();
+        if (assets == 0) revert InvalidAmount();
+        if (assets > totalDeployedAssets) revert InsufficientLiquidAssets();
+        _markIntentProcessed(intentId);
+        _requireUnaccountedAssets(assets);
+
+        totalDeployedAssets -= assets;
+
+        emit DeploymentReturnRecorded(intentId, currentEpoch, assets);
     }
 
     function setAutoCompound(bool enabled) external {
@@ -309,6 +350,19 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
         if (newOperator == address(0)) revert InvalidAddress();
         emit OperatorUpdated(operator, newOperator);
         operator = newOperator;
+    }
+
+    function transferOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert InvalidAddress();
+        pendingOwner = newOwner;
+        emit OwnershipTransferStarted(owner, newOwner);
+    }
+
+    function acceptOwnership() external {
+        if (msg.sender != pendingOwner) revert OnlyPendingOwner();
+        emit OwnershipTransferred(owner, msg.sender);
+        owner = msg.sender;
+        pendingOwner = address(0);
     }
 
     function setPolicy(Policy calldata newPolicy) external onlyOwner {
@@ -351,11 +405,12 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
     }
 
     function liquidAssets() public view returns (uint256) {
-        return USDC.balanceOf(address(this));
+        return usdc.balanceOf(address(this));
     }
 
     function deployableAssets() public view returns (uint256) {
-        uint256 reserved = totalPendingAssets + totalClaimablePremium + totalClaimableWithdrawals;
+        uint256 reserved = totalPendingAssets + totalClaimablePremium + totalClaimableWithdrawals
+            + _sharesToAssets(totalLockedWithdrawalShares);
         uint256 liquid = liquidAssets();
         return liquid > reserved ? liquid - reserved : 0;
     }
@@ -401,6 +456,10 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
         if (msg.sender != agent && msg.sender != operator) revert OnlyAgentOrOperator();
     }
 
+    function _checkOwner() internal view {
+        if (msg.sender != owner) revert OnlyOwner();
+    }
+
     function _requireDeployableAssets(uint256 assets) internal view {
         if (assets > deployableAssets()) revert InsufficientLiquidAssets();
     }
@@ -412,10 +471,14 @@ contract ArcMetaVault is Ownable, Pausable, ReentrancyGuard {
     }
 
     function _assetsToShares(uint256 assets) internal view returns (uint256) {
-        return assets * ASSET_TO_SHARE_SCALE;
+        return assets * assetToShareScale;
     }
 
     function _sharesToAssets(uint256 shares) internal view returns (uint256) {
-        return shares / ASSET_TO_SHARE_SCALE;
+        return shares / assetToShareScale;
     }
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    uint256[40] private __gap;
 }
