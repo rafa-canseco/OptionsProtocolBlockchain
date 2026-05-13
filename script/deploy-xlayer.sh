@@ -4,16 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BLOCKCHAIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "=== Options Protocol — Beta Deploy (Base Sepolia) ==="
+echo "=== Options Protocol — XLayer Testnet Deploy ==="
 
-# --- 1. Load env vars from .env (fish format: set -x KEY value) ---
-ENV_FILE="$BLOCKCHAIN_DIR/.env"
+# --- 1. Load env vars from .env.xlayer-testnet (fish format) ---
+ENV_FILE="$BLOCKCHAIN_DIR/.env.xlayer-testnet"
 if [ -f "$ENV_FILE" ]; then
-    echo "[..] Loading .env..."
+    echo "[..] Loading .env.xlayer-testnet..."
     while IFS= read -r line; do
-        # Skip comments and empty lines
         [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
-        # Parse fish "set -x KEY VALUE" format
         if [[ "$line" =~ ^set\ -x\ ([A-Z_]+)\ (.+)$ ]]; then
             key="${BASH_REMATCH[1]}"
             val="${BASH_REMATCH[2]}"
@@ -23,10 +21,10 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 # --- 2. Verify required env vars ---
-for var in PRIVATE_KEY BASE_SEPOLIA_RPC_URL; do
+for var in PRIVATE_KEY XLAYER_TESTNET_RPC_URL; do
     if [ -z "${!var:-}" ]; then
         echo "[FAIL] Missing env var: $var"
-        echo "Set it in .env or export it before running this script."
+        echo "Set it in .env.xlayer-testnet or export it before running."
         exit 1
     fi
 done
@@ -38,10 +36,10 @@ echo "[..] Building contracts..."
 cd "$BLOCKCHAIN_DIR"
 forge build --force --silent 2>/dev/null || forge build --force
 
-# --- 4. Deploy (no inline verification — we verify with Blockscout after) ---
-echo "[..] Deploying to Base Sepolia..."
-DEPLOY_OUTPUT=$(forge script script/DeployBeta.s.sol:DeployBeta \
-    --rpc-url "$BASE_SEPOLIA_RPC_URL" \
+# --- 4. Deploy to XLayer testnet ---
+echo "[..] Deploying to XLayer testnet..."
+DEPLOY_OUTPUT=$(forge script script/DeployXLayer.s.sol:DeployXLayer \
+    --rpc-url "$XLAYER_TESTNET_RPC_URL" \
     --broadcast \
     --slow \
     -vvvv 2>&1) || {
@@ -61,8 +59,8 @@ get_addr() {
     grep "^$1:" "$ADDR_FILE" | cut -d: -f2
 }
 
-# --- 6. Write deployments-beta.json ---
-echo "[..] Writing deployments-beta.json..."
+# --- 6. Write deployments-xlayer.json ---
+echo "[..] Writing deployments-xlayer.json..."
 DEPLOYER_ADDR=$(uv run python3 -c "
 from eth_keys import keys
 pk = bytes.fromhex('${PRIVATE_KEY#0x}')
@@ -81,16 +79,14 @@ with open('$ADDR_FILE') as f:
             addrs[name] = addr
 
 deployment = {
-    'chain': 'base-sepolia',
-    'chainId': 84532,
-    'rpcUrl': '$BASE_SEPOLIA_RPC_URL',
+    'chain': 'xlayer-testnet',
+    'chainId': 1952,
+    'rpcUrl': '$XLAYER_TESTNET_RPC_URL',
     'deployer': '$DEPLOYER_ADDR',
     'contracts': {
-        'LETH': addrs.get('LETH', ''),
-        'LUSD': addrs.get('LUSD', ''),
-        'LBTC': addrs.get('LBTC', ''),
-        'MockChainlinkFeedETH': addrs.get('MockChainlinkFeedETH', ''),
-        'MockChainlinkFeedBTC': addrs.get('MockChainlinkFeedBTC', ''),
+        'MockOKB': addrs.get('MockOKB', ''),
+        'MockUSDC': addrs.get('MockUSDC', ''),
+        'MockChainlinkFeedOKB': addrs.get('MockChainlinkFeedOKB', ''),
         'MockAavePool': addrs.get('MockAavePool', ''),
         'MockSwapRouter': addrs.get('MockSwapRouter', ''),
         'AddressBook': addrs.get('AddressBook', ''),
@@ -104,13 +100,12 @@ deployment = {
     'config': {
         'protocolFeeBps': 400,
         'swapFeeTier': 500,
-        'initialEthPrice': '2500e8',
-        'initialBtcPrice': '90000e8',
+        'initialOkbPrice': '50e8',
         'priceDeviationThresholdBps': 1000,
     }
 }
 
-with open('$BLOCKCHAIN_DIR/deployments-beta.json', 'w') as f:
+with open('$BLOCKCHAIN_DIR/deployments-xlayer.json', 'w') as f:
     json.dump(deployment, f, indent=2)
     f.write('\n')
 
@@ -118,13 +113,12 @@ print()
 print('=== Deploy Complete ===')
 print('Contracts:')
 for name, addr in sorted(addrs.items()):
-    print(f'  {name:<20s} {addr}')
+    print(f'  {name:<25s} {addr}')
 "
 
-# --- 7. Verify contracts on Blockscout ---
-echo "[..] Verifying contracts on Blockscout..."
-BLOCKSCOUT_URL="https://base-sepolia.blockscout.com/api/"
-RPC_URL="$BASE_SEPOLIA_RPC_URL"
+# --- 7. Attempt contract verification ---
+echo "[..] Attempting contract verification on XLayer explorer..."
+RPC_URL="$XLAYER_TESTNET_RPC_URL"
 
 verify_contract() {
     local addr="$1"
@@ -133,16 +127,14 @@ verify_contract() {
     forge verify-contract \
         --rpc-url "$RPC_URL" \
         --verifier blockscout \
-        --verifier-url "$BLOCKSCOUT_URL" \
+        --verifier-url "https://www.okx.com/web3/explorer/xlayer-test/api/" \
         "$addr" \
         "$contract_path" 2>&1 | tail -1 || true
 }
 
-verify_contract "$(get_addr LETH)" "src/mocks/MockERC20.sol:MockERC20"
-verify_contract "$(get_addr LUSD)" "src/mocks/MockERC20.sol:MockERC20"
-verify_contract "$(get_addr LBTC)" "src/mocks/MockERC20.sol:MockERC20"
-verify_contract "$(get_addr MockChainlinkFeedETH)" "src/mocks/MockChainlinkFeed.sol:MockChainlinkFeed"
-verify_contract "$(get_addr MockChainlinkFeedBTC)" "src/mocks/MockChainlinkFeed.sol:MockChainlinkFeed"
+verify_contract "$(get_addr MockOKB)" "src/mocks/MockERC20.sol:MockERC20"
+verify_contract "$(get_addr MockUSDC)" "src/mocks/MockERC20.sol:MockERC20"
+verify_contract "$(get_addr MockChainlinkFeedOKB)" "src/mocks/MockChainlinkFeed.sol:MockChainlinkFeed"
 verify_contract "$(get_addr MockAavePool)" "src/mocks/MockAavePool.sol:MockAavePool"
 verify_contract "$(get_addr MockSwapRouter)" "src/mocks/MockSwapRouter.sol:MockSwapRouter"
 verify_contract "$(get_addr AddressBook)" "src/core/AddressBook.sol:AddressBook"
@@ -153,14 +145,13 @@ verify_contract "$(get_addr Oracle)" "src/core/Oracle.sol:Oracle"
 verify_contract "$(get_addr Whitelist)" "src/core/Whitelist.sol:Whitelist"
 verify_contract "$(get_addr BatchSettler)" "src/core/BatchSettler.sol:BatchSettler"
 
-echo "[ok] Verification submitted"
+echo "[ok] Verification attempted (best-effort)"
 
 # --- 8. Export ABIs ---
 echo "[..] Exporting ABIs..."
 ABI_DIR="$BLOCKCHAIN_DIR/abis"
 mkdir -p "$ABI_DIR"
 
-# Protocol contracts
 for contract in AddressBook Controller MarginPool OTokenFactory Oracle Whitelist BatchSettler OToken; do
     ABI_FILE="$BLOCKCHAIN_DIR/out/${contract}.sol/${contract}.json"
     if [ -f "$ABI_FILE" ]; then
@@ -175,7 +166,6 @@ print(json.dumps(data['abi'], indent=2))
     fi
 done
 
-# Mock contracts
 for contract in MockERC20 MockChainlinkFeed MockAavePool MockSwapRouter; do
     ABI_FILE="$BLOCKCHAIN_DIR/out/${contract}.sol/${contract}.json"
     if [ -f "$ABI_FILE" ]; then
@@ -191,13 +181,13 @@ print(json.dumps(data['abi'], indent=2))
 done
 
 echo ""
-echo "=== Beta Deployment Summary ==="
-echo "  Chain:                 Base Sepolia (84532)"
-echo "  Deployer:              $DEPLOYER_ADDR"
-echo "  Protocol fee:          400 bps (4%)"
-echo "  deployments-beta.json: $BLOCKCHAIN_DIR/deployments-beta.json"
-echo "  ABIs:                  $ABI_DIR/"
+echo "=== XLayer Testnet Deployment Summary ==="
+echo "  Chain:                    XLayer Testnet (1952)"
+echo "  Deployer:                 $DEPLOYER_ADDR"
+echo "  Protocol fee:             400 bps (4%)"
+echo "  deployments-xlayer.json:  $BLOCKCHAIN_DIR/deployments-xlayer.json"
+echo "  ABIs:                     $ABI_DIR/"
 echo ""
-echo "Next: share deployments-beta.json with backend (B1) and frontend (F1)"
+echo "Next: share deployments-xlayer.json with backend (B1N-287) and frontend (B1N-288)"
 
 rm -f "$ADDR_FILE"
