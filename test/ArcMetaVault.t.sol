@@ -2,6 +2,7 @@
 pragma solidity 0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {ArcMetaVault} from "../src/vaults/ArcMetaVault.sol";
@@ -23,7 +24,14 @@ contract ArcMetaVaultTest is Test {
 
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
-        vault = new ArcMetaVault(address(usdc), owner, operator, agent, EPOCH_DURATION);
+        vault = ArcMetaVault(
+            address(
+                new ERC1967Proxy(
+                    address(new ArcMetaVault()),
+                    abi.encodeCall(ArcMetaVault.initialize, (address(usdc), owner, operator, agent, EPOCH_DURATION))
+                )
+            )
+        );
 
         usdc.mint(alice, 100_000e6);
         usdc.mint(bob, 100_000e6);
@@ -195,6 +203,57 @@ contract ArcMetaVaultTest is Test {
         assertEq(vault.pendingShares(3, bob), 100e18);
     }
 
+    function test_policyBlocksBridgeDeposits() public {
+        vault.setPolicy(
+            ArcMetaVault.Policy({
+                depositsEnabled: false, deploymentsEnabled: true, minDepositAssets: 0, maxDepositAssets: 0
+            })
+        );
+
+        usdc.mint(address(vault), 100e6);
+
+        vm.expectRevert(ArcMetaVault.DepositsDisabled.selector);
+        vm.prank(agent);
+        vault.finalizeBridgeDeposit(keccak256("bridge-while-disabled"), alice, 100e6);
+    }
+
+    function test_requestedWithdrawalsReduceDeployableAssets() public {
+        _depositAndActivate(alice, alice, 1_000e6);
+
+        assertEq(vault.deployableAssets(), 1_000e6);
+
+        vm.prank(alice);
+        vault.requestWithdrawal(400e18);
+
+        assertEq(vault.totalLockedWithdrawalShares(), 400e18);
+        assertEq(vault.deployableAssets(), 600e6);
+
+        vm.expectRevert(ArcMetaVault.InsufficientLiquidAssets.selector);
+        vm.prank(agent);
+        vault.recordDeployment(keccak256("over-deploy"), bridge, 700e6);
+
+        vm.prank(agent);
+        vault.recordDeployment(keccak256("allowed-deploy"), bridge, 600e6);
+
+        assertEq(vault.totalDeployedAssets(), 600e6);
+        assertEq(vault.deployableAssets(), 0);
+    }
+
+    function test_recordDeploymentReturnReconcilesDeployedAssets() public {
+        _depositAndActivate(alice, alice, 1_000e6);
+
+        vm.prank(agent);
+        vault.recordDeployment(keccak256("deploy"), bridge, 300e6);
+
+        usdc.mint(address(vault), 125e6);
+
+        vm.prank(agent);
+        vault.recordDeploymentReturn(keccak256("return"), 125e6);
+
+        assertEq(vault.totalDeployedAssets(), 175e6);
+        assertEq(vault.totalAccountedAssets(), 1_000e6);
+    }
+
     function test_withdrawalQueueAccounting() public {
         _depositAndActivate(alice, alice, 1_000e6);
 
@@ -209,6 +268,7 @@ contract ArcMetaVaultTest is Test {
         assertEq(claimable, 400e6);
         assertEq(vault.activeShares(alice), 600e18);
         assertEq(vault.totalActivePrincipal(), 600e6);
+        assertEq(vault.totalLockedWithdrawalShares(), 0);
         assertEq(vault.claimableWithdrawals(alice), 400e6);
 
         vm.prank(alice);
