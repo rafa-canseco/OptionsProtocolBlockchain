@@ -1,0 +1,32 @@
+{
+  "chain": "base-sepolia",
+  "chainId": 84532,
+  "deployer": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+  "contracts": {
+    "USDC": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "LETH": "0xe9fA411040F31cbBf57632E7F6F92ba882F07b46",
+    "LBTC": "0x6c9230eE8aAdbAAedCa71f00432F815DaE5Fd097",
+    "MockChainlinkFeedETH": "0x3b6d8Bb512d97ac836bD0C0CF8E7A90a241ca823",
+    "MockChainlinkFeedBTC": "0x7c2d289d129A3b3AdB92C62d850a0a7b7DaE01BD",
+    "MockAavePool": "0x31B18280f30Ffae812f71fb4Ffa7b2f1aF75dc5d",
+    "MockFundedSwapRouter": "0x4BD582c2839475d63084aE4d5dEdFE39e5eFBDDb",
+    "AddressBook": "0xa7f8E7e73ADB698F02b45D91B69ae3c15F094219",
+    "Controller": "0x107a73204229809Aa5e23a14A5d88b6697Aabba1",
+    "MarginPool": "0xF3E58e6fed228179dD86fdd3a1A9Fe23A4980DA3",
+    "OTokenFactory": "0x9aD4a3824Ac9Dfb0983EC58a044b1D833B930144",
+    "Oracle": "0x93165653c0618909Ee44e499E2F076f4ba34cE1C",
+    "Whitelist": "0xa32C96b3E0C66C1a5ffE89Fea4Be71b9Ad5Cd2af",
+    "BatchSettler": "0x494E4F5b56Ed30bddB8D2d20300f3977623EB7bF",
+    "BaseVaultAdapterImplementation": "0x94Ba2ba2b602b492D03de82277FbBde319B6B5A0",
+    "BaseVaultAdapter": "0x28B953496815AF6404320522E2CB7b9A2b0a5F90"
+  },
+  "config": {
+    "usdcSource": "Circle testnet USDC",
+    "protocolFeeBps": 400,
+    "swapFeeTier": 500,
+    "initialEthPrice": "2500e8",
+    "initialBtcPrice": "90000e8",
+    "priceDeviationThresholdBps": 1000,
+    "cctpDomain": 6
+  }
+}
