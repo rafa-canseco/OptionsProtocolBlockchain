@@ -263,6 +263,70 @@ contract EthCspVaultTest is Test {
         assertEq(vault.totalManagedAssets(), 0);
     }
 
+    function test_reservedWithdrawalAssetsCannotBeOpenedAsCollateral() public {
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        vm.prank(alice);
+        vault.requestWithdraw(10_000e6);
+
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        vm.prank(bob);
+        vault.deposit(1_000e6);
+
+        address oToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.InsufficientAvailableAssets.selector);
+        vault.openCspBatch(quote, sig, 1e8, 2_000e6);
+
+        assertEq(vault.reservedWithdrawalAssets(), 10_000e6);
+        assertEq(vault.availableIdleAssets(), 1_000e6);
+    }
+
+    function test_closeEpochDoesNotDoubleCountPreviousWithdrawalReserves() public {
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+        vm.prank(bob);
+        vault.deposit(10_000e6);
+
+        vm.prank(alice);
+        vault.requestWithdraw(10_000e6);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        assertEq(vault.reservedWithdrawalAssets(), 10_000e6);
+        assertEq(vault.availableIdleAssets(), 10_000e6);
+        assertEq(vault.totalShares(), 10_000e6);
+
+        vm.prank(bob);
+        vault.requestWithdraw(10_000e6);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        assertEq(vault.reservedWithdrawalAssets(), 20_000e6);
+        assertEq(vault.availableIdleAssets(), 0);
+        assertEq(vault.totalShares(), 0);
+    }
+
+    function test_depositRevertsWhenExistingSharesHaveNoManagedAssets() public {
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        vm.prank(address(vault));
+        usdc.transfer(address(0xDEAD), 10_000e6);
+
+        assertEq(vault.totalShares(), 10_000e6);
+        assertEq(vault.totalManagedAssets(), 0);
+
+        vm.prank(bob);
+        vm.expectRevert(EthCspVault.InsolventShareSupply.selector);
+        vault.deposit(1_000e6);
+    }
+
     function test_rejectsCoveredCallAndNonOperatorOpen() public {
         vm.prank(alice);
         vault.deposit(10_000e6);

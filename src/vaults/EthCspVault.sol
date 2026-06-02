@@ -115,6 +115,8 @@ contract EthCspVault is ReentrancyGuard {
     error PremiumAccountingMismatch();
     error PendingWithdrawal();
     error EpochNotClosed();
+    error InsufficientAvailableAssets();
+    error InsolventShareSupply();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -161,8 +163,10 @@ contract EthCspVault is ReentrancyGuard {
         uint256 managedBefore = totalManagedAssets();
         usdc.safeTransferFrom(msg.sender, address(this), amount);
 
-        if (totalShares == 0 || managedBefore == 0) {
+        if (totalShares == 0) {
             mintedShares = amount;
+        } else if (managedBefore == 0) {
+            revert InsolventShareSupply();
         } else {
             mintedShares = (amount * totalShares) / managedBefore;
         }
@@ -216,6 +220,7 @@ contract EthCspVault is ReentrancyGuard {
     ) external onlyOperator nonReentrant returns (uint256 batchId, uint256 protocolVaultId) {
         if (amount == 0 || collateral == 0) revert InvalidAmount();
         _validateEthUsdcPut(quote.oToken);
+        if (collateral > availableIdleAssets()) revert InsufficientAvailableAssets();
 
         address marginPool = addressBook.marginPool();
         usdc.forceApprove(marginPool, collateral);
@@ -291,7 +296,7 @@ contract EthCspVault is ReentrancyGuard {
         uint256 pendingShares = totalPendingWithdrawalShares;
         uint256 reservedAssets;
         if (pendingShares > 0) {
-            reservedAssets = (idleAssets() * pendingShares) / totalShares;
+            reservedAssets = (availableIdleAssets() * pendingShares) / totalShares;
             epoch.withdrawalAssetsPerShare = (reservedAssets * 1e18) / pendingShares;
             totalShares -= pendingShares;
             totalPendingWithdrawalShares = 0;
@@ -336,8 +341,14 @@ contract EthCspVault is ReentrancyGuard {
         return usdc.balanceOf(address(this));
     }
 
+    function availableIdleAssets() public view returns (uint256) {
+        uint256 idle = idleAssets();
+        if (idle <= reservedWithdrawalAssets) return 0;
+        return idle - reservedWithdrawalAssets;
+    }
+
     function totalManagedAssets() public view returns (uint256) {
-        return idleAssets() - reservedWithdrawalAssets + activeCollateral;
+        return availableIdleAssets() + activeCollateral;
     }
 
     function convertToAssets(uint256 shares) external view returns (uint256) {
