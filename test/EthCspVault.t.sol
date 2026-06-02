@@ -1,0 +1,309 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
+
+import "forge-std/Test.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import "../src/core/AddressBook.sol";
+import "../src/core/BatchSettler.sol";
+import "../src/core/Controller.sol";
+import "../src/core/MarginPool.sol";
+import "../src/core/OToken.sol";
+import "../src/core/OTokenFactory.sol";
+import "../src/core/Oracle.sol";
+import "../src/core/Whitelist.sol";
+import "../src/mocks/MockERC20.sol";
+import "../src/vaults/EthCspVault.sol";
+
+contract EthCspVaultTest is Test {
+    AddressBook public addressBook;
+    Controller public controller;
+    MarginPool public pool;
+    OTokenFactory public factory;
+    Oracle public oracle;
+    Whitelist public whitelist;
+    BatchSettler public settler;
+    EthCspVault public vault;
+
+    MockERC20 public weth;
+    MockERC20 public usdc;
+
+    address public alice = address(0xA11CE);
+    address public bob = address(0xB0B);
+    address public operator = address(0x0F);
+    address public feeRecipient = address(0xFEE);
+
+    uint256 public mmKey = 0xAA01;
+    address public mm;
+
+    uint256 public expiry;
+    uint256 public nextQuoteId = 1;
+    uint256 public constant STRIKE = 2000e8;
+
+    function setUp() public {
+        vm.warp(1700000000);
+        mm = vm.addr(mmKey);
+
+        weth = new MockERC20("Wrapped ETH", "WETH", 18);
+        usdc = new MockERC20("USD Coin", "USDC", 6);
+
+        addressBook = AddressBook(
+            address(
+                new ERC1967Proxy(address(new AddressBook()), abi.encodeCall(AddressBook.initialize, (address(this))))
+            )
+        );
+        controller = Controller(
+            address(
+                new ERC1967Proxy(
+                    address(new Controller()),
+                    abi.encodeCall(Controller.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        pool = MarginPool(
+            address(
+                new ERC1967Proxy(
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                )
+            )
+        );
+        factory = OTokenFactory(
+            address(
+                new ERC1967Proxy(
+                    address(new OTokenFactory()), abi.encodeCall(OTokenFactory.initialize, (address(addressBook)))
+                )
+            )
+        );
+        oracle = Oracle(
+            address(
+                new ERC1967Proxy(
+                    address(new Oracle()), abi.encodeCall(Oracle.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        whitelist = Whitelist(
+            address(
+                new ERC1967Proxy(
+                    address(new Whitelist()),
+                    abi.encodeCall(Whitelist.initialize, (address(addressBook), address(this)))
+                )
+            )
+        );
+        settler = BatchSettler(
+            address(
+                new ERC1967Proxy(
+                    address(new BatchSettler()),
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), operator, address(this)))
+                )
+            )
+        );
+
+        addressBook.setController(address(controller));
+        addressBook.setMarginPool(address(pool));
+        addressBook.setOTokenFactory(address(factory));
+        addressBook.setOracle(address(oracle));
+        addressBook.setWhitelist(address(whitelist));
+        addressBook.setBatchSettler(address(settler));
+
+        factory.setOperator(address(this));
+        settler.setWhitelistedMM(mm, true);
+
+        whitelist.whitelistUnderlying(address(weth));
+        whitelist.whitelistCollateral(address(usdc));
+        whitelist.whitelistCollateral(address(weth));
+        whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);
+        whitelist.whitelistProduct(address(weth), address(usdc), address(weth), false);
+
+        vault = new EthCspVault(address(addressBook), address(usdc), address(weth), operator, feeRecipient, 1000);
+
+        _computeExpiry();
+
+        usdc.mint(mm, 1_000_000e6);
+        vm.prank(mm);
+        usdc.approve(address(settler), type(uint256).max);
+
+        usdc.mint(alice, 20_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+
+        usdc.mint(bob, 20_000e6);
+        vm.prank(bob);
+        usdc.approve(address(vault), type(uint256).max);
+    }
+
+    function test_depositMintsInternalShares() public {
+        vm.prank(alice);
+        uint256 minted = vault.deposit(10_000e6);
+
+        assertEq(minted, 10_000e6);
+        assertEq(vault.sharesOf(alice), 10_000e6);
+        assertEq(vault.totalShares(), 10_000e6);
+        assertEq(vault.totalManagedAssets(), 10_000e6);
+
+        (uint64 startedAt,,,,,,,,,) = vault.epochs(1);
+        assertEq(startedAt, uint64(block.timestamp));
+    }
+
+    function test_openCspBatchUsesExistingBatchSettlerFlow() public {
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        address oToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        (uint256 batchId, uint256 protocolVaultId) = vault.openCspBatch(quote, sig, 1e8, 2000e6);
+
+        assertEq(batchId, 1);
+        assertEq(protocolVaultId, 1);
+        assertEq(vault.activeBatches(), 1);
+        assertEq(vault.activeCollateral(), 2000e6);
+        assertEq(vault.idleAssets(), 8070e6);
+        assertEq(vault.totalManagedAssets(), 10_070e6);
+        assertEq(usdc.balanceOf(address(pool)), 2000e6);
+        assertEq(settler.mmOTokenBalance(mm, oToken), 1e8);
+        assertEq(OToken(oToken).balanceOf(address(settler)), 1e8);
+
+        (uint256 epochId,, uint256 storedVaultId, uint256 amount, uint256 collateral, uint256 premium,, bool settled) =
+            vault.batches(batchId);
+        assertEq(epochId, 1);
+        assertEq(storedVaultId, protocolVaultId);
+        assertEq(amount, 1e8);
+        assertEq(collateral, 2000e6);
+        assertEq(premium, 70e6);
+        assertFalse(settled);
+    }
+
+    function test_settleOtmCloseEpochChargesPerformanceFeeAndRollsOver() public {
+        _depositAndOpenOnePut();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+
+        vm.prank(operator);
+        uint256 returned = vault.settleCspBatch(1);
+
+        assertEq(returned, 2000e6);
+        assertEq(vault.activeBatches(), 0);
+        assertEq(vault.activeCollateral(), 0);
+        assertEq(vault.idleAssets(), 10_070e6);
+
+        (,,,,,,, int256 realizedPnlBeforeFee,,) = vault.epochs(1);
+        assertEq(realizedPnlBeforeFee, int256(70e6));
+
+        vm.prank(operator);
+        uint256 nextEpoch = vault.closeEpoch();
+
+        assertEq(nextEpoch, 2);
+        assertEq(vault.currentEpoch(), 2);
+        assertEq(usdc.balanceOf(feeRecipient), 7e6);
+        assertEq(vault.totalManagedAssets(), 10_063e6);
+
+        (,,,,,,,, uint256 performanceFee, bool closed) = vault.epochs(1);
+        assertEq(performanceFee, 7e6);
+        assertTrue(closed);
+    }
+
+    function test_settleItmDoesNotChargePerformanceFee() public {
+        _depositAndOpenOnePut();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        vm.prank(operator);
+        uint256 returned = vault.settleCspBatch(1);
+        assertEq(returned, 0);
+
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        assertEq(usdc.balanceOf(feeRecipient), 0);
+        assertEq(vault.totalManagedAssets(), 8070e6);
+
+        (,,,,,,, int256 realizedPnl, uint256 performanceFee,) = vault.epochs(1);
+        assertEq(realizedPnl, -int256(1930e6));
+        assertEq(performanceFee, 0);
+    }
+
+    function test_withdrawBlockedWhileBatchOpenThenUsesRolloverAssets() public {
+        _depositAndOpenOnePut();
+
+        vm.prank(bob);
+        vm.expectRevert(EthCspVault.OpenBatches.selector);
+        vault.deposit(1_000e6);
+
+        vm.prank(alice);
+        vm.expectRevert(EthCspVault.OpenBatches.selector);
+        vault.withdraw(10_000e6);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+        vm.prank(operator);
+        vault.settleCspBatch(1);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        vm.prank(alice);
+        uint256 withdrawn = vault.withdraw(10_000e6);
+
+        assertEq(withdrawn, 10_063e6);
+        assertEq(usdc.balanceOf(alice), 20_063e6);
+        assertEq(vault.totalShares(), 0);
+        assertEq(vault.totalManagedAssets(), 0);
+    }
+
+    function test_rejectsCoveredCallAndNonOperatorOpen() public {
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        address callToken = factory.createOToken(address(weth), address(usdc), address(weth), 2300e8, expiry, false);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(callToken, 50e6, 100e8);
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.InvalidOToken.selector);
+        vault.openCspBatch(quote, sig, 1e8, 1e18);
+
+        address putToken = _createPut();
+        (quote, sig) = _signQuote(putToken, 70e6, 100e8);
+
+        vm.prank(alice);
+        vm.expectRevert(EthCspVault.OnlyOperator.selector);
+        vault.openCspBatch(quote, sig, 1e8, 2000e6);
+    }
+
+    function _depositAndOpenOnePut() internal {
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        address oToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        vault.openCspBatch(quote, sig, 1e8, 2000e6);
+    }
+
+    function _createPut() internal returns (address) {
+        return factory.createOToken(address(weth), address(usdc), address(usdc), STRIKE, expiry, true);
+    }
+
+    function _signQuote(address oToken, uint256 bidPrice, uint256 maxAmount)
+        internal
+        returns (BatchSettler.Quote memory quote, bytes memory sig)
+    {
+        quote = BatchSettler.Quote({
+            oToken: oToken,
+            bidPrice: bidPrice,
+            deadline: block.timestamp + 1 hours,
+            quoteId: nextQuoteId++,
+            maxAmount: maxAmount,
+            makerNonce: settler.makerNonce(mm)
+        });
+        bytes32 digest = settler.hashQuote(quote);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mmKey, digest);
+        sig = abi.encodePacked(r, s, v);
+    }
+
+    function _computeExpiry() internal {
+        uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
+        expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
+    }
+}

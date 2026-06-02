@@ -1,0 +1,317 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "../core/AddressBook.sol";
+import "../core/BatchSettler.sol";
+import "../core/Controller.sol";
+import "../core/OToken.sol";
+
+/**
+ * @title EthCspVault
+ * @notice First vault slice: users deposit USDC once and an operator repeatedly
+ *         sells ETH cash-secured puts through the existing BatchSettler flow.
+ * @dev Not ERC4626 by design. This keeps the V1 accounting explicit while the
+ *      product is limited to one collateral asset, one underlying, and one
+ *      strategy.
+ */
+contract EthCspVault is ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
+    struct Epoch {
+        uint64 startedAt;
+        uint64 endedAt;
+        uint256 deposits;
+        uint256 withdrawals;
+        uint256 committedCollateral;
+        uint256 returnedCollateral;
+        uint256 premiumEarned;
+        int256 realizedPnl;
+        uint256 performanceFee;
+        bool closed;
+    }
+
+    struct CspBatch {
+        uint256 epochId;
+        address oToken;
+        uint256 protocolVaultId;
+        uint256 amount;
+        uint256 collateral;
+        uint256 premiumEarned;
+        uint256 collateralReturned;
+        bool settled;
+    }
+
+    AddressBook public immutable addressBook;
+    IERC20 public immutable usdc;
+    address public immutable ethUnderlying;
+
+    address public owner;
+    address public operator;
+    address public feeRecipient;
+    uint256 public performanceFeeBps;
+
+    uint256 public totalShares;
+    mapping(address => uint256) public sharesOf;
+
+    uint256 public currentEpoch;
+    uint256 public batchCount;
+    uint256 public activeBatches;
+    uint256 public activeCollateral;
+
+    mapping(uint256 => Epoch) public epochs;
+    mapping(uint256 => CspBatch) public batches;
+
+    uint256 private constant MAX_PERFORMANCE_FEE_BPS = 2000;
+
+    event Deposited(address indexed user, uint256 amount, uint256 shares);
+    event Withdrawn(address indexed user, uint256 amount, uint256 shares);
+    event CspBatchOpened(
+        uint256 indexed batchId,
+        uint256 indexed epochId,
+        address indexed oToken,
+        uint256 protocolVaultId,
+        uint256 amount,
+        uint256 collateral,
+        uint256 premiumEarned
+    );
+    event CspBatchSettled(
+        uint256 indexed batchId,
+        uint256 indexed epochId,
+        uint256 protocolVaultId,
+        uint256 collateralReturned,
+        int256 realizedPnl
+    );
+    event EpochClosed(uint256 indexed epochId, int256 realizedPnl, uint256 performanceFee);
+    event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
+    event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
+    event PerformanceFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
+    event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
+
+    error InvalidAddress();
+    error InvalidAmount();
+    error OnlyOwner();
+    error OnlyOperator();
+    error OpenBatches();
+    error NoShares();
+    error InsufficientShares();
+    error InvalidOToken();
+    error BatchAlreadySettled();
+    error FeeTooHigh();
+    error PremiumAccountingMismatch();
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert OnlyOwner();
+        _;
+    }
+
+    modifier onlyOperator() {
+        if (msg.sender != operator) revert OnlyOperator();
+        _;
+    }
+
+    constructor(
+        address _addressBook,
+        address _usdc,
+        address _ethUnderlying,
+        address _operator,
+        address _feeRecipient,
+        uint256 _performanceFeeBps
+    ) {
+        if (
+            _addressBook == address(0) || _usdc == address(0) || _ethUnderlying == address(0) || _operator == address(0)
+                || _feeRecipient == address(0)
+        ) {
+            revert InvalidAddress();
+        }
+        if (_performanceFeeBps > MAX_PERFORMANCE_FEE_BPS) revert FeeTooHigh();
+
+        addressBook = AddressBook(_addressBook);
+        usdc = IERC20(_usdc);
+        ethUnderlying = _ethUnderlying;
+        owner = msg.sender;
+        operator = _operator;
+        feeRecipient = _feeRecipient;
+        performanceFeeBps = _performanceFeeBps;
+
+        currentEpoch = 1;
+        epochs[currentEpoch].startedAt = uint64(block.timestamp);
+    }
+
+    function deposit(uint256 amount) external nonReentrant returns (uint256 mintedShares) {
+        if (amount == 0) revert InvalidAmount();
+        if (activeBatches != 0) revert OpenBatches();
+
+        uint256 managedBefore = totalManagedAssets();
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+
+        if (totalShares == 0 || managedBefore == 0) {
+            mintedShares = amount;
+        } else {
+            mintedShares = (amount * totalShares) / managedBefore;
+        }
+        if (mintedShares == 0) revert NoShares();
+
+        sharesOf[msg.sender] += mintedShares;
+        totalShares += mintedShares;
+        epochs[currentEpoch].deposits += amount;
+
+        emit Deposited(msg.sender, amount, mintedShares);
+    }
+
+    function withdraw(uint256 shares) external nonReentrant returns (uint256 amount) {
+        if (shares == 0) revert InvalidAmount();
+        if (activeBatches != 0) revert OpenBatches();
+        if (sharesOf[msg.sender] < shares) revert InsufficientShares();
+
+        amount = (idleAssets() * shares) / totalShares;
+        if (amount == 0) revert InvalidAmount();
+
+        sharesOf[msg.sender] -= shares;
+        totalShares -= shares;
+        epochs[currentEpoch].withdrawals += amount;
+
+        usdc.safeTransfer(msg.sender, amount);
+        emit Withdrawn(msg.sender, amount, shares);
+    }
+
+    function openCspBatch(
+        BatchSettler.Quote calldata quote,
+        bytes calldata signature,
+        uint256 amount,
+        uint256 collateral
+    ) external onlyOperator nonReentrant returns (uint256 batchId, uint256 protocolVaultId) {
+        if (amount == 0 || collateral == 0) revert InvalidAmount();
+        _validateEthUsdcPut(quote.oToken);
+
+        address marginPool = addressBook.marginPool();
+        usdc.forceApprove(marginPool, collateral);
+
+        uint256 balanceBefore = usdc.balanceOf(address(this));
+        protocolVaultId = BatchSettler(addressBook.batchSettler()).executeOrder(quote, signature, amount, collateral);
+        uint256 balanceAfter = usdc.balanceOf(address(this));
+
+        uint256 premiumEarnedWithCollateral = balanceAfter + collateral;
+        if (premiumEarnedWithCollateral < balanceBefore) revert PremiumAccountingMismatch();
+        uint256 premiumEarned = premiumEarnedWithCollateral - balanceBefore;
+
+        batchId = ++batchCount;
+        batches[batchId] = CspBatch({
+            epochId: currentEpoch,
+            oToken: quote.oToken,
+            protocolVaultId: protocolVaultId,
+            amount: amount,
+            collateral: collateral,
+            premiumEarned: premiumEarned,
+            collateralReturned: 0,
+            settled: false
+        });
+
+        activeBatches++;
+        activeCollateral += collateral;
+
+        Epoch storage epoch = epochs[currentEpoch];
+        epoch.committedCollateral += collateral;
+        epoch.premiumEarned += premiumEarned;
+
+        emit CspBatchOpened(batchId, currentEpoch, quote.oToken, protocolVaultId, amount, collateral, premiumEarned);
+    }
+
+    function settleCspBatch(uint256 batchId) external onlyOperator nonReentrant returns (uint256 collateralReturned) {
+        CspBatch storage batch = batches[batchId];
+        if (batch.protocolVaultId == 0) revert InvalidAmount();
+        if (batch.settled) revert BatchAlreadySettled();
+
+        uint256 balanceBefore = usdc.balanceOf(address(this));
+        Controller(addressBook.controller()).settleVault(address(this), batch.protocolVaultId);
+        collateralReturned = usdc.balanceOf(address(this)) - balanceBefore;
+
+        batch.settled = true;
+        batch.collateralReturned = collateralReturned;
+        activeBatches--;
+        activeCollateral -= batch.collateral;
+
+        int256 batchPnl = int256(collateralReturned + batch.premiumEarned) - int256(batch.collateral);
+
+        Epoch storage epoch = epochs[batch.epochId];
+        epoch.returnedCollateral += collateralReturned;
+        epoch.realizedPnl += batchPnl;
+
+        emit CspBatchSettled(batchId, batch.epochId, batch.protocolVaultId, collateralReturned, batchPnl);
+    }
+
+    function closeEpoch() external onlyOperator nonReentrant returns (uint256 nextEpoch) {
+        if (activeBatches != 0) revert OpenBatches();
+
+        Epoch storage epoch = epochs[currentEpoch];
+        if (epoch.closed) revert InvalidAmount();
+
+        uint256 fee;
+        if (epoch.realizedPnl > 0 && performanceFeeBps > 0) {
+            fee = (uint256(epoch.realizedPnl) * performanceFeeBps) / 10000;
+            if (fee > 0) {
+                epoch.performanceFee = fee;
+                usdc.safeTransfer(feeRecipient, fee);
+            }
+        }
+
+        epoch.closed = true;
+        epoch.endedAt = uint64(block.timestamp);
+
+        emit EpochClosed(currentEpoch, epoch.realizedPnl, fee);
+
+        nextEpoch = currentEpoch + 1;
+        currentEpoch = nextEpoch;
+        epochs[nextEpoch].startedAt = uint64(block.timestamp);
+    }
+
+    function setOperator(address newOperator) external onlyOwner {
+        if (newOperator == address(0)) revert InvalidAddress();
+        emit OperatorUpdated(operator, newOperator);
+        operator = newOperator;
+    }
+
+    function setFeeRecipient(address newFeeRecipient) external onlyOwner {
+        if (newFeeRecipient == address(0)) revert InvalidAddress();
+        emit FeeRecipientUpdated(feeRecipient, newFeeRecipient);
+        feeRecipient = newFeeRecipient;
+    }
+
+    function setPerformanceFeeBps(uint256 newFeeBps) external onlyOwner {
+        if (newFeeBps > MAX_PERFORMANCE_FEE_BPS) revert FeeTooHigh();
+        emit PerformanceFeeUpdated(performanceFeeBps, newFeeBps);
+        performanceFeeBps = newFeeBps;
+    }
+
+    function transferOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert InvalidAddress();
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
+    }
+
+    function idleAssets() public view returns (uint256) {
+        return usdc.balanceOf(address(this));
+    }
+
+    function totalManagedAssets() public view returns (uint256) {
+        return idleAssets() + activeCollateral;
+    }
+
+    function convertToAssets(uint256 shares) external view returns (uint256) {
+        if (totalShares == 0) return shares;
+        return (totalManagedAssets() * shares) / totalShares;
+    }
+
+    function _validateEthUsdcPut(address oTokenAddress) internal view {
+        if (oTokenAddress == address(0)) revert InvalidOToken();
+        OToken oToken = OToken(oTokenAddress);
+        if (
+            !oToken.isPut() || oToken.underlying() != ethUnderlying || oToken.strikeAsset() != address(usdc)
+                || oToken.collateralAsset() != address(usdc)
+        ) {
+            revert InvalidOToken();
+        }
+    }
+}
