@@ -139,7 +139,7 @@ contract EthCspVaultTest is Test {
         assertEq(vault.totalShares(), 10_000e6);
         assertEq(vault.totalManagedAssets(), 10_000e6);
 
-        (uint64 startedAt,,,,,,,,,) = vault.epochs(1);
+        (uint64 startedAt,,,,,,,,,,) = vault.epochs(1);
         assertEq(startedAt, uint64(block.timestamp));
     }
 
@@ -187,8 +187,8 @@ contract EthCspVaultTest is Test {
         assertEq(vault.activeCollateral(), 0);
         assertEq(vault.idleAssets(), 10_070e6);
 
-        (,,,,,,, int256 realizedPnlBeforeFee,,) = vault.epochs(1);
-        assertEq(realizedPnlBeforeFee, int256(70e6));
+        (,,,,,,, uint256 assignmentShortfallBeforeFee,,,) = vault.epochs(1);
+        assertEq(assignmentShortfallBeforeFee, 0);
 
         vm.prank(operator);
         uint256 nextEpoch = vault.closeEpoch();
@@ -198,12 +198,12 @@ contract EthCspVaultTest is Test {
         assertEq(usdc.balanceOf(feeRecipient), 7e6);
         assertEq(vault.totalManagedAssets(), 10_063e6);
 
-        (,,,,,,,, uint256 performanceFee, bool closed) = vault.epochs(1);
+        (,,,,,,,, uint256 performanceFee,, bool closed) = vault.epochs(1);
         assertEq(performanceFee, 7e6);
         assertTrue(closed);
     }
 
-    function test_settleItmDoesNotChargePerformanceFee() public {
+    function test_settleItmTracksAssignmentShortfallAndFeesOnlyPremium() public {
         _depositAndOpenOnePut();
 
         vm.warp(expiry + 1);
@@ -216,15 +216,15 @@ contract EthCspVaultTest is Test {
         vm.prank(operator);
         vault.closeEpoch();
 
-        assertEq(usdc.balanceOf(feeRecipient), 0);
-        assertEq(vault.totalManagedAssets(), 8070e6);
+        assertEq(usdc.balanceOf(feeRecipient), 7e6);
+        assertEq(vault.totalManagedAssets(), 8063e6);
 
-        (,,,,,,, int256 realizedPnl, uint256 performanceFee,) = vault.epochs(1);
-        assertEq(realizedPnl, -int256(1930e6));
-        assertEq(performanceFee, 0);
+        (,,,,,,, uint256 assignmentShortfall, uint256 performanceFee,,) = vault.epochs(1);
+        assertEq(assignmentShortfall, 2000e6);
+        assertEq(performanceFee, 7e6);
     }
 
-    function test_withdrawBlockedWhileBatchOpenThenUsesRolloverAssets() public {
+    function test_requestWithdrawBeforeCloseAndClaimAfterEpoch() public {
         _depositAndOpenOnePut();
 
         vm.prank(bob);
@@ -232,8 +232,16 @@ contract EthCspVaultTest is Test {
         vault.deposit(1_000e6);
 
         vm.prank(alice);
-        vm.expectRevert(EthCspVault.OpenBatches.selector);
-        vault.withdraw(10_000e6);
+        vault.requestWithdraw(10_000e6);
+
+        assertEq(vault.sharesOf(alice), 0);
+        assertEq(vault.pendingWithdrawalEpoch(alice), 1);
+        assertEq(vault.pendingWithdrawalShares(alice), 10_000e6);
+        assertEq(vault.totalPendingWithdrawalShares(), 10_000e6);
+
+        vm.prank(alice);
+        vm.expectRevert(EthCspVault.EpochNotClosed.selector);
+        vault.claimWithdraw();
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
@@ -242,12 +250,16 @@ contract EthCspVaultTest is Test {
         vm.prank(operator);
         vault.closeEpoch();
 
+        assertEq(vault.totalShares(), 0);
+        assertEq(vault.reservedWithdrawalAssets(), 10_063e6);
+        assertEq(vault.totalManagedAssets(), 0);
+
         vm.prank(alice);
-        uint256 withdrawn = vault.withdraw(10_000e6);
+        uint256 withdrawn = vault.claimWithdraw();
 
         assertEq(withdrawn, 10_063e6);
         assertEq(usdc.balanceOf(alice), 20_063e6);
-        assertEq(vault.totalShares(), 0);
+        assertEq(vault.reservedWithdrawalAssets(), 0);
         assertEq(vault.totalManagedAssets(), 0);
     }
 

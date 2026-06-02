@@ -28,8 +28,9 @@ contract EthCspVault is ReentrancyGuard {
         uint256 committedCollateral;
         uint256 returnedCollateral;
         uint256 premiumEarned;
-        int256 realizedPnl;
+        uint256 assignmentShortfall;
         uint256 performanceFee;
+        uint256 withdrawalAssetsPerShare;
         bool closed;
     }
 
@@ -60,14 +61,19 @@ contract EthCspVault is ReentrancyGuard {
     uint256 public batchCount;
     uint256 public activeBatches;
     uint256 public activeCollateral;
+    uint256 public totalPendingWithdrawalShares;
+    uint256 public reservedWithdrawalAssets;
 
     mapping(uint256 => Epoch) public epochs;
     mapping(uint256 => CspBatch) public batches;
+    mapping(address => uint256) public pendingWithdrawalEpoch;
+    mapping(address => uint256) public pendingWithdrawalShares;
 
     uint256 private constant MAX_PERFORMANCE_FEE_BPS = 2000;
 
     event Deposited(address indexed user, uint256 amount, uint256 shares);
-    event Withdrawn(address indexed user, uint256 amount, uint256 shares);
+    event WithdrawRequested(address indexed user, uint256 indexed epochId, uint256 shares);
+    event WithdrawClaimed(address indexed user, uint256 indexed epochId, uint256 amount, uint256 shares);
     event CspBatchOpened(
         uint256 indexed batchId,
         uint256 indexed epochId,
@@ -82,9 +88,15 @@ contract EthCspVault is ReentrancyGuard {
         uint256 indexed epochId,
         uint256 protocolVaultId,
         uint256 collateralReturned,
-        int256 realizedPnl
+        uint256 assignmentShortfall
     );
-    event EpochClosed(uint256 indexed epochId, int256 realizedPnl, uint256 performanceFee);
+    event EpochClosed(
+        uint256 indexed epochId,
+        uint256 premiumEarned,
+        uint256 assignmentShortfall,
+        uint256 performanceFee,
+        uint256 reservedWithdrawalAssets
+    );
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event PerformanceFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
@@ -101,6 +113,8 @@ contract EthCspVault is ReentrancyGuard {
     error BatchAlreadySettled();
     error FeeTooHigh();
     error PremiumAccountingMismatch();
+    error PendingWithdrawal();
+    error EpochNotClosed();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -161,20 +175,37 @@ contract EthCspVault is ReentrancyGuard {
         emit Deposited(msg.sender, amount, mintedShares);
     }
 
-    function withdraw(uint256 shares) external nonReentrant returns (uint256 amount) {
+    function requestWithdraw(uint256 shares) external nonReentrant {
         if (shares == 0) revert InvalidAmount();
-        if (activeBatches != 0) revert OpenBatches();
+        if (pendingWithdrawalShares[msg.sender] != 0) revert PendingWithdrawal();
         if (sharesOf[msg.sender] < shares) revert InsufficientShares();
 
-        amount = (idleAssets() * shares) / totalShares;
+        sharesOf[msg.sender] -= shares;
+        pendingWithdrawalEpoch[msg.sender] = currentEpoch;
+        pendingWithdrawalShares[msg.sender] = shares;
+        totalPendingWithdrawalShares += shares;
+
+        emit WithdrawRequested(msg.sender, currentEpoch, shares);
+    }
+
+    function claimWithdraw() external nonReentrant returns (uint256 amount) {
+        uint256 epochId = pendingWithdrawalEpoch[msg.sender];
+        uint256 shares = pendingWithdrawalShares[msg.sender];
+        if (shares == 0) revert InvalidAmount();
+
+        Epoch storage epoch = epochs[epochId];
+        if (!epoch.closed) revert EpochNotClosed();
+
+        amount = (shares * epoch.withdrawalAssetsPerShare) / 1e18;
         if (amount == 0) revert InvalidAmount();
 
-        sharesOf[msg.sender] -= shares;
-        totalShares -= shares;
-        epochs[currentEpoch].withdrawals += amount;
+        pendingWithdrawalEpoch[msg.sender] = 0;
+        pendingWithdrawalShares[msg.sender] = 0;
+        reservedWithdrawalAssets -= amount;
+        epoch.withdrawals += amount;
 
         usdc.safeTransfer(msg.sender, amount);
-        emit Withdrawn(msg.sender, amount, shares);
+        emit WithdrawClaimed(msg.sender, epochId, amount, shares);
     }
 
     function openCspBatch(
@@ -233,13 +264,13 @@ contract EthCspVault is ReentrancyGuard {
         activeBatches--;
         activeCollateral -= batch.collateral;
 
-        int256 batchPnl = int256(collateralReturned + batch.premiumEarned) - int256(batch.collateral);
+        uint256 assignmentShortfall = batch.collateral - collateralReturned;
 
         Epoch storage epoch = epochs[batch.epochId];
         epoch.returnedCollateral += collateralReturned;
-        epoch.realizedPnl += batchPnl;
+        epoch.assignmentShortfall += assignmentShortfall;
 
-        emit CspBatchSettled(batchId, batch.epochId, batch.protocolVaultId, collateralReturned, batchPnl);
+        emit CspBatchSettled(batchId, batch.epochId, batch.protocolVaultId, collateralReturned, assignmentShortfall);
     }
 
     function closeEpoch() external onlyOperator nonReentrant returns (uint256 nextEpoch) {
@@ -249,18 +280,28 @@ contract EthCspVault is ReentrancyGuard {
         if (epoch.closed) revert InvalidAmount();
 
         uint256 fee;
-        if (epoch.realizedPnl > 0 && performanceFeeBps > 0) {
-            fee = (uint256(epoch.realizedPnl) * performanceFeeBps) / 10000;
+        if (epoch.premiumEarned > 0 && performanceFeeBps > 0) {
+            fee = (epoch.premiumEarned * performanceFeeBps) / 10000;
             if (fee > 0) {
                 epoch.performanceFee = fee;
                 usdc.safeTransfer(feeRecipient, fee);
             }
         }
 
+        uint256 pendingShares = totalPendingWithdrawalShares;
+        uint256 reservedAssets;
+        if (pendingShares > 0) {
+            reservedAssets = (idleAssets() * pendingShares) / totalShares;
+            epoch.withdrawalAssetsPerShare = (reservedAssets * 1e18) / pendingShares;
+            totalShares -= pendingShares;
+            totalPendingWithdrawalShares = 0;
+            reservedWithdrawalAssets += reservedAssets;
+        }
+
         epoch.closed = true;
         epoch.endedAt = uint64(block.timestamp);
 
-        emit EpochClosed(currentEpoch, epoch.realizedPnl, fee);
+        emit EpochClosed(currentEpoch, epoch.premiumEarned, epoch.assignmentShortfall, fee, reservedAssets);
 
         nextEpoch = currentEpoch + 1;
         currentEpoch = nextEpoch;
@@ -296,7 +337,7 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function totalManagedAssets() public view returns (uint256) {
-        return idleAssets() + activeCollateral;
+        return idleAssets() - reservedWithdrawalAssets + activeCollateral;
     }
 
     function convertToAssets(uint256 shares) external view returns (uint256) {
