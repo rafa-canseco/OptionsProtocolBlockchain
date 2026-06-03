@@ -32,6 +32,8 @@ contract EthCspVaultTest is Test {
     address public carol = address(0xCA20);
     address public receiver = address(0x1234);
     address public operator = address(0x0F);
+    address public curator = address(0xC02A);
+    address public newAllocator = address(0xA110C);
     address public feeRecipient = address(0xFEE);
 
     uint256 public mmKey = 0xAA01;
@@ -586,7 +588,7 @@ contract EthCspVaultTest is Test {
         assertEq(vault.availableUnderlyingAssets(), 1e18);
     }
 
-    function test_rejectsCoveredCallAndNonOperatorOpen() public {
+    function test_rejectsCoveredCallAndNonAllocatorOpen() public {
         vm.prank(alice);
         vault.deposit(10_000e6);
 
@@ -601,8 +603,97 @@ contract EthCspVaultTest is Test {
         (quote, sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(alice);
-        vm.expectRevert(EthCspVault.OnlyOperator.selector);
+        vm.expectRevert(EthCspVault.OnlyAllocator.selector);
         vault.openCspBatch(quote, sig, 1e8, 2000e6);
+    }
+
+    function test_ownerSetsCuratorAndCuratorSetsAllocator() public {
+        vault.setCurator(curator);
+        assertEq(vault.curator(), curator);
+
+        vm.prank(curator);
+        vault.setAllocator(newAllocator);
+        assertEq(vault.allocator(), newAllocator);
+
+        address putToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.OnlyAllocator.selector);
+        vault.openCspBatch(quote, sig, 1e8, 2000e6);
+
+        vm.prank(newAllocator);
+        vault.openCspBatch(quote, sig, 1e8, 2000e6);
+    }
+
+    function test_curatorStrategyBoundsAllocator() public {
+        vault.setStrategyConfig(
+            EthCspVault.StrategyConfig({
+                maxCollateralPerBatch: 1500e6,
+                maxUtilizationBps: 10_000,
+                minPremiumBps: 0,
+                minExpiryDelay: 0,
+                maxExpiryDelay: type(uint256).max,
+                minStrike: 0,
+                maxStrike: type(uint256).max
+            })
+        );
+
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        address putToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.StrategyConstraint.selector);
+        vault.openCspBatch(quote, sig, 1e8, 2000e6);
+
+        vault.setStrategyConfig(
+            EthCspVault.StrategyConfig({
+                maxCollateralPerBatch: 2000e6,
+                maxUtilizationBps: 10_000,
+                minPremiumBps: 400,
+                minExpiryDelay: 0,
+                maxExpiryDelay: type(uint256).max,
+                minStrike: 0,
+                maxStrike: type(uint256).max
+            })
+        );
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.StrategyConstraint.selector);
+        vault.openCspBatch(quote, sig, 1e8, 2000e6);
+    }
+
+    function test_activateDepositsSkipsUsersWithoutPendingAssets() public {
+        _depositAndOpenOnePut();
+
+        vm.prank(bob);
+        vault.deposit(1_000e6);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+        uint256 returned = _backendSettleVault(1, 1);
+        vm.prank(operator);
+        vault.settleCspBatch(1, returned, 0);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        address[] memory users = new address[](3);
+        users[0] = alice;
+        users[1] = bob;
+        users[2] = carol;
+
+        uint256 minted = vault.activateDeposits(users);
+
+        assertEq(minted, 993_740_063);
+        assertEq(vault.pendingDepositAssets(bob), 0);
+        assertEq(vault.totalPendingDepositAssets(), 0);
+        assertEq(vault.sharesOf(bob), 993_740_063);
     }
 
     function _depositAndOpenOnePut() internal {

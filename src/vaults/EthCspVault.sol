@@ -11,7 +11,7 @@ import "../core/OToken.sol";
 
 /**
  * @title EthCspVault
- * @notice First vault slice: users deposit USDC once and an operator repeatedly
+ * @notice First vault slice: users deposit USDC once and an allocator repeatedly
  *         sells ETH cash-secured puts through the existing BatchSettler flow.
  * @dev Not ERC4626 by design. This keeps the V1 accounting explicit while the
  *      product is limited to one collateral asset, one underlying, and one
@@ -47,15 +47,27 @@ contract EthCspVault is ReentrancyGuard {
         bool settled;
     }
 
+    struct StrategyConfig {
+        uint256 maxCollateralPerBatch;
+        uint256 maxUtilizationBps;
+        uint256 minPremiumBps;
+        uint256 minExpiryDelay;
+        uint256 maxExpiryDelay;
+        uint256 minStrike;
+        uint256 maxStrike;
+    }
+
     AddressBook public immutable addressBook;
     IERC20 public immutable usdc;
     IERC20 public immutable underlying;
     address public immutable ethUnderlying;
 
     address public owner;
-    address public operator;
+    address public curator;
+    address public allocator;
     address public feeRecipient;
     uint256 public performanceFeeBps;
+    StrategyConfig public strategyConfig;
 
     uint256 public totalShares;
     mapping(address => uint256) public sharesOf;
@@ -119,7 +131,9 @@ contract EthCspVault is ReentrancyGuard {
         uint256 performanceFee,
         uint256 reservedWithdrawalAssets
     );
-    event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
+    event CuratorUpdated(address indexed oldCurator, address indexed newCurator);
+    event AllocatorUpdated(address indexed oldAllocator, address indexed newAllocator);
+    event StrategyConfigUpdated(StrategyConfig config);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event PerformanceFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
@@ -127,7 +141,8 @@ contract EthCspVault is ReentrancyGuard {
     error InvalidAddress();
     error InvalidAmount();
     error OnlyOwner();
-    error OnlyOperator();
+    error OnlyCurator();
+    error OnlyAllocator();
     error OpenBatches();
     error NoShares();
     error InsufficientShares();
@@ -142,14 +157,20 @@ contract EthCspVault is ReentrancyGuard {
     error PendingWithdrawalsOpen();
     error PendingDepositsOpen();
     error CollateralAccountingMismatch();
+    error StrategyConstraint();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
         _;
     }
 
-    modifier onlyOperator() {
-        if (msg.sender != operator) revert OnlyOperator();
+    modifier onlyCurator() {
+        if (msg.sender != owner && msg.sender != curator) revert OnlyCurator();
+        _;
+    }
+
+    modifier onlyAllocator() {
+        if (msg.sender != allocator) revert OnlyAllocator();
         _;
     }
 
@@ -157,13 +178,13 @@ contract EthCspVault is ReentrancyGuard {
         address _addressBook,
         address _usdc,
         address _ethUnderlying,
-        address _operator,
+        address _allocator,
         address _feeRecipient,
         uint256 _performanceFeeBps
     ) {
         if (
-            _addressBook == address(0) || _usdc == address(0) || _ethUnderlying == address(0) || _operator == address(0)
-                || _feeRecipient == address(0)
+            _addressBook == address(0) || _usdc == address(0) || _ethUnderlying == address(0)
+                || _allocator == address(0) || _feeRecipient == address(0)
         ) {
             revert InvalidAddress();
         }
@@ -174,9 +195,19 @@ contract EthCspVault is ReentrancyGuard {
         underlying = IERC20(_ethUnderlying);
         ethUnderlying = _ethUnderlying;
         owner = msg.sender;
-        operator = _operator;
+        curator = msg.sender;
+        allocator = _allocator;
         feeRecipient = _feeRecipient;
         performanceFeeBps = _performanceFeeBps;
+        strategyConfig = StrategyConfig({
+            maxCollateralPerBatch: type(uint256).max,
+            maxUtilizationBps: 10_000,
+            minPremiumBps: 0,
+            minExpiryDelay: 0,
+            maxExpiryDelay: type(uint256).max,
+            minStrike: 0,
+            maxStrike: type(uint256).max
+        });
 
         currentEpoch = 1;
         epochs[currentEpoch].startedAt = uint64(block.timestamp);
@@ -213,6 +244,7 @@ contract EthCspVault is ReentrancyGuard {
     function activateDeposits(address[] calldata users) external nonReentrant returns (uint256 mintedShares) {
         for (uint256 i = 0; i < users.length; i++) {
             if (users[i] == address(0)) revert InvalidAddress();
+            if (pendingDepositAssets[users[i]] == 0) continue;
             mintedShares += _activateDeposit(users[i]);
         }
     }
@@ -305,12 +337,13 @@ contract EthCspVault is ReentrancyGuard {
         bytes calldata signature,
         uint256 amount,
         uint256 collateral
-    ) external onlyOperator nonReentrant returns (uint256 batchId, uint256 protocolVaultId) {
+    ) external onlyAllocator nonReentrant returns (uint256 batchId, uint256 protocolVaultId) {
         if (amount == 0 || collateral == 0) revert InvalidAmount();
         _validateEthUsdcPut(quote.oToken);
         if (totalPendingDepositAssets != 0) revert PendingDepositsOpen();
         if (availableUnderlyingAssets() != 0) revert OpenBatches();
         if (collateral > deployableIdleAssets()) revert InsufficientAvailableAssets();
+        _validateStrategy(quote, amount, collateral);
 
         address marginPool = addressBook.marginPool();
         uint256 poolBalanceBefore = MarginPool(marginPool).getStoredBalance(address(usdc));
@@ -359,11 +392,11 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     /// @notice Finalizes vault accounting after the backend has settled the protocol vault.
-    /// @dev The vault never calls Controller settlement or physical redemption itself. The operator
+    /// @dev The vault never calls Controller settlement or physical redemption itself. The allocator
     ///      must first settle through BatchSettler and, when assigned, deliver WETH to this vault.
     function settleCspBatch(uint256 batchId, uint256 collateralReturned, uint256 underlyingReceived)
         external
-        onlyOperator
+        onlyAllocator
         nonReentrant
     {
         CspBatch storage batch = batches[batchId];
@@ -394,7 +427,7 @@ contract EthCspVault is ReentrancyGuard {
         );
     }
 
-    function closeEpoch() external onlyOperator nonReentrant returns (uint256 nextEpoch) {
+    function closeEpoch() external onlyAllocator nonReentrant returns (uint256 nextEpoch) {
         if (activeBatches != 0) revert OpenBatches();
 
         Epoch storage epoch = epochs[currentEpoch];
@@ -431,10 +464,24 @@ contract EthCspVault is ReentrancyGuard {
         epochs[nextEpoch].startedAt = uint64(block.timestamp);
     }
 
-    function setOperator(address newOperator) external onlyOwner {
-        if (newOperator == address(0)) revert InvalidAddress();
-        emit OperatorUpdated(operator, newOperator);
-        operator = newOperator;
+    function setCurator(address newCurator) external onlyOwner {
+        if (newCurator == address(0)) revert InvalidAddress();
+        emit CuratorUpdated(curator, newCurator);
+        curator = newCurator;
+    }
+
+    function setAllocator(address newAllocator) external onlyCurator {
+        if (newAllocator == address(0)) revert InvalidAddress();
+        emit AllocatorUpdated(allocator, newAllocator);
+        allocator = newAllocator;
+    }
+
+    function setStrategyConfig(StrategyConfig calldata newConfig) external onlyCurator {
+        if (newConfig.maxUtilizationBps > 10_000) revert StrategyConstraint();
+        if (newConfig.maxExpiryDelay < newConfig.minExpiryDelay) revert StrategyConstraint();
+        if (newConfig.maxStrike < newConfig.minStrike) revert StrategyConstraint();
+        strategyConfig = newConfig;
+        emit StrategyConfigUpdated(newConfig);
     }
 
     function setFeeRecipient(address newFeeRecipient) external onlyOwner {
@@ -529,6 +576,23 @@ contract EthCspVault is ReentrancyGuard {
 
     function _canActivateDeposits() internal view returns (bool) {
         return activeBatches == 0 && totalPendingWithdrawalShares == 0 && availableUnderlyingAssets() == 0;
+    }
+
+    function _validateStrategy(BatchSettler.Quote calldata quote, uint256 amount, uint256 collateral) internal view {
+        StrategyConfig memory config = strategyConfig;
+        OToken oToken = OToken(quote.oToken);
+
+        if (collateral > config.maxCollateralPerBatch) revert StrategyConstraint();
+        if (collateral * 10_000 > totalManagedAssets() * config.maxUtilizationBps) revert StrategyConstraint();
+
+        uint256 premium = (amount * quote.bidPrice) / 1e8;
+        if (premium * 10_000 < collateral * config.minPremiumBps) revert StrategyConstraint();
+
+        uint256 expiryDelay = oToken.expiry() > block.timestamp ? oToken.expiry() - block.timestamp : 0;
+        if (expiryDelay < config.minExpiryDelay || expiryDelay > config.maxExpiryDelay) revert StrategyConstraint();
+
+        uint256 strike = oToken.strikePrice();
+        if (strike < config.minStrike || strike > config.maxStrike) revert StrategyConstraint();
     }
 
     function _virtualAssets() internal pure returns (uint256) {
