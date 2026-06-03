@@ -68,6 +68,7 @@ contract EthCspVault is ReentrancyGuard {
     uint256 public totalPendingWithdrawalClaims;
     uint256 public reservedWithdrawalAssets;
     uint256 public reservedUnderlyingAssets;
+    uint256 public accountedUnderlyingAssets;
 
     mapping(uint256 => Epoch) public epochs;
     mapping(uint256 => CspBatch) public batches;
@@ -208,6 +209,8 @@ contract EthCspVault is ReentrancyGuard {
     function withdrawIdle(uint256 shares, address receiver) external nonReentrant returns (uint256 amount) {
         if (receiver == address(0)) revert InvalidAddress();
         if (shares == 0) revert InvalidAmount();
+        if (activeBatches != 0) revert OpenBatches();
+        if (availableUnderlyingAssets() != 0) revert OpenBatches();
         if (sharesOf[msg.sender] < shares) revert InsufficientShares();
 
         amount = _convertToAssets(shares);
@@ -272,6 +275,7 @@ contract EthCspVault is ReentrancyGuard {
         withdrawalUnderlyingRemaining[epochId] -= underlyingAmount;
         reservedWithdrawalAssets -= usdcAmount;
         reservedUnderlyingAssets -= underlyingAmount;
+        accountedUnderlyingAssets -= underlyingAmount;
         epoch.withdrawals += usdcAmount;
 
         if (usdcAmount > 0) {
@@ -328,6 +332,13 @@ contract EthCspVault is ReentrancyGuard {
         Epoch storage epoch = epochs[currentEpoch];
         epoch.committedCollateral += collateral;
         epoch.premiumEarned += premiumEarned;
+        if (premiumEarned > 0 && performanceFeeBps > 0) {
+            uint256 fee = (premiumEarned * performanceFeeBps) / 10000;
+            if (fee > 0) {
+                epoch.performanceFee += fee;
+                usdc.safeTransfer(feeRecipient, fee);
+            }
+        }
 
         emit CspBatchOpened(batchId, currentEpoch, quote.oToken, protocolVaultId, amount, collateral, premiumEarned);
     }
@@ -345,11 +356,14 @@ contract EthCspVault is ReentrancyGuard {
         if (batch.settled) revert BatchAlreadySettled();
         if (collateralReturned > batch.collateral) revert CollateralAccountingMismatch();
         if (collateralReturned > availableIdleAssets()) revert CollateralAccountingMismatch();
-        if (underlyingReceived > availableUnderlyingAssets()) revert CollateralAccountingMismatch();
+        if (underlying.balanceOf(address(this)) < accountedUnderlyingAssets + underlyingReceived) {
+            revert CollateralAccountingMismatch();
+        }
 
         batch.settled = true;
         batch.collateralReturned = collateralReturned;
         batchUnderlyingReceived[batchId] = underlyingReceived;
+        accountedUnderlyingAssets += underlyingReceived;
         activeBatches--;
         activeCollateral -= batch.collateral;
 
@@ -370,15 +384,6 @@ contract EthCspVault is ReentrancyGuard {
 
         Epoch storage epoch = epochs[currentEpoch];
         if (epoch.closed) revert InvalidAmount();
-
-        uint256 fee;
-        if (epoch.premiumEarned > 0 && performanceFeeBps > 0) {
-            fee = (epoch.premiumEarned * performanceFeeBps) / 10000;
-            if (fee > 0) {
-                epoch.performanceFee = fee;
-                usdc.safeTransfer(feeRecipient, fee);
-            }
-        }
 
         uint256 pendingShares = totalPendingWithdrawalShares;
         uint256 pendingClaims = totalPendingWithdrawalClaims;
@@ -402,7 +407,9 @@ contract EthCspVault is ReentrancyGuard {
         epoch.closed = true;
         epoch.endedAt = uint64(block.timestamp);
 
-        emit EpochClosed(currentEpoch, epoch.premiumEarned, epoch.assignmentShortfall, fee, reservedAssets);
+        emit EpochClosed(
+            currentEpoch, epoch.premiumEarned, epoch.assignmentShortfall, epoch.performanceFee, reservedAssets
+        );
 
         nextEpoch = currentEpoch + 1;
         currentEpoch = nextEpoch;
@@ -444,9 +451,8 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function availableUnderlyingAssets() public view returns (uint256) {
-        uint256 balance = underlying.balanceOf(address(this));
-        if (balance <= reservedUnderlyingAssets) return 0;
-        return balance - reservedUnderlyingAssets;
+        if (accountedUnderlyingAssets <= reservedUnderlyingAssets) return 0;
+        return accountedUnderlyingAssets - reservedUnderlyingAssets;
     }
 
     function deployableIdleAssets() public view returns (uint256) {

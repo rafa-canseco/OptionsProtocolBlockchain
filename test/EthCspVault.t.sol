@@ -163,8 +163,9 @@ contract EthCspVaultTest is Test {
         assertEq(protocolVaultId, 1);
         assertEq(vault.activeBatches(), 1);
         assertEq(vault.activeCollateral(), 2000e6);
-        assertEq(vault.idleAssets(), 8070e6);
-        assertEq(vault.totalManagedAssets(), 10_070e6);
+        assertEq(vault.idleAssets(), 8063e6);
+        assertEq(vault.totalManagedAssets(), 10_063e6);
+        assertEq(usdc.balanceOf(feeRecipient), 7e6);
         assertEq(usdc.balanceOf(address(pool)), 2000e6);
         assertEq(usdc.allowance(address(vault), address(pool)), 0);
         assertEq(settler.mmOTokenBalance(mm, oToken), 1e8);
@@ -194,6 +195,25 @@ contract EthCspVaultTest is Test {
         assertEq(vault.totalManagedAssets(), 7_500e6);
     }
 
+    function test_withdrawIdleRevertsWhileBatchIsActive() public {
+        _depositAndOpenOnePut();
+
+        vm.prank(alice);
+        vm.expectRevert(EthCspVault.OpenBatches.selector);
+        vault.withdrawIdle(1_000e6, receiver);
+    }
+
+    function test_underlyingDonationDoesNotBlockDeposits() public {
+        weth.mint(address(vault), 1);
+
+        vm.prank(alice);
+        uint256 minted = vault.deposit(10_000e6);
+
+        assertEq(minted, 10_000e6);
+        assertEq(vault.availableUnderlyingAssets(), 0);
+        assertEq(vault.accountedUnderlyingAssets(), 0);
+    }
+
     function test_settleOtmCloseEpochChargesPerformanceFeeAndRollsOver() public {
         _depositAndOpenOnePut();
 
@@ -207,7 +227,7 @@ contract EthCspVaultTest is Test {
         assertEq(returned, 2000e6);
         assertEq(vault.activeBatches(), 0);
         assertEq(vault.activeCollateral(), 0);
-        assertEq(vault.idleAssets(), 10_070e6);
+        assertEq(vault.idleAssets(), 10_063e6);
 
         (,,,,,,, uint256 assignmentShortfallBeforeFee,,,,,) = vault.epochs(1);
         assertEq(assignmentShortfallBeforeFee, 0);
@@ -463,6 +483,26 @@ contract EthCspVaultTest is Test {
         assertEq(wethWithdrawn, 1e18);
         assertEq(weth.balanceOf(receiver), 1e18);
         assertEq(vault.reservedUnderlyingAssets(), 0);
+        assertEq(vault.accountedUnderlyingAssets(), 0);
+    }
+
+    function test_withdrawIdleRevertsAfterAssignmentUntilUnderlyingIsClaimed() public {
+        _depositAndOpenOnePut();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+        uint256 returned = _backendSettleVault(1, 1);
+        assertEq(returned, 0);
+
+        weth.mint(address(vault), 1e18);
+        vm.prank(operator);
+        vault.settleCspBatch(1, 0, 1e18);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        vm.prank(alice);
+        vm.expectRevert(EthCspVault.OpenBatches.selector);
+        vault.withdrawIdle(1_000e6, receiver);
     }
 
     function test_rejectsCoveredCallAndNonOperatorOpen() public {
