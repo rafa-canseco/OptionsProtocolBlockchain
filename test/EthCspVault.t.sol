@@ -29,6 +29,7 @@ contract EthCspVaultTest is Test {
 
     address public alice = address(0xA11CE);
     address public bob = address(0xB0B);
+    address public carol = address(0xCA20);
     address public operator = address(0x0F);
     address public feeRecipient = address(0xFEE);
 
@@ -128,6 +129,10 @@ contract EthCspVaultTest is Test {
         usdc.mint(bob, 20_000e6);
         vm.prank(bob);
         usdc.approve(address(vault), type(uint256).max);
+
+        usdc.mint(carol, 20_000e6);
+        vm.prank(carol);
+        usdc.approve(address(vault), type(uint256).max);
     }
 
     function test_depositMintsInternalShares() public {
@@ -139,7 +144,7 @@ contract EthCspVaultTest is Test {
         assertEq(vault.totalShares(), 10_000e6);
         assertEq(vault.totalManagedAssets(), 10_000e6);
 
-        (uint64 startedAt,,,,,,,,,,) = vault.epochs(1);
+        (uint64 startedAt,,,,,,,,,,,,) = vault.epochs(1);
         assertEq(startedAt, uint64(block.timestamp));
     }
 
@@ -160,6 +165,7 @@ contract EthCspVaultTest is Test {
         assertEq(vault.idleAssets(), 8070e6);
         assertEq(vault.totalManagedAssets(), 10_070e6);
         assertEq(usdc.balanceOf(address(pool)), 2000e6);
+        assertEq(usdc.allowance(address(vault), address(pool)), 0);
         assertEq(settler.mmOTokenBalance(mm, oToken), 1e8);
         assertEq(OToken(oToken).balanceOf(address(settler)), 1e8);
 
@@ -187,7 +193,7 @@ contract EthCspVaultTest is Test {
         assertEq(vault.activeCollateral(), 0);
         assertEq(vault.idleAssets(), 10_070e6);
 
-        (,,,,,,, uint256 assignmentShortfallBeforeFee,,,) = vault.epochs(1);
+        (,,,,,,, uint256 assignmentShortfallBeforeFee,,,,,) = vault.epochs(1);
         assertEq(assignmentShortfallBeforeFee, 0);
 
         vm.prank(operator);
@@ -198,7 +204,7 @@ contract EthCspVaultTest is Test {
         assertEq(usdc.balanceOf(feeRecipient), 7e6);
         assertEq(vault.totalManagedAssets(), 10_063e6);
 
-        (,,,,,,,, uint256 performanceFee,, bool closed) = vault.epochs(1);
+        (,,,,,,,, uint256 performanceFee,,,, bool closed) = vault.epochs(1);
         assertEq(performanceFee, 7e6);
         assertTrue(closed);
     }
@@ -219,7 +225,7 @@ contract EthCspVaultTest is Test {
         assertEq(usdc.balanceOf(feeRecipient), 7e6);
         assertEq(vault.totalManagedAssets(), 8063e6);
 
-        (,,,,,,, uint256 assignmentShortfall, uint256 performanceFee,,) = vault.epochs(1);
+        (,,,,,,, uint256 assignmentShortfall, uint256 performanceFee,,,,) = vault.epochs(1);
         assertEq(assignmentShortfall, 2000e6);
         assertEq(performanceFee, 7e6);
     }
@@ -317,7 +323,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         vm.prank(address(vault));
-        usdc.transfer(address(0xDEAD), 10_000e6);
+        assertTrue(usdc.transfer(address(0xDEAD), 10_000e6));
 
         assertEq(vault.totalShares(), 10_000e6);
         assertEq(vault.totalManagedAssets(), 0);
@@ -325,6 +331,74 @@ contract EthCspVaultTest is Test {
         vm.prank(bob);
         vm.expectRevert(EthCspVault.InsolventShareSupply.selector);
         vault.deposit(1_000e6);
+    }
+
+    function test_virtualSharesPreventDonationShareInflationProfit() public {
+        vm.prank(alice);
+        vault.deposit(1);
+
+        vm.prank(alice);
+        assertTrue(usdc.transfer(address(vault), 999_999));
+
+        vm.prank(bob);
+        uint256 bobShares = vault.deposit(1_999_999);
+        assertGt(bobShares, 1);
+
+        vm.prank(alice);
+        vault.requestWithdraw(1);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        vm.prank(alice);
+        uint256 withdrawn = vault.claimWithdraw();
+
+        assertLt(withdrawn, 1_000_000);
+        assertEq(usdc.balanceOf(alice), aliceBefore + withdrawn);
+    }
+
+    function test_pendingWithdrawalsBlockNewCspBatchBeforeEpochClose() public {
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+        vm.prank(alice);
+        vault.requestWithdraw(1_000e6);
+
+        address oToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.PendingWithdrawalsOpen.selector);
+        vault.openCspBatch(quote, sig, 1e8, 2_000e6);
+    }
+
+    function test_lastWithdrawalClaimConsumesRoundingDust() public {
+        vm.prank(alice);
+        vault.deposit(1);
+        vm.prank(bob);
+        vault.deposit(2);
+
+        vm.prank(address(vault));
+        assertTrue(usdc.transfer(address(0xDEAD), 2));
+
+        vm.prank(alice);
+        vault.requestWithdraw(1);
+        vm.prank(bob);
+        vault.requestWithdraw(2);
+
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        assertEq(vault.reservedWithdrawalAssets(), 1);
+
+        vm.prank(alice);
+        uint256 aliceWithdrawn = vault.claimWithdraw();
+        assertEq(aliceWithdrawn, 0);
+        assertEq(vault.reservedWithdrawalAssets(), 1);
+
+        vm.prank(bob);
+        uint256 bobWithdrawn = vault.claimWithdraw();
+        assertEq(bobWithdrawn, 1);
+        assertEq(vault.reservedWithdrawalAssets(), 0);
     }
 
     function test_rejectsCoveredCallAndNonOperatorOpen() public {
