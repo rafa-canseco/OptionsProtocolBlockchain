@@ -34,6 +34,8 @@ contract EthCspVaultTest is Test {
     address public operator = address(0x0F);
     address public curator = address(0xC02A);
     address public newAllocator = address(0xA110C);
+    address public newOwner = address(0x0A0A);
+    address public treasury = address(0x7A2);
     address public feeRecipient = address(0xFEE);
 
     uint256 public mmKey = 0xAA01;
@@ -629,6 +631,32 @@ contract EthCspVaultTest is Test {
         vault.openCspBatch(quote, sig, 1e8, 2000e6);
     }
 
+    function test_transferOwnershipMovesDefaultCurator() public {
+        vault.transferOwnership(newOwner);
+
+        assertEq(vault.owner(), newOwner);
+        assertEq(vault.curator(), newOwner);
+
+        vm.expectRevert(EthCspVault.OnlyOwner.selector);
+        vault.setCurator(curator);
+
+        vm.prank(newOwner);
+        vault.setAllocator(newAllocator);
+        assertEq(vault.allocator(), newAllocator);
+    }
+
+    function test_transferOwnershipPreservesExplicitCurator() public {
+        vault.setCurator(curator);
+        vault.transferOwnership(newOwner);
+
+        assertEq(vault.owner(), newOwner);
+        assertEq(vault.curator(), curator);
+
+        vm.prank(curator);
+        vault.setAllocator(newAllocator);
+        assertEq(vault.allocator(), newAllocator);
+    }
+
     function test_curatorStrategyBoundsAllocator() public {
         vault.setStrategyConfig(
             EthCspVault.StrategyConfig({
@@ -663,6 +691,62 @@ contract EthCspVaultTest is Test {
                 maxStrike: type(uint256).max
             })
         );
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.StrategyConstraint.selector);
+        vault.openCspBatch(quote, sig, 1e8, 2000e6);
+    }
+
+    function test_curatorUtilizationBoundsCumulativeExposure() public {
+        vault.setStrategyConfig(
+            EthCspVault.StrategyConfig({
+                maxCollateralPerBatch: 10_000e6,
+                maxUtilizationBps: 5000,
+                minPremiumBps: 0,
+                minExpiryDelay: 0,
+                maxExpiryDelay: type(uint256).max,
+                minStrike: 0,
+                maxStrike: type(uint256).max
+            })
+        );
+
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        address putToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        vault.openCspBatch(quote, sig, 1e8, 5_000e6);
+
+        (quote, sig) = _signQuote(putToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.StrategyConstraint.selector);
+        vault.openCspBatch(quote, sig, 1e6, 40e6);
+    }
+
+    function test_curatorMinPremiumUsesNetPremiumReceived() public {
+        settler.setTreasury(treasury);
+        settler.setProtocolFeeBps(2000);
+
+        vault.setStrategyConfig(
+            EthCspVault.StrategyConfig({
+                maxCollateralPerBatch: type(uint256).max,
+                maxUtilizationBps: 10_000,
+                minPremiumBps: 300,
+                minExpiryDelay: 0,
+                maxExpiryDelay: type(uint256).max,
+                minStrike: 0,
+                maxStrike: type(uint256).max
+            })
+        );
+
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        address putToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         vm.expectRevert(EthCspVault.StrategyConstraint.selector);

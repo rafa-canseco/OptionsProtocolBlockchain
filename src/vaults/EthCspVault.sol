@@ -343,7 +343,7 @@ contract EthCspVault is ReentrancyGuard {
         if (totalPendingDepositAssets != 0) revert PendingDepositsOpen();
         if (availableUnderlyingAssets() != 0) revert OpenBatches();
         if (collateral > deployableIdleAssets()) revert InsufficientAvailableAssets();
-        _validateStrategy(quote, amount, collateral);
+        _validateStrategyBounds(quote.oToken, collateral);
 
         address marginPool = addressBook.marginPool();
         uint256 poolBalanceBefore = MarginPool(marginPool).getStoredBalance(address(usdc));
@@ -361,6 +361,7 @@ contract EthCspVault is ReentrancyGuard {
         uint256 premiumEarnedWithCollateral = balanceAfter + collateral;
         if (premiumEarnedWithCollateral < balanceBefore) revert PremiumAccountingMismatch();
         uint256 premiumEarned = premiumEarnedWithCollateral - balanceBefore;
+        _validateStrategyPremium(collateral, premiumEarned);
 
         batchId = ++batchCount;
         batches[batchId] = CspBatch({
@@ -498,8 +499,13 @@ contract EthCspVault is ReentrancyGuard {
 
     function transferOwnership(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert InvalidAddress();
-        emit OwnershipTransferred(owner, newOwner);
+        address oldOwner = owner;
+        emit OwnershipTransferred(oldOwner, newOwner);
         owner = newOwner;
+        if (curator == oldOwner) {
+            emit CuratorUpdated(oldOwner, newOwner);
+            curator = newOwner;
+        }
     }
 
     function idleAssets() public view returns (uint256) {
@@ -578,21 +584,26 @@ contract EthCspVault is ReentrancyGuard {
         return activeBatches == 0 && totalPendingWithdrawalShares == 0 && availableUnderlyingAssets() == 0;
     }
 
-    function _validateStrategy(BatchSettler.Quote calldata quote, uint256 amount, uint256 collateral) internal view {
+    function _validateStrategyBounds(address oTokenAddress, uint256 collateral) internal view {
         StrategyConfig memory config = strategyConfig;
-        OToken oToken = OToken(quote.oToken);
+        OToken oToken = OToken(oTokenAddress);
 
         if (collateral > config.maxCollateralPerBatch) revert StrategyConstraint();
-        if (collateral * 10_000 > totalManagedAssets() * config.maxUtilizationBps) revert StrategyConstraint();
-
-        uint256 premium = (amount * quote.bidPrice) / 1e8;
-        if (premium * 10_000 < collateral * config.minPremiumBps) revert StrategyConstraint();
+        uint256 nextActiveCollateral = activeCollateral + collateral;
+        if (nextActiveCollateral * 10_000 > totalManagedAssets() * config.maxUtilizationBps) {
+            revert StrategyConstraint();
+        }
 
         uint256 expiryDelay = oToken.expiry() > block.timestamp ? oToken.expiry() - block.timestamp : 0;
         if (expiryDelay < config.minExpiryDelay || expiryDelay > config.maxExpiryDelay) revert StrategyConstraint();
 
         uint256 strike = oToken.strikePrice();
         if (strike < config.minStrike || strike > config.maxStrike) revert StrategyConstraint();
+    }
+
+    function _validateStrategyPremium(uint256 collateral, uint256 premiumEarned) internal view {
+        uint256 minPremiumBps = strategyConfig.minPremiumBps;
+        if (premiumEarned * 10_000 < collateral * minPremiumBps) revert StrategyConstraint();
     }
 
     function _virtualAssets() internal pure returns (uint256) {
