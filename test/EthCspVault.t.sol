@@ -30,6 +30,7 @@ contract EthCspVaultTest is Test {
     address public alice = address(0xA11CE);
     address public bob = address(0xB0B);
     address public carol = address(0xCA20);
+    address public receiver = address(0x1234);
     address public operator = address(0x0F);
     address public feeRecipient = address(0xFEE);
 
@@ -179,6 +180,20 @@ contract EthCspVaultTest is Test {
         assertFalse(settled);
     }
 
+    function test_withdrawIdleExitsImmediatelyWhenUsdcIsAvailable() public {
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        vm.prank(alice);
+        uint256 withdrawn = vault.withdrawIdle(2_500e6, receiver);
+
+        assertEq(withdrawn, 2_500e6);
+        assertEq(usdc.balanceOf(receiver), 2_500e6);
+        assertEq(vault.sharesOf(alice), 7_500e6);
+        assertEq(vault.totalShares(), 7_500e6);
+        assertEq(vault.totalManagedAssets(), 7_500e6);
+    }
+
     function test_settleOtmCloseEpochChargesPerformanceFeeAndRollsOver() public {
         _depositAndOpenOnePut();
 
@@ -261,10 +276,10 @@ contract EthCspVaultTest is Test {
         assertEq(vault.totalManagedAssets(), 0);
 
         vm.prank(alice);
-        uint256 withdrawn = vault.claimWithdraw();
+        uint256 withdrawn = vault.claimWithdrawTo(receiver);
 
         assertEq(withdrawn, 10_063e6);
-        assertEq(usdc.balanceOf(alice), 20_063e6);
+        assertEq(usdc.balanceOf(receiver), 10_063e6);
         assertEq(vault.reservedWithdrawalAssets(), 0);
         assertEq(vault.totalManagedAssets(), 0);
     }
@@ -333,6 +348,17 @@ contract EthCspVaultTest is Test {
         vault.deposit(1_000e6);
     }
 
+    function test_depositRevertsWhileWithdrawalsArePending() public {
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+        vm.prank(alice);
+        vault.requestWithdraw(1_000e6);
+
+        vm.prank(bob);
+        vm.expectRevert(EthCspVault.PendingWithdrawalsOpen.selector);
+        vault.deposit(1_000e6);
+    }
+
     function test_virtualSharesPreventDonationShareInflationProfit() public {
         vm.prank(alice);
         vault.deposit(1);
@@ -357,18 +383,25 @@ contract EthCspVaultTest is Test {
         assertEq(usdc.balanceOf(alice), aliceBefore + withdrawn);
     }
 
-    function test_pendingWithdrawalsBlockNewCspBatchBeforeEpochClose() public {
+    function test_pendingWithdrawalsOnlyReduceDeployableBatchCollateral() public {
         vm.prank(alice);
         vault.deposit(10_000e6);
         vm.prank(alice);
         vault.requestWithdraw(1_000e6);
 
+        assertEq(vault.deployableIdleAssets(), 9_000e6);
+
         address oToken = _createPut();
         (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
 
         vm.prank(operator);
-        vm.expectRevert(EthCspVault.PendingWithdrawalsOpen.selector);
+        vm.expectRevert(EthCspVault.InsufficientAvailableAssets.selector);
+        vault.openCspBatch(quote, sig, 1e8, 9_001e6);
+
+        vm.prank(operator);
         vault.openCspBatch(quote, sig, 1e8, 2_000e6);
+
+        assertEq(vault.activeCollateral(), 2_000e6);
     }
 
     function test_lastWithdrawalClaimConsumesRoundingDust() public {

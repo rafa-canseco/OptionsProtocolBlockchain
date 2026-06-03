@@ -76,8 +76,11 @@ contract EthCspVault is ReentrancyGuard {
     uint256 private constant MAX_PERFORMANCE_FEE_BPS = 2000;
 
     event Deposited(address indexed user, uint256 amount, uint256 shares);
+    event IdleWithdrawn(address indexed user, address indexed receiver, uint256 amount, uint256 shares);
     event WithdrawRequested(address indexed user, uint256 indexed epochId, uint256 shares);
-    event WithdrawClaimed(address indexed user, uint256 indexed epochId, uint256 amount, uint256 shares);
+    event WithdrawClaimed(
+        address indexed user, address indexed receiver, uint256 indexed epochId, uint256 amount, uint256 shares
+    );
     event CspBatchOpened(
         uint256 indexed batchId,
         uint256 indexed epochId,
@@ -165,6 +168,7 @@ contract EthCspVault is ReentrancyGuard {
     function deposit(uint256 amount) external nonReentrant returns (uint256 mintedShares) {
         if (amount == 0) revert InvalidAmount();
         if (activeBatches != 0) revert OpenBatches();
+        if (totalPendingWithdrawalShares != 0) revert PendingWithdrawalsOpen();
 
         uint256 managedBefore = totalManagedAssets();
         uint256 balanceBefore = idleAssets();
@@ -188,6 +192,22 @@ contract EthCspVault is ReentrancyGuard {
         emit Deposited(msg.sender, received, mintedShares);
     }
 
+    function withdrawIdle(uint256 shares, address receiver) external nonReentrant returns (uint256 amount) {
+        if (receiver == address(0)) revert InvalidAddress();
+        if (shares == 0) revert InvalidAmount();
+        if (sharesOf[msg.sender] < shares) revert InsufficientShares();
+
+        amount = _convertToAssets(shares);
+        if (amount == 0) revert InvalidAmount();
+        if (amount > availableIdleAssets()) revert InsufficientAvailableAssets();
+
+        sharesOf[msg.sender] -= shares;
+        totalShares -= shares;
+
+        usdc.safeTransfer(receiver, amount);
+        emit IdleWithdrawn(msg.sender, receiver, amount, shares);
+    }
+
     function requestWithdraw(uint256 shares) external nonReentrant {
         if (shares == 0) revert InvalidAmount();
         if (pendingWithdrawalShares[msg.sender] != 0) revert PendingWithdrawal();
@@ -203,6 +223,15 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function claimWithdraw() external nonReentrant returns (uint256 amount) {
+        return _claimWithdraw(msg.sender);
+    }
+
+    function claimWithdrawTo(address receiver) external nonReentrant returns (uint256 amount) {
+        if (receiver == address(0)) revert InvalidAddress();
+        return _claimWithdraw(receiver);
+    }
+
+    function _claimWithdraw(address receiver) internal returns (uint256 amount) {
         uint256 epochId = pendingWithdrawalEpoch[msg.sender];
         uint256 shares = pendingWithdrawalShares[msg.sender];
         if (shares == 0) revert InvalidAmount();
@@ -225,9 +254,9 @@ contract EthCspVault is ReentrancyGuard {
         epoch.withdrawals += amount;
 
         if (amount > 0) {
-            usdc.safeTransfer(msg.sender, amount);
+            usdc.safeTransfer(receiver, amount);
         }
-        emit WithdrawClaimed(msg.sender, epochId, amount, shares);
+        emit WithdrawClaimed(msg.sender, receiver, epochId, amount, shares);
     }
 
     function openCspBatch(
@@ -237,9 +266,8 @@ contract EthCspVault is ReentrancyGuard {
         uint256 collateral
     ) external onlyOperator nonReentrant returns (uint256 batchId, uint256 protocolVaultId) {
         if (amount == 0 || collateral == 0) revert InvalidAmount();
-        if (totalPendingWithdrawalShares != 0) revert PendingWithdrawalsOpen();
         _validateEthUsdcPut(quote.oToken);
-        if (collateral > availableIdleAssets()) revert InsufficientAvailableAssets();
+        if (collateral > deployableIdleAssets()) revert InsufficientAvailableAssets();
 
         address marginPool = addressBook.marginPool();
         uint256 poolBalanceBefore = MarginPool(marginPool).getStoredBalance(address(usdc));
@@ -377,11 +405,22 @@ contract EthCspVault is ReentrancyGuard {
         return idle - reservedWithdrawalAssets;
     }
 
+    function deployableIdleAssets() public view returns (uint256) {
+        uint256 available = availableIdleAssets();
+        if (totalPendingWithdrawalShares == 0) return available;
+        uint256 activeShares = totalShares - totalPendingWithdrawalShares;
+        return (available * activeShares) / totalShares;
+    }
+
     function totalManagedAssets() public view returns (uint256) {
         return availableIdleAssets() + activeCollateral;
     }
 
     function convertToAssets(uint256 shares) external view returns (uint256) {
+        return _convertToAssets(shares);
+    }
+
+    function _convertToAssets(uint256 shares) internal view returns (uint256) {
         if (totalShares == 0) return shares;
         return (totalManagedAssets() * shares) / totalShares;
     }
