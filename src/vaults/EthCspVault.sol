@@ -97,6 +97,7 @@ contract EthCspVault is ReentrancyGuard {
 
     event Deposited(address indexed user, uint256 amount, uint256 shares);
     event DepositQueued(address indexed user, uint256 indexed epochId, uint256 amount);
+    event DepositRefunded(address indexed user, uint256 amount);
     event IdleWithdrawn(address indexed user, address indexed receiver, uint256 amount, uint256 shares);
     event WithdrawRequested(address indexed user, uint256 indexed epochId, uint256 shares);
     event WithdrawClaimed(
@@ -557,13 +558,26 @@ contract EthCspVault is ReentrancyGuard {
         uint256 managedBefore = totalManagedAssets();
         pendingDepositAssets[user] = 0;
         totalPendingDepositAssets -= assets;
-        mintedShares = _mintActiveShares(user, assets, managedBefore);
+        mintedShares = _previewActiveShares(assets, managedBefore);
+        if (mintedShares == 0) {
+            usdc.safeTransfer(user, assets);
+            emit DepositRefunded(user, assets);
+            return 0;
+        }
+
+        _recordActiveShares(user, assets, mintedShares);
     }
 
     function _mintActiveShares(address user, uint256 assets, uint256 managedBefore)
         internal
         returns (uint256 mintedShares)
     {
+        mintedShares = _previewActiveShares(assets, managedBefore);
+        if (mintedShares == 0) revert NoShares();
+        _recordActiveShares(user, assets, mintedShares);
+    }
+
+    function _previewActiveShares(uint256 assets, uint256 managedBefore) internal view returns (uint256 mintedShares) {
         if (totalShares == 0) {
             mintedShares = assets;
         } else if (managedBefore == 0) {
@@ -571,8 +585,9 @@ contract EthCspVault is ReentrancyGuard {
         } else {
             mintedShares = (assets * (totalShares + _virtualShares())) / (managedBefore + _virtualAssets());
         }
-        if (mintedShares == 0) revert NoShares();
+    }
 
+    function _recordActiveShares(address user, uint256 assets, uint256 mintedShares) internal {
         sharesOf[user] += mintedShares;
         totalShares += mintedShares;
         epochs[currentEpoch].deposits += assets;

@@ -780,6 +780,40 @@ contract EthCspVaultTest is Test {
         assertEq(vault.sharesOf(bob), 993_740_063);
     }
 
+    function test_dustPendingDepositRefundsInsteadOfBlockingBatches() public {
+        _depositAndOpenOnePut();
+
+        vm.prank(bob);
+        vault.deposit(1);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+        uint256 returned = _backendSettleVault(1, 1);
+        vm.prank(operator);
+        vault.settleCspBatch(1, returned, 0);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        usdc.mint(address(vault), 100_000e6);
+
+        uint256 bobBalanceBefore = usdc.balanceOf(bob);
+        vm.prank(operator);
+        uint256 minted = vault.activateDepositFor(bob);
+
+        assertEq(minted, 0);
+        assertEq(usdc.balanceOf(bob), bobBalanceBefore + 1);
+        assertEq(vault.pendingDepositAssets(bob), 0);
+        assertEq(vault.totalPendingDepositAssets(), 0);
+        assertEq(vault.sharesOf(bob), 0);
+
+        _computeExpiry();
+        address putToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        vault.openCspBatch(quote, sig, 1e8, 2_000e6);
+    }
+
     function _depositAndOpenOnePut() internal {
         vm.prank(alice);
         vault.deposit(10_000e6);
