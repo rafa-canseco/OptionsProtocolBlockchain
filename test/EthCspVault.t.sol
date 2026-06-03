@@ -200,8 +200,9 @@ contract EthCspVaultTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
 
+        uint256 returned = _backendSettleVault(1, 1);
         vm.prank(operator);
-        uint256 returned = vault.settleCspBatch(1);
+        vault.settleCspBatch(1, returned, 0);
 
         assertEq(returned, 2000e6);
         assertEq(vault.activeBatches(), 0);
@@ -230,8 +231,10 @@ contract EthCspVaultTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
+        uint256 returned = _backendSettleVault(1, 1);
+        weth.mint(address(vault), 1e18);
         vm.prank(operator);
-        uint256 returned = vault.settleCspBatch(1);
+        vault.settleCspBatch(1, returned, 1e18);
         assertEq(returned, 0);
 
         vm.prank(operator);
@@ -266,8 +269,9 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+        uint256 returned = _backendSettleVault(1, 1);
         vm.prank(operator);
-        vault.settleCspBatch(1);
+        vault.settleCspBatch(1, returned, 0);
         vm.prank(operator);
         vault.closeEpoch();
 
@@ -276,9 +280,10 @@ contract EthCspVaultTest is Test {
         assertEq(vault.totalManagedAssets(), 0);
 
         vm.prank(alice);
-        uint256 withdrawn = vault.claimWithdrawTo(receiver);
+        (uint256 withdrawn, uint256 underlyingWithdrawn) = vault.claimWithdrawTo(receiver);
 
         assertEq(withdrawn, 10_063e6);
+        assertEq(underlyingWithdrawn, 0);
         assertEq(usdc.balanceOf(receiver), 10_063e6);
         assertEq(vault.reservedWithdrawalAssets(), 0);
         assertEq(vault.totalManagedAssets(), 0);
@@ -377,7 +382,7 @@ contract EthCspVaultTest is Test {
 
         uint256 aliceBefore = usdc.balanceOf(alice);
         vm.prank(alice);
-        uint256 withdrawn = vault.claimWithdraw();
+        (uint256 withdrawn,) = vault.claimWithdraw();
 
         assertLt(withdrawn, 1_000_000);
         assertEq(usdc.balanceOf(alice), aliceBefore + withdrawn);
@@ -424,14 +429,40 @@ contract EthCspVaultTest is Test {
         assertEq(vault.reservedWithdrawalAssets(), 1);
 
         vm.prank(alice);
-        uint256 aliceWithdrawn = vault.claimWithdraw();
+        (uint256 aliceWithdrawn,) = vault.claimWithdraw();
         assertEq(aliceWithdrawn, 0);
         assertEq(vault.reservedWithdrawalAssets(), 1);
 
         vm.prank(bob);
-        uint256 bobWithdrawn = vault.claimWithdraw();
+        (uint256 bobWithdrawn,) = vault.claimWithdraw();
         assertEq(bobWithdrawn, 1);
         assertEq(vault.reservedWithdrawalAssets(), 0);
+    }
+
+    function test_itmWithdrawerClaimsAssignedWethAfterPhysicalDelivery() public {
+        _depositAndOpenOnePut();
+
+        vm.prank(alice);
+        vault.requestWithdraw(10_000e6);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+        uint256 returned = _backendSettleVault(1, 1);
+        assertEq(returned, 0);
+
+        weth.mint(address(vault), 1e18);
+        vm.prank(operator);
+        vault.settleCspBatch(1, 0, 1e18);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        vm.prank(alice);
+        (uint256 usdcWithdrawn, uint256 wethWithdrawn) = vault.claimWithdrawTo(receiver);
+
+        assertEq(usdcWithdrawn, 8063e6);
+        assertEq(wethWithdrawn, 1e18);
+        assertEq(weth.balanceOf(receiver), 1e18);
+        assertEq(vault.reservedUnderlyingAssets(), 0);
     }
 
     function test_rejectsCoveredCallAndNonOperatorOpen() public {
@@ -462,6 +493,22 @@ contract EthCspVaultTest is Test {
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1e8, 2000e6);
+    }
+
+    function _backendSettleVault(uint256 batchId, uint256 expectedVaultId) internal returns (uint256 returned) {
+        uint256 balanceBefore = usdc.balanceOf(address(vault));
+        (,, uint256 protocolVaultId,,,,,) = vault.batches(batchId);
+        assertEq(protocolVaultId, expectedVaultId);
+
+        address[] memory owners = new address[](1);
+        uint256[] memory vaultIds = new uint256[](1);
+        owners[0] = address(vault);
+        vaultIds[0] = protocolVaultId;
+
+        vm.prank(operator);
+        settler.batchSettleVaults(owners, vaultIds);
+
+        returned = usdc.balanceOf(address(vault)) - balanceBefore;
     }
 
     function _createPut() internal returns (address) {

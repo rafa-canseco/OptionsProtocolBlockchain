@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../core/AddressBook.sol";
 import "../core/BatchSettler.sol";
-import "../core/Controller.sol";
 import "../core/MarginPool.sol";
 import "../core/OToken.sol";
 
@@ -50,6 +49,7 @@ contract EthCspVault is ReentrancyGuard {
 
     AddressBook public immutable addressBook;
     IERC20 public immutable usdc;
+    IERC20 public immutable underlying;
     address public immutable ethUnderlying;
 
     address public owner;
@@ -67,9 +67,14 @@ contract EthCspVault is ReentrancyGuard {
     uint256 public totalPendingWithdrawalShares;
     uint256 public totalPendingWithdrawalClaims;
     uint256 public reservedWithdrawalAssets;
+    uint256 public reservedUnderlyingAssets;
 
     mapping(uint256 => Epoch) public epochs;
     mapping(uint256 => CspBatch) public batches;
+    mapping(uint256 => uint256) public batchUnderlyingReceived;
+    mapping(uint256 => uint256) public epochAssignedUnderlying;
+    mapping(uint256 => uint256) public withdrawalUnderlyingPerShare;
+    mapping(uint256 => uint256) public withdrawalUnderlyingRemaining;
     mapping(address => uint256) public pendingWithdrawalEpoch;
     mapping(address => uint256) public pendingWithdrawalShares;
 
@@ -79,7 +84,12 @@ contract EthCspVault is ReentrancyGuard {
     event IdleWithdrawn(address indexed user, address indexed receiver, uint256 amount, uint256 shares);
     event WithdrawRequested(address indexed user, uint256 indexed epochId, uint256 shares);
     event WithdrawClaimed(
-        address indexed user, address indexed receiver, uint256 indexed epochId, uint256 amount, uint256 shares
+        address indexed user,
+        address indexed receiver,
+        uint256 indexed epochId,
+        uint256 usdcAmount,
+        uint256 underlyingAmount,
+        uint256 shares
     );
     event CspBatchOpened(
         uint256 indexed batchId,
@@ -95,6 +105,7 @@ contract EthCspVault is ReentrancyGuard {
         uint256 indexed epochId,
         uint256 protocolVaultId,
         uint256 collateralReturned,
+        uint256 underlyingReceived,
         uint256 assignmentShortfall
     );
     event EpochClosed(
@@ -155,6 +166,7 @@ contract EthCspVault is ReentrancyGuard {
 
         addressBook = AddressBook(_addressBook);
         usdc = IERC20(_usdc);
+        underlying = IERC20(_ethUnderlying);
         ethUnderlying = _ethUnderlying;
         owner = msg.sender;
         operator = _operator;
@@ -169,6 +181,7 @@ contract EthCspVault is ReentrancyGuard {
         if (amount == 0) revert InvalidAmount();
         if (activeBatches != 0) revert OpenBatches();
         if (totalPendingWithdrawalShares != 0) revert PendingWithdrawalsOpen();
+        if (availableUnderlyingAssets() != 0) revert OpenBatches();
 
         uint256 managedBefore = totalManagedAssets();
         uint256 balanceBefore = idleAssets();
@@ -222,16 +235,20 @@ contract EthCspVault is ReentrancyGuard {
         emit WithdrawRequested(msg.sender, currentEpoch, shares);
     }
 
-    function claimWithdraw() external nonReentrant returns (uint256 amount) {
+    function claimWithdraw() external nonReentrant returns (uint256 usdcAmount, uint256 underlyingAmount) {
         return _claimWithdraw(msg.sender);
     }
 
-    function claimWithdrawTo(address receiver) external nonReentrant returns (uint256 amount) {
+    function claimWithdrawTo(address receiver)
+        external
+        nonReentrant
+        returns (uint256 usdcAmount, uint256 underlyingAmount)
+    {
         if (receiver == address(0)) revert InvalidAddress();
         return _claimWithdraw(receiver);
     }
 
-    function _claimWithdraw(address receiver) internal returns (uint256 amount) {
+    function _claimWithdraw(address receiver) internal returns (uint256 usdcAmount, uint256 underlyingAmount) {
         uint256 epochId = pendingWithdrawalEpoch[msg.sender];
         uint256 shares = pendingWithdrawalShares[msg.sender];
         if (shares == 0) revert InvalidAmount();
@@ -241,22 +258,29 @@ contract EthCspVault is ReentrancyGuard {
         if (epoch.remainingWithdrawalClaims == 0) revert InvalidAmount();
 
         if (epoch.remainingWithdrawalClaims == 1) {
-            amount = epoch.withdrawalAssetsRemaining;
+            usdcAmount = epoch.withdrawalAssetsRemaining;
+            underlyingAmount = withdrawalUnderlyingRemaining[epochId];
         } else {
-            amount = (shares * epoch.withdrawalAssetsPerShare) / 1e18;
+            usdcAmount = (shares * epoch.withdrawalAssetsPerShare) / 1e18;
+            underlyingAmount = (shares * withdrawalUnderlyingPerShare[epochId]) / 1e18;
         }
 
         pendingWithdrawalEpoch[msg.sender] = 0;
         pendingWithdrawalShares[msg.sender] = 0;
         epoch.remainingWithdrawalClaims--;
-        epoch.withdrawalAssetsRemaining -= amount;
-        reservedWithdrawalAssets -= amount;
-        epoch.withdrawals += amount;
+        epoch.withdrawalAssetsRemaining -= usdcAmount;
+        withdrawalUnderlyingRemaining[epochId] -= underlyingAmount;
+        reservedWithdrawalAssets -= usdcAmount;
+        reservedUnderlyingAssets -= underlyingAmount;
+        epoch.withdrawals += usdcAmount;
 
-        if (amount > 0) {
-            usdc.safeTransfer(receiver, amount);
+        if (usdcAmount > 0) {
+            usdc.safeTransfer(receiver, usdcAmount);
         }
-        emit WithdrawClaimed(msg.sender, receiver, epochId, amount, shares);
+        if (underlyingAmount > 0) {
+            underlying.safeTransfer(receiver, underlyingAmount);
+        }
+        emit WithdrawClaimed(msg.sender, receiver, epochId, usdcAmount, underlyingAmount, shares);
     }
 
     function openCspBatch(
@@ -308,18 +332,24 @@ contract EthCspVault is ReentrancyGuard {
         emit CspBatchOpened(batchId, currentEpoch, quote.oToken, protocolVaultId, amount, collateral, premiumEarned);
     }
 
-    function settleCspBatch(uint256 batchId) external onlyOperator nonReentrant returns (uint256 collateralReturned) {
+    /// @notice Finalizes vault accounting after the backend has settled the protocol vault.
+    /// @dev The vault never calls Controller settlement or physical redemption itself. The operator
+    ///      must first settle through BatchSettler and, when assigned, deliver WETH to this vault.
+    function settleCspBatch(uint256 batchId, uint256 collateralReturned, uint256 underlyingReceived)
+        external
+        onlyOperator
+        nonReentrant
+    {
         CspBatch storage batch = batches[batchId];
         if (batch.protocolVaultId == 0) revert InvalidAmount();
         if (batch.settled) revert BatchAlreadySettled();
-
-        uint256 balanceBefore = usdc.balanceOf(address(this));
-        Controller(addressBook.controller()).settleVault(address(this), batch.protocolVaultId);
-        collateralReturned = usdc.balanceOf(address(this)) - balanceBefore;
         if (collateralReturned > batch.collateral) revert CollateralAccountingMismatch();
+        if (collateralReturned > availableIdleAssets()) revert CollateralAccountingMismatch();
+        if (underlyingReceived > availableUnderlyingAssets()) revert CollateralAccountingMismatch();
 
         batch.settled = true;
         batch.collateralReturned = collateralReturned;
+        batchUnderlyingReceived[batchId] = underlyingReceived;
         activeBatches--;
         activeCollateral -= batch.collateral;
 
@@ -328,8 +358,11 @@ contract EthCspVault is ReentrancyGuard {
         Epoch storage epoch = epochs[batch.epochId];
         epoch.returnedCollateral += collateralReturned;
         epoch.assignmentShortfall += assignmentShortfall;
+        epochAssignedUnderlying[batch.epochId] += underlyingReceived;
 
-        emit CspBatchSettled(batchId, batch.epochId, batch.protocolVaultId, collateralReturned, assignmentShortfall);
+        emit CspBatchSettled(
+            batchId, batch.epochId, batch.protocolVaultId, collateralReturned, underlyingReceived, assignmentShortfall
+        );
     }
 
     function closeEpoch() external onlyOperator nonReentrant returns (uint256 nextEpoch) {
@@ -350,15 +383,20 @@ contract EthCspVault is ReentrancyGuard {
         uint256 pendingShares = totalPendingWithdrawalShares;
         uint256 pendingClaims = totalPendingWithdrawalClaims;
         uint256 reservedAssets;
+        uint256 reservedUnderlying;
         if (pendingShares > 0) {
             reservedAssets = (availableIdleAssets() * pendingShares) / totalShares;
+            reservedUnderlying = (availableUnderlyingAssets() * pendingShares) / totalShares;
             epoch.withdrawalAssetsPerShare = (reservedAssets * 1e18) / pendingShares;
             epoch.withdrawalAssetsRemaining = reservedAssets;
+            withdrawalUnderlyingPerShare[currentEpoch] = (reservedUnderlying * 1e18) / pendingShares;
+            withdrawalUnderlyingRemaining[currentEpoch] = reservedUnderlying;
             epoch.remainingWithdrawalClaims = pendingClaims;
             totalShares -= pendingShares;
             totalPendingWithdrawalShares = 0;
             totalPendingWithdrawalClaims = 0;
             reservedWithdrawalAssets += reservedAssets;
+            reservedUnderlyingAssets += reservedUnderlying;
         }
 
         epoch.closed = true;
@@ -403,6 +441,12 @@ contract EthCspVault is ReentrancyGuard {
         uint256 idle = idleAssets();
         if (idle <= reservedWithdrawalAssets) return 0;
         return idle - reservedWithdrawalAssets;
+    }
+
+    function availableUnderlyingAssets() public view returns (uint256) {
+        uint256 balance = underlying.balanceOf(address(this));
+        if (balance <= reservedUnderlyingAssets) return 0;
+        return balance - reservedUnderlyingAssets;
     }
 
     function deployableIdleAssets() public view returns (uint256) {
