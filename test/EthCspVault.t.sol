@@ -203,6 +203,43 @@ contract EthCspVaultTest is Test {
         vault.withdrawIdle(1_000e6, receiver);
     }
 
+    function test_depositDuringActiveBatchQueuesAndActivatesNextEpoch() public {
+        _depositAndOpenOnePut();
+
+        vm.prank(bob);
+        uint256 mintedDuringBatch = vault.deposit(1_000e6);
+
+        assertEq(mintedDuringBatch, 0);
+        assertEq(vault.pendingDepositAssets(bob), 1_000e6);
+        assertEq(vault.totalPendingDepositAssets(), 1_000e6);
+        assertEq(vault.sharesOf(bob), 0);
+        assertEq(vault.totalManagedAssets(), 10_063e6);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+        uint256 returned = _backendSettleVault(1, 1);
+        vm.prank(operator);
+        vault.settleCspBatch(1, returned, 0);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        _computeExpiry();
+        address oToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.PendingDepositsOpen.selector);
+        vault.openCspBatch(quote, sig, 1e8, 2_000e6);
+
+        vm.prank(operator);
+        uint256 activated = vault.activateDepositFor(bob);
+
+        assertEq(activated, 993_740_063);
+        assertEq(vault.pendingDepositAssets(bob), 0);
+        assertEq(vault.totalPendingDepositAssets(), 0);
+        assertEq(vault.sharesOf(bob), 993_740_063);
+        assertEq(vault.totalShares(), 10_993_740_063);
+    }
+
     function test_underlyingDonationDoesNotBlockDeposits() public {
         weth.mint(address(vault), 1);
 
@@ -272,8 +309,10 @@ contract EthCspVaultTest is Test {
         _depositAndOpenOnePut();
 
         vm.prank(bob);
-        vm.expectRevert(EthCspVault.OpenBatches.selector);
-        vault.deposit(1_000e6);
+        uint256 bobMinted = vault.deposit(1_000e6);
+        assertEq(bobMinted, 0);
+        assertEq(vault.pendingDepositAssets(bob), 1_000e6);
+        assertEq(vault.totalPendingDepositAssets(), 1_000e6);
 
         vm.prank(alice);
         vault.requestWithdraw(10_000e6);
@@ -307,6 +346,13 @@ contract EthCspVaultTest is Test {
         assertEq(usdc.balanceOf(receiver), 10_063e6);
         assertEq(vault.reservedWithdrawalAssets(), 0);
         assertEq(vault.totalManagedAssets(), 0);
+
+        vm.prank(bob);
+        uint256 activated = vault.activateDeposit();
+        assertEq(activated, 1_000e6);
+        assertEq(vault.pendingDepositAssets(bob), 0);
+        assertEq(vault.totalPendingDepositAssets(), 0);
+        assertEq(vault.sharesOf(bob), 1_000e6);
     }
 
     function test_reservedWithdrawalAssetsCannotBeOpenedAsCollateral() public {
@@ -373,15 +419,26 @@ contract EthCspVaultTest is Test {
         vault.deposit(1_000e6);
     }
 
-    function test_depositRevertsWhileWithdrawalsArePending() public {
+    function test_depositQueuesWhileWithdrawalsArePending() public {
         vm.prank(alice);
         vault.deposit(10_000e6);
         vm.prank(alice);
         vault.requestWithdraw(1_000e6);
 
         vm.prank(bob);
-        vm.expectRevert(EthCspVault.PendingWithdrawalsOpen.selector);
-        vault.deposit(1_000e6);
+        uint256 minted = vault.deposit(1_000e6);
+
+        assertEq(minted, 0);
+        assertEq(vault.pendingDepositAssets(bob), 1_000e6);
+        assertEq(vault.totalPendingDepositAssets(), 1_000e6);
+
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        vm.prank(bob);
+        uint256 activated = vault.activateDeposit();
+        assertEq(activated, 1_000e6);
+        assertEq(vault.sharesOf(bob), 1_000e6);
     }
 
     function test_virtualSharesPreventDonationShareInflationProfit() public {
@@ -503,6 +560,30 @@ contract EthCspVaultTest is Test {
         vm.prank(alice);
         vm.expectRevert(EthCspVault.OpenBatches.selector);
         vault.withdrawIdle(1_000e6, receiver);
+    }
+
+    function test_depositAfterAssignmentQueuesInsteadOfMixingWithAssignedWeth() public {
+        _depositAndOpenOnePut();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+        uint256 returned = _backendSettleVault(1, 1);
+        assertEq(returned, 0);
+
+        weth.mint(address(vault), 1e18);
+        vm.prank(operator);
+        vault.settleCspBatch(1, 0, 1e18);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        vm.prank(bob);
+        uint256 minted = vault.deposit(1_000e6);
+
+        assertEq(minted, 0);
+        assertEq(vault.pendingDepositAssets(bob), 1_000e6);
+        assertEq(vault.totalPendingDepositAssets(), 1_000e6);
+        assertEq(vault.sharesOf(bob), 0);
+        assertEq(vault.availableUnderlyingAssets(), 1e18);
     }
 
     function test_rejectsCoveredCallAndNonOperatorOpen() public {

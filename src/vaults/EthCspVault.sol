@@ -66,6 +66,7 @@ contract EthCspVault is ReentrancyGuard {
     uint256 public activeCollateral;
     uint256 public totalPendingWithdrawalShares;
     uint256 public totalPendingWithdrawalClaims;
+    uint256 public totalPendingDepositAssets;
     uint256 public reservedWithdrawalAssets;
     uint256 public reservedUnderlyingAssets;
     uint256 public accountedUnderlyingAssets;
@@ -76,12 +77,14 @@ contract EthCspVault is ReentrancyGuard {
     mapping(uint256 => uint256) public epochAssignedUnderlying;
     mapping(uint256 => uint256) public withdrawalUnderlyingPerShare;
     mapping(uint256 => uint256) public withdrawalUnderlyingRemaining;
+    mapping(address => uint256) public pendingDepositAssets;
     mapping(address => uint256) public pendingWithdrawalEpoch;
     mapping(address => uint256) public pendingWithdrawalShares;
 
     uint256 private constant MAX_PERFORMANCE_FEE_BPS = 2000;
 
     event Deposited(address indexed user, uint256 amount, uint256 shares);
+    event DepositQueued(address indexed user, uint256 indexed epochId, uint256 amount);
     event IdleWithdrawn(address indexed user, address indexed receiver, uint256 amount, uint256 shares);
     event WithdrawRequested(address indexed user, uint256 indexed epochId, uint256 shares);
     event WithdrawClaimed(
@@ -137,6 +140,7 @@ contract EthCspVault is ReentrancyGuard {
     error InsufficientAvailableAssets();
     error InsolventShareSupply();
     error PendingWithdrawalsOpen();
+    error PendingDepositsOpen();
     error CollateralAccountingMismatch();
 
     modifier onlyOwner() {
@@ -180,9 +184,7 @@ contract EthCspVault is ReentrancyGuard {
 
     function deposit(uint256 amount) external nonReentrant returns (uint256 mintedShares) {
         if (amount == 0) revert InvalidAmount();
-        if (activeBatches != 0) revert OpenBatches();
-        if (totalPendingWithdrawalShares != 0) revert PendingWithdrawalsOpen();
-        if (availableUnderlyingAssets() != 0) revert OpenBatches();
+        _activateDepositIfPossible(msg.sender);
 
         uint256 managedBefore = totalManagedAssets();
         uint256 balanceBefore = idleAssets();
@@ -190,23 +192,33 @@ contract EthCspVault is ReentrancyGuard {
         uint256 received = idleAssets() - balanceBefore;
         if (received == 0) revert InvalidAmount();
 
-        if (totalShares == 0) {
-            mintedShares = received;
-        } else if (managedBefore == 0) {
-            revert InsolventShareSupply();
+        if (_canActivateDeposits()) {
+            mintedShares = _mintActiveShares(msg.sender, received, managedBefore);
         } else {
-            mintedShares = (received * (totalShares + _virtualShares())) / (managedBefore + _virtualAssets());
+            pendingDepositAssets[msg.sender] += received;
+            totalPendingDepositAssets += received;
+            emit DepositQueued(msg.sender, currentEpoch, received);
         }
-        if (mintedShares == 0) revert NoShares();
+    }
 
-        sharesOf[msg.sender] += mintedShares;
-        totalShares += mintedShares;
-        epochs[currentEpoch].deposits += received;
+    function activateDeposit() external nonReentrant returns (uint256 mintedShares) {
+        return _activateDeposit(msg.sender);
+    }
 
-        emit Deposited(msg.sender, received, mintedShares);
+    function activateDepositFor(address user) external nonReentrant returns (uint256 mintedShares) {
+        if (user == address(0)) revert InvalidAddress();
+        return _activateDeposit(user);
+    }
+
+    function activateDeposits(address[] calldata users) external nonReentrant returns (uint256 mintedShares) {
+        for (uint256 i = 0; i < users.length; i++) {
+            if (users[i] == address(0)) revert InvalidAddress();
+            mintedShares += _activateDeposit(users[i]);
+        }
     }
 
     function withdrawIdle(uint256 shares, address receiver) external nonReentrant returns (uint256 amount) {
+        _activateDepositIfPossible(msg.sender);
         if (receiver == address(0)) revert InvalidAddress();
         if (shares == 0) revert InvalidAmount();
         if (activeBatches != 0) revert OpenBatches();
@@ -225,6 +237,7 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function requestWithdraw(uint256 shares) external nonReentrant {
+        _activateDepositIfPossible(msg.sender);
         if (shares == 0) revert InvalidAmount();
         if (pendingWithdrawalShares[msg.sender] != 0) revert PendingWithdrawal();
         if (sharesOf[msg.sender] < shares) revert InsufficientShares();
@@ -295,6 +308,8 @@ contract EthCspVault is ReentrancyGuard {
     ) external onlyOperator nonReentrant returns (uint256 batchId, uint256 protocolVaultId) {
         if (amount == 0 || collateral == 0) revert InvalidAmount();
         _validateEthUsdcPut(quote.oToken);
+        if (totalPendingDepositAssets != 0) revert PendingDepositsOpen();
+        if (availableUnderlyingAssets() != 0) revert OpenBatches();
         if (collateral > deployableIdleAssets()) revert InsufficientAvailableAssets();
 
         address marginPool = addressBook.marginPool();
@@ -446,8 +461,9 @@ contract EthCspVault is ReentrancyGuard {
 
     function availableIdleAssets() public view returns (uint256) {
         uint256 idle = idleAssets();
-        if (idle <= reservedWithdrawalAssets) return 0;
-        return idle - reservedWithdrawalAssets;
+        uint256 unavailable = reservedWithdrawalAssets + totalPendingDepositAssets;
+        if (idle <= unavailable) return 0;
+        return idle - unavailable;
     }
 
     function availableUnderlyingAssets() public view returns (uint256) {
@@ -473,6 +489,46 @@ contract EthCspVault is ReentrancyGuard {
     function _convertToAssets(uint256 shares) internal view returns (uint256) {
         if (totalShares == 0) return shares;
         return (totalManagedAssets() * shares) / totalShares;
+    }
+
+    function _activateDepositIfPossible(address user) internal returns (uint256 mintedShares) {
+        if (pendingDepositAssets[user] == 0 || !_canActivateDeposits()) return 0;
+        return _activateDeposit(user);
+    }
+
+    function _activateDeposit(address user) internal returns (uint256 mintedShares) {
+        if (!_canActivateDeposits()) revert OpenBatches();
+        uint256 assets = pendingDepositAssets[user];
+        if (assets == 0) revert InvalidAmount();
+
+        uint256 managedBefore = totalManagedAssets();
+        pendingDepositAssets[user] = 0;
+        totalPendingDepositAssets -= assets;
+        mintedShares = _mintActiveShares(user, assets, managedBefore);
+    }
+
+    function _mintActiveShares(address user, uint256 assets, uint256 managedBefore)
+        internal
+        returns (uint256 mintedShares)
+    {
+        if (totalShares == 0) {
+            mintedShares = assets;
+        } else if (managedBefore == 0) {
+            revert InsolventShareSupply();
+        } else {
+            mintedShares = (assets * (totalShares + _virtualShares())) / (managedBefore + _virtualAssets());
+        }
+        if (mintedShares == 0) revert NoShares();
+
+        sharesOf[user] += mintedShares;
+        totalShares += mintedShares;
+        epochs[currentEpoch].deposits += assets;
+
+        emit Deposited(user, assets, mintedShares);
+    }
+
+    function _canActivateDeposits() internal view returns (bool) {
+        return activeBatches == 0 && totalPendingWithdrawalShares == 0 && availableUnderlyingAssets() == 0;
     }
 
     function _virtualAssets() internal pure returns (uint256) {
