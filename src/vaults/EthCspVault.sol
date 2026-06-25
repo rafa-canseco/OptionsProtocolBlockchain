@@ -412,9 +412,9 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     /// @notice Settles the protocol vault and finalizes vault accounting from observed balance deltas.
-    /// @dev The allocator must deliver any assigned WETH before this call. USDC collateral returned
-    ///      is derived from the Controller settlement performed here so idle USDC cannot be reused as
-    ///      fake returned collateral.
+    /// @dev USDC collateral returned is derived from the Controller settlement performed here. Assigned
+    ///      WETH is pulled from the allocator during this call, so unsolicited WETH already sitting in
+    ///      the vault cannot be promoted into assignment accounting.
     function settleCspBatch(uint256 batchId, uint256 collateralReturned, uint256 underlyingReceived)
         external
         onlyAllocator
@@ -430,9 +430,11 @@ contract EthCspVault is ReentrancyGuard {
         uint256 observedCollateralReturned = usdc.balanceOf(address(this)) - usdcBefore;
         if (observedCollateralReturned != collateralReturned) revert CollateralAccountingMismatch();
 
-        uint256 underlyingBalance = underlying.balanceOf(address(this));
-        if (underlyingBalance < accountedUnderlyingAssets) revert CollateralAccountingMismatch();
-        uint256 observedUnderlyingReceived = underlyingBalance - accountedUnderlyingAssets;
+        uint256 underlyingBefore = underlying.balanceOf(address(this));
+        if (underlyingReceived > 0) {
+            underlying.safeTransferFrom(msg.sender, address(this), underlyingReceived);
+        }
+        uint256 observedUnderlyingReceived = underlying.balanceOf(address(this)) - underlyingBefore;
         if (observedUnderlyingReceived != underlyingReceived) {
             revert CollateralAccountingMismatch();
         }

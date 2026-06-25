@@ -310,13 +310,36 @@ contract EthCspVaultTest is Test {
         assertEq(vault.activeCollateral(), 0);
     }
 
+    function test_settleIgnoresUnsolicitedUnderlyingDonation() public {
+        _depositAndOpenOnePut();
+
+        weth.mint(address(vault), vault.underlyingDustThreshold() + 1);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+
+        _settleVaultBatch(1, 1, 2000e6, 0);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        assertEq(vault.accountedUnderlyingAssets(), 0);
+        assertEq(vault.availableUnderlyingAssets(), 0);
+
+        _computeExpiry();
+        address oToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        vault.openCspBatch(quote, sig, 1e8, 2000e6);
+        assertEq(vault.activeBatches(), 1);
+    }
+
     function test_settleItmTracksAssignmentShortfallAndFeesOnlyPremium() public {
         _depositAndOpenOnePut();
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
-        weth.mint(address(vault), 1e18);
         uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
         assertEq(returned, 0);
 
@@ -542,7 +565,6 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
-        weth.mint(address(vault), 1e18);
         uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
         assertEq(returned, 0);
         vm.prank(operator);
@@ -563,7 +585,6 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
-        weth.mint(address(vault), 1e18);
         uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
         assertEq(returned, 0);
         vm.prank(operator);
@@ -591,7 +612,6 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
-        weth.mint(address(vault), 1e18);
         uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
         assertEq(returned, 0);
         vm.prank(operator);
@@ -636,7 +656,6 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
-        weth.mint(address(vault), 1e18);
         uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
         assertEq(returned, 0);
         vm.prank(operator);
@@ -673,7 +692,6 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
-        weth.mint(address(vault), 1e18);
         uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
         assertEq(returned, 0);
         vm.prank(operator);
@@ -921,6 +939,12 @@ contract EthCspVaultTest is Test {
     ) internal returns (uint256 returned) {
         (,, uint256 protocolVaultId,,,,,) = vault.batches(batchId);
         assertEq(protocolVaultId, expectedVaultId);
+
+        if (expectedUnderlyingReceived > 0) {
+            weth.mint(operator, expectedUnderlyingReceived);
+            vm.prank(operator);
+            weth.approve(address(vault), expectedUnderlyingReceived);
+        }
 
         vm.prank(operator);
         vault.settleCspBatch(batchId, expectedCollateralReturned, expectedUnderlyingReceived);
