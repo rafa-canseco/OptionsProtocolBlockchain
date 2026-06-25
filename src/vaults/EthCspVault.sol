@@ -2,6 +2,7 @@
 pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../core/AddressBook.sol";
@@ -10,6 +11,7 @@ import "../core/Controller.sol";
 import "../core/MarginPool.sol";
 import "../core/OToken.sol";
 import "./interfaces/IEthCspOptionSelector.sol";
+import "./interfaces/IEthCspStrategyAdapter.sol";
 
 /**
  * @title EthCspVault
@@ -69,6 +71,7 @@ contract EthCspVault is ReentrancyGuard {
     address public allocator;
     address public feeRecipient;
     address public optionSelector;
+    address public strategyAdapter;
     uint256 public performanceFeeBps;
     StrategyConfig public strategyConfig;
 
@@ -99,6 +102,9 @@ contract EthCspVault is ReentrancyGuard {
     mapping(address => uint256) public pendingWithdrawalShares;
     mapping(address => uint256) public underlyingPerSharePaid;
     mapping(address => uint256) public claimableAssignedUnderlying;
+    mapping(address => uint256) public strategyAdapterCap;
+    mapping(address => uint256) public activeAdapterCollateral;
+    mapping(uint256 => address) public batchStrategyAdapter;
 
     uint256 private constant MAX_PERFORMANCE_FEE_BPS = 2000;
     uint256 public constant MIN_DEPOSIT_ASSETS = 1e6;
@@ -149,6 +155,8 @@ contract EthCspVault is ReentrancyGuard {
     event StrategyConfigUpdated(StrategyConfig config);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event OptionSelectorUpdated(address indexed oldSelector, address indexed newSelector);
+    event StrategyAdapterUpdated(address indexed oldAdapter, address indexed newAdapter, uint256 cap);
+    event StrategyAdapterCapUpdated(address indexed adapter, uint256 oldCap, uint256 newCap);
     event PerformanceFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
     event AssignedUnderlyingDustSwept(address indexed receiver, uint256 amount);
@@ -286,6 +294,7 @@ contract EthCspVault is ReentrancyGuard {
         if (receiver == address(0)) revert InvalidAddress();
         if (shares == 0) revert InvalidAmount();
         if (activeBatches != 0) revert OpenBatches();
+        if (availableUnderlyingAssets() != 0) revert OpenBatches();
         if (sharesOf[msg.sender] < shares) revert InsufficientShares();
 
         amount = _convertToAssets(shares);
@@ -400,23 +409,47 @@ contract EthCspVault is ReentrancyGuard {
         if (availableUnderlyingAssets() != 0) revert OpenBatches();
         if (collateral > deployableIdleAssets()) revert InsufficientAvailableAssets();
         _validateOptionSelection(quote.oToken, collateral);
+        _validateStrategyAdapterCap(collateral);
 
         address marginPool = addressBook.marginPool();
-        uint256 poolBalanceBefore = MarginPool(marginPool).getStoredBalance(address(usdc));
-        usdc.forceApprove(marginPool, collateral);
+        uint256 premiumEarned;
+        address adapter = strategyAdapter;
+        if (adapter == address(0)) {
+            uint256 poolBalanceBefore = MarginPool(marginPool).getStoredBalance(address(usdc));
+            usdc.forceApprove(marginPool, collateral);
 
-        uint256 balanceBefore = usdc.balanceOf(address(this));
-        protocolVaultId = BatchSettler(addressBook.batchSettler()).executeOrder(quote, signature, amount, collateral);
-        usdc.forceApprove(marginPool, 0);
-        uint256 balanceAfter = usdc.balanceOf(address(this));
-        uint256 poolBalanceAfter = MarginPool(marginPool).getStoredBalance(address(usdc));
-        if (poolBalanceAfter < poolBalanceBefore || poolBalanceAfter - poolBalanceBefore != collateral) {
-            revert CollateralAccountingMismatch();
+            uint256 balanceBefore = usdc.balanceOf(address(this));
+            protocolVaultId =
+                BatchSettler(addressBook.batchSettler()).executeOrder(quote, signature, amount, collateral);
+            usdc.forceApprove(marginPool, 0);
+            uint256 balanceAfter = usdc.balanceOf(address(this));
+            uint256 poolBalanceAfter = MarginPool(marginPool).getStoredBalance(address(usdc));
+            if (poolBalanceAfter < poolBalanceBefore || poolBalanceAfter - poolBalanceBefore != collateral) {
+                revert CollateralAccountingMismatch();
+            }
+
+            uint256 premiumEarnedWithCollateral = balanceAfter + collateral;
+            if (premiumEarnedWithCollateral < balanceBefore) revert PremiumAccountingMismatch();
+            premiumEarned = premiumEarnedWithCollateral - balanceBefore;
+        } else {
+            uint256 poolBalanceBefore = MarginPool(marginPool).getStoredBalance(address(usdc));
+            uint256 balanceBefore = usdc.balanceOf(address(this));
+            usdc.forceApprove(marginPool, collateral);
+            IEthCspStrategyAdapter.OpenResult memory result = IEthCspStrategyAdapter(adapter)
+                .openCspBatch(address(this), address(addressBook), address(usdc), quote, signature, amount, collateral);
+            usdc.forceApprove(marginPool, 0);
+            uint256 balanceAfter = usdc.balanceOf(address(this));
+            uint256 poolBalanceAfter = MarginPool(marginPool).getStoredBalance(address(usdc));
+            if (poolBalanceAfter < poolBalanceBefore || poolBalanceAfter - poolBalanceBefore != collateral) {
+                revert CollateralAccountingMismatch();
+            }
+
+            uint256 premiumEarnedWithCollateral = balanceAfter + collateral;
+            if (premiumEarnedWithCollateral < balanceBefore) revert PremiumAccountingMismatch();
+            premiumEarned = premiumEarnedWithCollateral - balanceBefore;
+            if (premiumEarned != result.premiumEarned) revert PremiumAccountingMismatch();
+            protocolVaultId = result.protocolVaultId;
         }
-
-        uint256 premiumEarnedWithCollateral = balanceAfter + collateral;
-        if (premiumEarnedWithCollateral < balanceBefore) revert PremiumAccountingMismatch();
-        uint256 premiumEarned = premiumEarnedWithCollateral - balanceBefore;
         _validateStrategyPremium(collateral, premiumEarned);
 
         batchId = ++batchCount;
@@ -430,9 +463,14 @@ contract EthCspVault is ReentrancyGuard {
             collateralReturned: 0,
             settled: false
         });
+        BatchSettler(addressBook.batchSettler()).reservePhysicalDelivery(protocolVaultId);
 
         activeBatches++;
         activeCollateral += collateral;
+        if (adapter != address(0)) {
+            batchStrategyAdapter[batchId] = adapter;
+            activeAdapterCollateral[adapter] += collateral;
+        }
 
         Epoch storage epoch = epochs[currentEpoch];
         epoch.committedCollateral += collateral;
@@ -461,20 +499,45 @@ contract EthCspVault is ReentrancyGuard {
         if (batch.protocolVaultId == 0) revert InvalidAmount();
         if (batch.settled) revert BatchAlreadySettled();
         if (collateralReturned > batch.collateral) revert CollateralAccountingMismatch();
+        uint256 requiredUnderlyingReceived = _requiredAssignedUnderlying(batch, collateralReturned);
+        if (underlyingReceived != requiredUnderlyingReceived) revert CollateralAccountingMismatch();
 
-        uint256 usdcBefore = usdc.balanceOf(address(this));
-        Controller(addressBook.controller()).settleVault(address(this), batch.protocolVaultId);
-        uint256 observedCollateralReturned = usdc.balanceOf(address(this)) - usdcBefore;
-        if (observedCollateralReturned != collateralReturned) revert CollateralAccountingMismatch();
+        address adapter = batchStrategyAdapter[batchId];
+        if (adapter == address(0)) {
+            uint256 usdcBefore = usdc.balanceOf(address(this));
+            Controller(addressBook.controller()).settleVault(address(this), batch.protocolVaultId);
+            uint256 observedCollateralReturned = usdc.balanceOf(address(this)) - usdcBefore;
+            if (observedCollateralReturned != collateralReturned) revert CollateralAccountingMismatch();
 
-        uint256 underlyingBefore = underlying.balanceOf(address(this));
-        if (underlyingReceived > 0) {
-            underlying.safeTransferFrom(msg.sender, address(this), underlyingReceived);
+            uint256 underlyingBefore = underlying.balanceOf(address(this));
+            if (underlyingReceived > 0) {
+                underlying.safeTransferFrom(msg.sender, address(this), underlyingReceived);
+            }
+            uint256 observedUnderlyingReceived = underlying.balanceOf(address(this)) - underlyingBefore;
+            if (observedUnderlyingReceived != underlyingReceived) {
+                revert CollateralAccountingMismatch();
+            }
+        } else {
+            uint256 usdcBefore = usdc.balanceOf(address(this));
+            IEthCspStrategyAdapter.SettleResult memory result = IEthCspStrategyAdapter(adapter)
+                .settleCspBatch(
+                    address(this), address(addressBook), address(usdc), batch.protocolVaultId, collateralReturned
+                );
+            uint256 observedCollateralReturned = usdc.balanceOf(address(this)) - usdcBefore;
+            if (result.collateralReturned != collateralReturned || observedCollateralReturned != collateralReturned) {
+                revert CollateralAccountingMismatch();
+            }
+
+            uint256 underlyingBefore = underlying.balanceOf(address(this));
+            if (underlyingReceived > 0) {
+                underlying.safeTransferFrom(msg.sender, address(this), underlyingReceived);
+            }
+            uint256 observedUnderlyingReceived = underlying.balanceOf(address(this)) - underlyingBefore;
+            if (observedUnderlyingReceived != underlyingReceived) {
+                revert CollateralAccountingMismatch();
+            }
         }
-        uint256 observedUnderlyingReceived = underlying.balanceOf(address(this)) - underlyingBefore;
-        if (observedUnderlyingReceived != underlyingReceived) {
-            revert CollateralAccountingMismatch();
-        }
+        BatchSettler(addressBook.batchSettler()).releasePhysicalDelivery(batch.protocolVaultId);
 
         batch.settled = true;
         batch.collateralReturned = collateralReturned;
@@ -482,6 +545,9 @@ contract EthCspVault is ReentrancyGuard {
         accountedUnderlyingAssets += underlyingReceived;
         activeBatches--;
         activeCollateral -= batch.collateral;
+        if (adapter != address(0)) {
+            activeAdapterCollateral[adapter] -= batch.collateral;
+        }
 
         uint256 assignmentShortfall = batch.collateral - collateralReturned;
 
@@ -564,6 +630,29 @@ contract EthCspVault is ReentrancyGuard {
         optionSelector = newOptionSelector;
     }
 
+    function setStrategyAdapter(address newStrategyAdapter, uint256 cap) external onlyCurator {
+        if (activeBatches != 0) revert OpenBatches();
+        address oldAdapter = strategyAdapter;
+        if (oldAdapter != address(0)) {
+            BatchSettler(addressBook.batchSettler()).setOrderExecutor(oldAdapter, false);
+        }
+        if (newStrategyAdapter != address(0)) {
+            if (cap == 0) revert StrategyConstraint();
+            BatchSettler(addressBook.batchSettler()).setOrderExecutor(newStrategyAdapter, true);
+            strategyAdapterCap[newStrategyAdapter] = cap;
+        }
+        strategyAdapter = newStrategyAdapter;
+        emit StrategyAdapterUpdated(oldAdapter, newStrategyAdapter, cap);
+    }
+
+    function setStrategyAdapterCap(address adapter, uint256 newCap) external onlyCurator {
+        if (adapter == address(0) || newCap == 0) revert InvalidAddress();
+        if (newCap < activeAdapterCollateral[adapter]) revert StrategyConstraint();
+        uint256 oldCap = strategyAdapterCap[adapter];
+        strategyAdapterCap[adapter] = newCap;
+        emit StrategyAdapterCapUpdated(adapter, oldCap, newCap);
+    }
+
     function setPerformanceFeeBps(uint256 newFeeBps) external onlyOwner {
         if (newFeeBps > MAX_PERFORMANCE_FEE_BPS) revert FeeTooHigh();
         emit PerformanceFeeUpdated(performanceFeeBps, newFeeBps);
@@ -577,6 +666,7 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function sweepAssignedUnderlyingDust() external onlyAllocator nonReentrant returns (uint256 amount) {
+        if (!epochs[currentEpoch].closed && epochAssignedUnderlying[currentEpoch] != 0) revert OpenBatches();
         amount = availableUnderlyingAssets();
         if (amount == 0) revert InvalidAmount();
         if (amount > underlyingDustThreshold) revert AssignedUnderlyingTooLarge();
@@ -687,7 +777,7 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function _canActivateDeposits() internal view returns (bool) {
-        return activeBatches == 0 && totalPendingWithdrawalShares == 0;
+        return activeBatches == 0 && totalPendingWithdrawalShares == 0 && availableUnderlyingAssets() == 0;
     }
 
     function _allocateAssignedUnderlying(uint256 epochId) internal {
@@ -695,7 +785,12 @@ contract EthCspVault is ReentrancyGuard {
         if (amount == 0 || totalShares == 0) return;
 
         uint256 delta = (amount * 1e18) / totalShares;
-        if (delta == 0) return;
+        if (delta == 0) {
+            accountedUnderlyingAssets -= amount;
+            underlying.safeTransfer(feeRecipient, amount);
+            emit AssignedUnderlyingDustSwept(feeRecipient, amount);
+            return;
+        }
 
         uint256 distributed = (delta * totalShares) / 1e18;
         cumulativeUnderlyingPerShare += delta;
@@ -742,6 +837,24 @@ contract EthCspVault is ReentrancyGuard {
 
         uint256 strike = oToken.strikePrice();
         if (strike < config.minStrike || strike > config.maxStrike) revert StrategyConstraint();
+    }
+
+    function _validateStrategyAdapterCap(uint256 collateral) internal view {
+        address adapter = strategyAdapter;
+        if (adapter == address(0)) return;
+        uint256 cap = strategyAdapterCap[adapter];
+        if (cap == 0 || activeAdapterCollateral[adapter] + collateral > cap) revert StrategyConstraint();
+    }
+
+    function _requiredAssignedUnderlying(CspBatch storage batch, uint256 collateralReturned)
+        internal
+        view
+        returns (uint256)
+    {
+        if (collateralReturned == batch.collateral) return 0;
+        uint8 underlyingDecimals = IERC20Metadata(address(underlying)).decimals();
+        if (underlyingDecimals < 8 || underlyingDecimals > 18) revert StrategyConstraint();
+        return batch.amount * (10 ** (underlyingDecimals - 8));
     }
 
     function _validateStrategyPremium(uint256 collateral, uint256 premiumEarned) internal view {
