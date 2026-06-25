@@ -9,6 +9,7 @@ import "../core/BatchSettler.sol";
 import "../core/Controller.sol";
 import "../core/MarginPool.sol";
 import "../core/OToken.sol";
+import "./interfaces/IEthCspOptionSelector.sol";
 
 /**
  * @title EthCspVault
@@ -67,6 +68,7 @@ contract EthCspVault is ReentrancyGuard {
     address public curator;
     address public allocator;
     address public feeRecipient;
+    address public optionSelector;
     uint256 public performanceFeeBps;
     StrategyConfig public strategyConfig;
 
@@ -83,6 +85,8 @@ contract EthCspVault is ReentrancyGuard {
     uint256 public reservedWithdrawalAssets;
     uint256 public reservedUnderlyingAssets;
     uint256 public accountedUnderlyingAssets;
+    uint256 public allocatedUnderlyingAssets;
+    uint256 public cumulativeUnderlyingPerShare;
 
     mapping(uint256 => Epoch) public epochs;
     mapping(uint256 => CspBatch) public batches;
@@ -93,6 +97,8 @@ contract EthCspVault is ReentrancyGuard {
     mapping(address => uint256) public pendingDepositAssets;
     mapping(address => uint256) public pendingWithdrawalEpoch;
     mapping(address => uint256) public pendingWithdrawalShares;
+    mapping(address => uint256) public underlyingPerSharePaid;
+    mapping(address => uint256) public claimableAssignedUnderlying;
 
     uint256 private constant MAX_PERFORMANCE_FEE_BPS = 2000;
     uint256 public constant MIN_DEPOSIT_ASSETS = 1e6;
@@ -103,6 +109,7 @@ contract EthCspVault is ReentrancyGuard {
     event Deposited(address indexed user, uint256 amount, uint256 shares);
     event DepositQueued(address indexed user, uint256 indexed epochId, uint256 amount);
     event DepositRefunded(address indexed user, uint256 amount);
+    event PendingDepositCancelled(address indexed user, address indexed receiver, uint256 amount);
     event IdleWithdrawn(address indexed user, address indexed receiver, uint256 amount, uint256 shares);
     event WithdrawRequested(address indexed user, uint256 indexed epochId, uint256 shares);
     event WithdrawClaimed(
@@ -141,9 +148,12 @@ contract EthCspVault is ReentrancyGuard {
     event AllocatorUpdated(address indexed oldAllocator, address indexed newAllocator);
     event StrategyConfigUpdated(StrategyConfig config);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
+    event OptionSelectorUpdated(address indexed oldSelector, address indexed newSelector);
     event PerformanceFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
     event AssignedUnderlyingDustSwept(address indexed receiver, uint256 amount);
+    event AssignedUnderlyingAllocated(uint256 indexed epochId, uint256 amount, uint256 activeShares);
+    event AssignedUnderlyingClaimed(address indexed user, address indexed receiver, uint256 amount);
     event UnderlyingDustThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
 
     error InvalidAddress();
@@ -258,12 +268,24 @@ contract EthCspVault is ReentrancyGuard {
         }
     }
 
+    function cancelPendingDeposit(address receiver) external nonReentrant returns (uint256 amount) {
+        if (receiver == address(0)) revert InvalidAddress();
+        amount = pendingDepositAssets[msg.sender];
+        if (amount == 0) revert InvalidAmount();
+
+        pendingDepositAssets[msg.sender] = 0;
+        totalPendingDepositAssets -= amount;
+
+        usdc.safeTransfer(receiver, amount);
+        emit PendingDepositCancelled(msg.sender, receiver, amount);
+    }
+
     function withdrawIdle(uint256 shares, address receiver) external nonReentrant returns (uint256 amount) {
         _activateDepositIfPossible(msg.sender);
+        _accrueAssignedUnderlying(msg.sender);
         if (receiver == address(0)) revert InvalidAddress();
         if (shares == 0) revert InvalidAmount();
         if (activeBatches != 0) revert OpenBatches();
-        if (availableUnderlyingAssets() != 0) revert OpenBatches();
         if (sharesOf[msg.sender] < shares) revert InsufficientShares();
 
         amount = _convertToAssets(shares);
@@ -299,6 +321,20 @@ contract EthCspVault is ReentrancyGuard {
     {
         if (receiver == address(0)) revert InvalidAddress();
         return _claimWithdraw(receiver);
+    }
+
+    function claimAssignedUnderlying(address receiver) external nonReentrant returns (uint256 amount) {
+        if (receiver == address(0)) revert InvalidAddress();
+        _accrueAssignedUnderlying(msg.sender);
+        amount = claimableAssignedUnderlying[msg.sender];
+        if (amount == 0) revert InvalidAmount();
+
+        claimableAssignedUnderlying[msg.sender] = 0;
+        allocatedUnderlyingAssets -= amount;
+        accountedUnderlyingAssets -= amount;
+        underlying.safeTransfer(receiver, amount);
+
+        emit AssignedUnderlyingClaimed(msg.sender, receiver, amount);
     }
 
     function _claimWithdraw(address receiver) internal returns (uint256 usdcAmount, uint256 underlyingAmount) {
@@ -342,6 +378,7 @@ contract EthCspVault is ReentrancyGuard {
         if (pendingWithdrawalShares[user] != 0) revert PendingWithdrawal();
         if (sharesOf[user] < shares) revert InsufficientShares();
 
+        _accrueAssignedUnderlying(user);
         sharesOf[user] -= shares;
         pendingWithdrawalEpoch[user] = currentEpoch;
         pendingWithdrawalShares[user] = shares;
@@ -362,7 +399,7 @@ contract EthCspVault is ReentrancyGuard {
         if (totalPendingWithdrawalShares != 0) revert PendingWithdrawalsOpen();
         if (availableUnderlyingAssets() != 0) revert OpenBatches();
         if (collateral > deployableIdleAssets()) revert InsufficientAvailableAssets();
-        _validateStrategyBounds(quote.oToken, collateral);
+        _validateOptionSelection(quote.oToken, collateral);
 
         address marginPool = addressBook.marginPool();
         uint256 poolBalanceBefore = MarginPool(marginPool).getStoredBalance(address(usdc));
@@ -482,6 +519,7 @@ contract EthCspVault is ReentrancyGuard {
             reservedWithdrawalAssets += reservedAssets;
             reservedUnderlyingAssets += reservedUnderlying;
         }
+        _allocateAssignedUnderlying(currentEpoch);
 
         epoch.closed = true;
         epoch.endedAt = uint64(block.timestamp);
@@ -519,6 +557,11 @@ contract EthCspVault is ReentrancyGuard {
         if (newFeeRecipient == address(0)) revert InvalidAddress();
         emit FeeRecipientUpdated(feeRecipient, newFeeRecipient);
         feeRecipient = newFeeRecipient;
+    }
+
+    function setOptionSelector(address newOptionSelector) external onlyCurator {
+        emit OptionSelectorUpdated(optionSelector, newOptionSelector);
+        optionSelector = newOptionSelector;
     }
 
     function setPerformanceFeeBps(uint256 newFeeBps) external onlyOwner {
@@ -566,8 +609,9 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function availableUnderlyingAssets() public view returns (uint256) {
-        if (accountedUnderlyingAssets <= reservedUnderlyingAssets) return 0;
-        return accountedUnderlyingAssets - reservedUnderlyingAssets;
+        uint256 unavailable = reservedUnderlyingAssets + allocatedUnderlyingAssets;
+        if (accountedUnderlyingAssets <= unavailable) return 0;
+        return accountedUnderlyingAssets - unavailable;
     }
 
     function deployableIdleAssets() public view returns (uint256) {
@@ -633,18 +677,57 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function _recordActiveShares(address user, uint256 assets, uint256 mintedShares) internal {
+        _accrueAssignedUnderlying(user);
         sharesOf[user] += mintedShares;
         totalShares += mintedShares;
+        underlyingPerSharePaid[user] = cumulativeUnderlyingPerShare;
         epochs[currentEpoch].deposits += assets;
 
         emit Deposited(user, assets, mintedShares);
     }
 
     function _canActivateDeposits() internal view returns (bool) {
-        return activeBatches == 0 && totalPendingWithdrawalShares == 0 && availableUnderlyingAssets() == 0;
+        return activeBatches == 0 && totalPendingWithdrawalShares == 0;
     }
 
-    function _validateStrategyBounds(address oTokenAddress, uint256 collateral) internal view {
+    function _allocateAssignedUnderlying(uint256 epochId) internal {
+        uint256 amount = availableUnderlyingAssets();
+        if (amount == 0 || totalShares == 0) return;
+
+        uint256 delta = (amount * 1e18) / totalShares;
+        if (delta == 0) return;
+
+        uint256 distributed = (delta * totalShares) / 1e18;
+        cumulativeUnderlyingPerShare += delta;
+        allocatedUnderlyingAssets += distributed;
+        emit AssignedUnderlyingAllocated(epochId, distributed, totalShares);
+    }
+
+    function _accrueAssignedUnderlying(address user) internal {
+        uint256 paid = underlyingPerSharePaid[user];
+        uint256 current = cumulativeUnderlyingPerShare;
+        if (paid == current) return;
+
+        uint256 userShares = sharesOf[user];
+        if (userShares > 0) {
+            uint256 accrued = (userShares * (current - paid)) / 1e18;
+            if (accrued > 0) {
+                claimableAssignedUnderlying[user] += accrued;
+            }
+        }
+        underlyingPerSharePaid[user] = current;
+    }
+
+    function _validateOptionSelection(address oTokenAddress, uint256 collateral) internal view {
+        address selector = optionSelector;
+        if (selector != address(0)) {
+            IEthCspOptionSelector(selector)
+                .validateOption(
+                    oTokenAddress, ethUnderlying, address(usdc), collateral, activeCollateral, totalManagedAssets()
+                );
+            return;
+        }
+
         StrategyConfig memory config = strategyConfig;
         OToken oToken = OToken(oTokenAddress);
 
@@ -662,6 +745,12 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function _validateStrategyPremium(uint256 collateral, uint256 premiumEarned) internal view {
+        address selector = optionSelector;
+        if (selector != address(0)) {
+            IEthCspOptionSelector(selector).validatePremium(collateral, premiumEarned);
+            return;
+        }
+
         uint256 minPremiumBps = strategyConfig.minPremiumBps;
         if (premiumEarned * 10_000 < collateral * minPremiumBps) revert StrategyConstraint();
     }
