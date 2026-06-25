@@ -221,9 +221,7 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
-        uint256 returned = _backendSettleVault(1, 1);
-        vm.prank(operator);
-        vault.settleCspBatch(1, returned, 0);
+        uint256 returned = _settleVaultBatch(1, 1, 2000e6, 0);
         vm.prank(operator);
         vault.closeEpoch();
 
@@ -239,9 +237,7 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 2 days);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
-        returned = _backendSettleVault(2, 2);
-        vm.prank(operator);
-        vault.settleCspBatch(2, returned, 0);
+        returned = _settleVaultBatch(2, 2, 2000e6, 0);
         vm.prank(operator);
         vault.closeEpoch();
 
@@ -272,9 +268,7 @@ contract EthCspVaultTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
 
-        uint256 returned = _backendSettleVault(1, 1);
-        vm.prank(operator);
-        vault.settleCspBatch(1, returned, 0);
+        uint256 returned = _settleVaultBatch(1, 1, 2000e6, 0);
 
         assertEq(returned, 2000e6);
         assertEq(vault.activeBatches(), 0);
@@ -297,16 +291,33 @@ contract EthCspVaultTest is Test {
         assertTrue(closed);
     }
 
+    function test_settleRejectsAllocatorCollateralReportNotBackedByControllerDelta() public {
+        _depositAndOpenOnePut();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.CollateralAccountingMismatch.selector);
+        vault.settleCspBatch(1, 100e6, 0);
+
+        assertEq(vault.activeBatches(), 1);
+        assertEq(vault.activeCollateral(), 2000e6);
+        assertEq(vault.totalManagedAssets(), 10_063e6);
+
+        _settleVaultBatch(1, 1, 2000e6, 0);
+        assertEq(vault.activeBatches(), 0);
+        assertEq(vault.activeCollateral(), 0);
+    }
+
     function test_settleItmTracksAssignmentShortfallAndFeesOnlyPremium() public {
         _depositAndOpenOnePut();
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
-        uint256 returned = _backendSettleVault(1, 1);
         weth.mint(address(vault), 1e18);
-        vm.prank(operator);
-        vault.settleCspBatch(1, returned, 1e18);
+        uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
         assertEq(returned, 0);
 
         vm.prank(operator);
@@ -343,9 +354,7 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
-        uint256 returned = _backendSettleVault(1, 1);
-        vm.prank(operator);
-        vault.settleCspBatch(1, returned, 0);
+        _settleVaultBatch(1, 1, 2000e6, 0);
         vm.prank(operator);
         vault.closeEpoch();
 
@@ -533,12 +542,9 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
-        uint256 returned = _backendSettleVault(1, 1);
-        assertEq(returned, 0);
-
         weth.mint(address(vault), 1e18);
-        vm.prank(operator);
-        vault.settleCspBatch(1, 0, 1e18);
+        uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
+        assertEq(returned, 0);
         vm.prank(operator);
         vault.closeEpoch();
 
@@ -557,12 +563,9 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
-        uint256 returned = _backendSettleVault(1, 1);
-        assertEq(returned, 0);
-
         weth.mint(address(vault), 1e18);
-        vm.prank(operator);
-        vault.settleCspBatch(1, 0, 1e18);
+        uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
+        assertEq(returned, 0);
         vm.prank(operator);
         vault.closeEpoch();
 
@@ -588,12 +591,9 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
-        uint256 returned = _backendSettleVault(1, 1);
-        assertEq(returned, 0);
-
         weth.mint(address(vault), 1e18);
-        vm.prank(operator);
-        vault.settleCspBatch(1, 0, 1e18);
+        uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
+        assertEq(returned, 0);
         vm.prank(operator);
         vault.closeEpoch();
 
@@ -636,12 +636,9 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
-        uint256 returned = _backendSettleVault(1, 1);
-        assertEq(returned, 0);
-
         weth.mint(address(vault), 1e18);
-        vm.prank(operator);
-        vault.settleCspBatch(1, 0, 1e18);
+        uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
+        assertEq(returned, 0);
         vm.prank(operator);
         vault.closeEpoch();
 
@@ -676,12 +673,9 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
-        uint256 returned = _backendSettleVault(1, 1);
-        assertEq(returned, 0);
-
         weth.mint(address(vault), 1e18);
-        vm.prank(operator);
-        vault.settleCspBatch(1, 0, 1e18);
+        uint256 returned = _settleVaultBatch(1, 1, 0, 1e18);
+        assertEq(returned, 0);
         vm.prank(operator);
         vault.closeEpoch();
 
@@ -866,9 +860,7 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
-        uint256 returned = _backendSettleVault(1, 1);
-        vm.prank(operator);
-        vault.settleCspBatch(1, returned, 0);
+        _settleVaultBatch(1, 1, 2000e6, 0);
         vm.prank(operator);
         vault.closeEpoch();
 
@@ -894,9 +886,7 @@ contract EthCspVaultTest is Test {
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
-        uint256 returned = _backendSettleVault(1, 1);
-        vm.prank(operator);
-        vault.settleCspBatch(1, returned, 0);
+        _settleVaultBatch(1, 1, 2000e6, 0);
         vm.prank(operator);
         vault.closeEpoch();
 
@@ -923,20 +913,19 @@ contract EthCspVaultTest is Test {
         vault.openCspBatch(quote, sig, 1e8, 2000e6);
     }
 
-    function _backendSettleVault(uint256 batchId, uint256 expectedVaultId) internal returns (uint256 returned) {
-        uint256 balanceBefore = usdc.balanceOf(address(vault));
+    function _settleVaultBatch(
+        uint256 batchId,
+        uint256 expectedVaultId,
+        uint256 expectedCollateralReturned,
+        uint256 expectedUnderlyingReceived
+    ) internal returns (uint256 returned) {
         (,, uint256 protocolVaultId,,,,,) = vault.batches(batchId);
         assertEq(protocolVaultId, expectedVaultId);
 
-        address[] memory owners = new address[](1);
-        uint256[] memory vaultIds = new uint256[](1);
-        owners[0] = address(vault);
-        vaultIds[0] = protocolVaultId;
-
         vm.prank(operator);
-        settler.batchSettleVaults(owners, vaultIds);
+        vault.settleCspBatch(batchId, expectedCollateralReturned, expectedUnderlyingReceived);
 
-        returned = usdc.balanceOf(address(vault)) - balanceBefore;
+        returned = expectedCollateralReturned;
     }
 
     function _createPut() internal returns (address) {

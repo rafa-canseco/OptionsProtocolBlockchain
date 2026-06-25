@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../core/AddressBook.sol";
 import "../core/BatchSettler.sol";
+import "../core/Controller.sol";
 import "../core/MarginPool.sol";
 import "../core/OToken.sol";
 
@@ -410,9 +411,10 @@ contract EthCspVault is ReentrancyGuard {
         emit CspBatchOpened(batchId, currentEpoch, quote.oToken, protocolVaultId, amount, collateral, premiumEarned);
     }
 
-    /// @notice Finalizes vault accounting after the backend has settled the protocol vault.
-    /// @dev The vault never calls Controller settlement or physical redemption itself. The allocator
-    ///      must first settle through BatchSettler and, when assigned, deliver WETH to this vault.
+    /// @notice Settles the protocol vault and finalizes vault accounting from observed balance deltas.
+    /// @dev The allocator must deliver any assigned WETH before this call. USDC collateral returned
+    ///      is derived from the Controller settlement performed here so idle USDC cannot be reused as
+    ///      fake returned collateral.
     function settleCspBatch(uint256 batchId, uint256 collateralReturned, uint256 underlyingReceived)
         external
         onlyAllocator
@@ -422,8 +424,16 @@ contract EthCspVault is ReentrancyGuard {
         if (batch.protocolVaultId == 0) revert InvalidAmount();
         if (batch.settled) revert BatchAlreadySettled();
         if (collateralReturned > batch.collateral) revert CollateralAccountingMismatch();
-        if (collateralReturned > availableIdleAssets()) revert CollateralAccountingMismatch();
-        if (underlying.balanceOf(address(this)) < accountedUnderlyingAssets + underlyingReceived) {
+
+        uint256 usdcBefore = usdc.balanceOf(address(this));
+        Controller(addressBook.controller()).settleVault(address(this), batch.protocolVaultId);
+        uint256 observedCollateralReturned = usdc.balanceOf(address(this)) - usdcBefore;
+        if (observedCollateralReturned != collateralReturned) revert CollateralAccountingMismatch();
+
+        uint256 underlyingBalance = underlying.balanceOf(address(this));
+        if (underlyingBalance < accountedUnderlyingAssets) revert CollateralAccountingMismatch();
+        uint256 observedUnderlyingReceived = underlyingBalance - accountedUnderlyingAssets;
+        if (observedUnderlyingReceived != underlyingReceived) {
             revert CollateralAccountingMismatch();
         }
 
