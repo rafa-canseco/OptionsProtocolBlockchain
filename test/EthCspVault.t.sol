@@ -231,17 +231,28 @@ contract EthCspVaultTest is Test {
         address oToken = _createPut();
         (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
         vm.prank(operator);
-        vm.expectRevert(EthCspVault.PendingDepositsOpen.selector);
         vault.openCspBatch(quote, sig, 1e8, 2_000e6);
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.OpenBatches.selector);
+        vault.activateDepositFor(bob);
+
+        vm.warp(expiry + 2 days);
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
+        returned = _backendSettleVault(2, 2);
+        vm.prank(operator);
+        vault.settleCspBatch(2, returned, 0);
+        vm.prank(operator);
+        vault.closeEpoch();
 
         vm.prank(operator);
         uint256 activated = vault.activateDepositFor(bob);
 
-        assertEq(activated, 993_740_063);
+        assertEq(activated, 987_556_784);
         assertEq(vault.pendingDepositAssets(bob), 0);
         assertEq(vault.totalPendingDepositAssets(), 0);
-        assertEq(vault.sharesOf(bob), 993_740_063);
-        assertEq(vault.totalShares(), 10_993_740_063);
+        assertEq(vault.sharesOf(bob), 987_556_784);
+        assertEq(vault.totalShares(), 10_987_556_784);
     }
 
     function test_underlyingDonationDoesNotBlockDeposits() public {
@@ -445,28 +456,27 @@ contract EthCspVaultTest is Test {
         assertEq(vault.sharesOf(bob), 1_000e6);
     }
 
-    function test_virtualSharesPreventDonationShareInflationProfit() public {
+    function test_minDepositPreventsTinyFirstDepositDonationAttack() public {
         vm.prank(alice);
+        vm.expectRevert(EthCspVault.InvalidAmount.selector);
         vault.deposit(1);
+    }
+
+    function test_sharePricingDoesNotLeakYieldToPostProfitDeposit() public {
+        vm.prank(alice);
+        vault.deposit(1e6);
 
         vm.prank(alice);
-        assertTrue(usdc.transfer(address(vault), 999_999));
+        assertTrue(usdc.transfer(address(vault), 1e6));
 
         vm.prank(bob);
-        uint256 bobShares = vault.deposit(1_999_999);
-        assertGt(bobShares, 1);
+        uint256 bobShares = vault.deposit(1e6);
 
-        vm.prank(alice);
-        vault.requestWithdraw(1);
-        vm.prank(operator);
-        vault.closeEpoch();
+        assertEq(bobShares, 500_000);
 
-        uint256 aliceBefore = usdc.balanceOf(alice);
-        vm.prank(alice);
-        (uint256 withdrawn,) = vault.claimWithdraw();
-
-        assertLt(withdrawn, 1_000_000);
-        assertEq(usdc.balanceOf(alice), aliceBefore + withdrawn);
+        vm.prank(bob);
+        uint256 withdrawn = vault.withdrawIdle(bobShares, bob);
+        assertEq(withdrawn, 1e6);
     }
 
     function test_pendingWithdrawalsOnlyReduceDeployableBatchCollateral() public {
@@ -481,42 +491,37 @@ contract EthCspVaultTest is Test {
         (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
 
         vm.prank(operator);
-        vm.expectRevert(EthCspVault.InsufficientAvailableAssets.selector);
-        vault.openCspBatch(quote, sig, 1e8, 9_001e6);
-
-        vm.prank(operator);
+        vm.expectRevert(EthCspVault.PendingWithdrawalsOpen.selector);
         vault.openCspBatch(quote, sig, 1e8, 2_000e6);
-
-        assertEq(vault.activeCollateral(), 2_000e6);
     }
 
     function test_lastWithdrawalClaimConsumesRoundingDust() public {
         vm.prank(alice);
-        vault.deposit(1);
+        vault.deposit(1e6);
         vm.prank(bob);
-        vault.deposit(2);
+        vault.deposit(2e6);
 
         vm.prank(address(vault));
         assertTrue(usdc.transfer(address(0xDEAD), 2));
 
         vm.prank(alice);
-        vault.requestWithdraw(1);
+        vault.requestWithdraw(1e6);
         vm.prank(bob);
-        vault.requestWithdraw(2);
+        vault.requestWithdraw(2e6);
 
         vm.prank(operator);
         vault.closeEpoch();
 
-        assertEq(vault.reservedWithdrawalAssets(), 1);
+        assertEq(vault.reservedWithdrawalAssets(), 2_999_998);
 
         vm.prank(alice);
         (uint256 aliceWithdrawn,) = vault.claimWithdraw();
-        assertEq(aliceWithdrawn, 0);
-        assertEq(vault.reservedWithdrawalAssets(), 1);
+        assertEq(aliceWithdrawn, 999_999);
+        assertEq(vault.reservedWithdrawalAssets(), 1_999_999);
 
         vm.prank(bob);
         (uint256 bobWithdrawn,) = vault.claimWithdraw();
-        assertEq(bobWithdrawn, 1);
+        assertEq(bobWithdrawn, 1_999_999);
         assertEq(vault.reservedWithdrawalAssets(), 0);
     }
 
@@ -564,6 +569,106 @@ contract EthCspVaultTest is Test {
         vm.prank(alice);
         vm.expectRevert(EthCspVault.OpenBatches.selector);
         vault.withdrawIdle(1_000e6, receiver);
+    }
+
+    function test_allocatorCanSweepAssignedUnderlyingDustToResumeVault() public {
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+        vm.prank(bob);
+        vault.deposit(1e6);
+
+        address oToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        vault.openCspBatch(quote, sig, 1e8, 2_000e6);
+
+        vm.prank(alice);
+        vault.requestWithdraw(10_000e6);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+        uint256 returned = _backendSettleVault(1, 1);
+        assertEq(returned, 0);
+
+        weth.mint(address(vault), 1e18);
+        vm.prank(operator);
+        vault.settleCspBatch(1, 0, 1e18);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        assertGt(vault.availableUnderlyingAssets(), 0);
+        assertLe(vault.availableUnderlyingAssets(), vault.underlyingDustThreshold());
+
+        _computeExpiry();
+        oToken = _createPut();
+        (quote, sig) = _signQuote(oToken, 70e6, 100e8);
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.OpenBatches.selector);
+        vault.openCspBatch(quote, sig, 10_000, 200_000);
+
+        vm.prank(operator);
+        uint256 swept = vault.sweepAssignedUnderlyingDust();
+
+        assertGt(swept, 0);
+        assertEq(vault.availableUnderlyingAssets(), 0);
+        assertEq(weth.balanceOf(feeRecipient), swept);
+
+        vm.prank(operator);
+        vault.openCspBatch(quote, sig, 10_000, 200_000);
+        assertEq(vault.activeBatches(), 1);
+    }
+
+    function test_allocatorCanForceWithdrawResidualUnderlyingHolder() public {
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+        vm.prank(bob);
+        vault.deposit(1_000e6);
+
+        address oToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        vault.openCspBatch(quote, sig, 1e8, 2_000e6);
+
+        vm.prank(alice);
+        vault.requestWithdraw(10_000e6);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+        uint256 returned = _backendSettleVault(1, 1);
+        assertEq(returned, 0);
+
+        weth.mint(address(vault), 1e18);
+        vm.prank(operator);
+        vault.settleCspBatch(1, 0, 1e18);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        assertGt(vault.availableUnderlyingAssets(), vault.underlyingDustThreshold());
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.AssignedUnderlyingTooLarge.selector);
+        vault.sweepAssignedUnderlyingDust();
+
+        vm.prank(operator);
+        vault.forceRequestWithdraw(bob);
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        assertEq(vault.availableUnderlyingAssets(), 0);
+        assertGt(vault.reservedUnderlyingAssets(), 0);
+
+        vm.prank(carol);
+        vault.deposit(1_000e6);
+
+        _computeExpiry();
+        oToken = _createPut();
+        (quote, sig) = _signQuote(oToken, 70e6, 100e8);
+
+        vm.prank(operator);
+        vault.openCspBatch(quote, sig, 10_000, 200_000);
+        assertEq(vault.activeBatches(), 1);
     }
 
     function test_depositAfterAssignmentQueuesInsteadOfMixingWithAssignedWeth() public {
@@ -774,16 +879,17 @@ contract EthCspVaultTest is Test {
 
         uint256 minted = vault.activateDeposits(users);
 
-        assertEq(minted, 993_740_063);
+        assertEq(minted, 993_739_441);
         assertEq(vault.pendingDepositAssets(bob), 0);
         assertEq(vault.totalPendingDepositAssets(), 0);
-        assertEq(vault.sharesOf(bob), 993_740_063);
+        assertEq(vault.sharesOf(bob), 993_739_441);
     }
 
     function test_dustPendingDepositRefundsInsteadOfBlockingBatches() public {
         _depositAndOpenOnePut();
 
         vm.prank(bob);
+        vm.expectRevert(EthCspVault.InvalidAmount.selector);
         vault.deposit(1);
 
         vm.warp(expiry + 1);
@@ -794,14 +900,6 @@ contract EthCspVaultTest is Test {
         vm.prank(operator);
         vault.closeEpoch();
 
-        usdc.mint(address(vault), 100_000e6);
-
-        uint256 bobBalanceBefore = usdc.balanceOf(bob);
-        vm.prank(operator);
-        uint256 minted = vault.activateDepositFor(bob);
-
-        assertEq(minted, 0);
-        assertEq(usdc.balanceOf(bob), bobBalanceBefore + 1);
         assertEq(vault.pendingDepositAssets(bob), 0);
         assertEq(vault.totalPendingDepositAssets(), 0);
         assertEq(vault.sharesOf(bob), 0);

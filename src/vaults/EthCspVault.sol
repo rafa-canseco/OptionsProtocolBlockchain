@@ -94,6 +94,10 @@ contract EthCspVault is ReentrancyGuard {
     mapping(address => uint256) public pendingWithdrawalShares;
 
     uint256 private constant MAX_PERFORMANCE_FEE_BPS = 2000;
+    uint256 public constant MIN_DEPOSIT_ASSETS = 1e6;
+    uint256 public constant MAX_UNDERLYING_DUST_THRESHOLD = 1e14;
+
+    uint256 public underlyingDustThreshold = MAX_UNDERLYING_DUST_THRESHOLD;
 
     event Deposited(address indexed user, uint256 amount, uint256 shares);
     event DepositQueued(address indexed user, uint256 indexed epochId, uint256 amount);
@@ -138,6 +142,8 @@ contract EthCspVault is ReentrancyGuard {
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event PerformanceFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
+    event AssignedUnderlyingDustSwept(address indexed receiver, uint256 amount);
+    event UnderlyingDustThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
 
     error InvalidAddress();
     error InvalidAmount();
@@ -159,6 +165,7 @@ contract EthCspVault is ReentrancyGuard {
     error PendingDepositsOpen();
     error CollateralAccountingMismatch();
     error StrategyConstraint();
+    error AssignedUnderlyingTooLarge();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -215,7 +222,7 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function deposit(uint256 amount) external nonReentrant returns (uint256 mintedShares) {
-        if (amount == 0) revert InvalidAmount();
+        if (amount < MIN_DEPOSIT_ASSETS) revert InvalidAmount();
         _activateDepositIfPossible(msg.sender);
 
         uint256 managedBefore = totalManagedAssets();
@@ -271,17 +278,13 @@ contract EthCspVault is ReentrancyGuard {
 
     function requestWithdraw(uint256 shares) external nonReentrant {
         _activateDepositIfPossible(msg.sender);
-        if (shares == 0) revert InvalidAmount();
-        if (pendingWithdrawalShares[msg.sender] != 0) revert PendingWithdrawal();
-        if (sharesOf[msg.sender] < shares) revert InsufficientShares();
+        _requestWithdraw(msg.sender, shares);
+    }
 
-        sharesOf[msg.sender] -= shares;
-        pendingWithdrawalEpoch[msg.sender] = currentEpoch;
-        pendingWithdrawalShares[msg.sender] = shares;
-        totalPendingWithdrawalShares += shares;
-        totalPendingWithdrawalClaims++;
-
-        emit WithdrawRequested(msg.sender, currentEpoch, shares);
+    function forceRequestWithdraw(address user) external onlyAllocator nonReentrant {
+        if (user == address(0)) revert InvalidAddress();
+        if (activeBatches != 0 || availableUnderlyingAssets() == 0) revert OpenBatches();
+        _requestWithdraw(user, sharesOf[user]);
     }
 
     function claimWithdraw() external nonReentrant returns (uint256 usdcAmount, uint256 underlyingAmount) {
@@ -333,6 +336,20 @@ contract EthCspVault is ReentrancyGuard {
         emit WithdrawClaimed(msg.sender, receiver, epochId, usdcAmount, underlyingAmount, shares);
     }
 
+    function _requestWithdraw(address user, uint256 shares) internal {
+        if (shares == 0) revert InvalidAmount();
+        if (pendingWithdrawalShares[user] != 0) revert PendingWithdrawal();
+        if (sharesOf[user] < shares) revert InsufficientShares();
+
+        sharesOf[user] -= shares;
+        pendingWithdrawalEpoch[user] = currentEpoch;
+        pendingWithdrawalShares[user] = shares;
+        totalPendingWithdrawalShares += shares;
+        totalPendingWithdrawalClaims++;
+
+        emit WithdrawRequested(user, currentEpoch, shares);
+    }
+
     function openCspBatch(
         BatchSettler.Quote calldata quote,
         bytes calldata signature,
@@ -341,7 +358,7 @@ contract EthCspVault is ReentrancyGuard {
     ) external onlyAllocator nonReentrant returns (uint256 batchId, uint256 protocolVaultId) {
         if (amount == 0 || collateral == 0) revert InvalidAmount();
         _validateEthUsdcPut(quote.oToken);
-        if (totalPendingDepositAssets != 0) revert PendingDepositsOpen();
+        if (totalPendingWithdrawalShares != 0) revert PendingWithdrawalsOpen();
         if (availableUnderlyingAssets() != 0) revert OpenBatches();
         if (collateral > deployableIdleAssets()) revert InsufficientAvailableAssets();
         _validateStrategyBounds(quote.oToken, collateral);
@@ -498,6 +515,22 @@ contract EthCspVault is ReentrancyGuard {
         performanceFeeBps = newFeeBps;
     }
 
+    function setUnderlyingDustThreshold(uint256 newThreshold) external onlyOwner {
+        if (newThreshold > MAX_UNDERLYING_DUST_THRESHOLD) revert StrategyConstraint();
+        emit UnderlyingDustThresholdUpdated(underlyingDustThreshold, newThreshold);
+        underlyingDustThreshold = newThreshold;
+    }
+
+    function sweepAssignedUnderlyingDust() external onlyAllocator nonReentrant returns (uint256 amount) {
+        amount = availableUnderlyingAssets();
+        if (amount == 0) revert InvalidAmount();
+        if (amount > underlyingDustThreshold) revert AssignedUnderlyingTooLarge();
+
+        accountedUnderlyingAssets -= amount;
+        underlying.safeTransfer(feeRecipient, amount);
+        emit AssignedUnderlyingDustSwept(feeRecipient, amount);
+    }
+
     function transferOwnership(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert InvalidAddress();
         address oldOwner = owner;
@@ -583,7 +616,7 @@ contract EthCspVault is ReentrancyGuard {
         } else if (managedBefore == 0) {
             revert InsolventShareSupply();
         } else {
-            mintedShares = (assets * (totalShares + _virtualShares())) / (managedBefore + _virtualAssets());
+            mintedShares = (assets * totalShares) / managedBefore;
         }
     }
 
@@ -619,14 +652,6 @@ contract EthCspVault is ReentrancyGuard {
     function _validateStrategyPremium(uint256 collateral, uint256 premiumEarned) internal view {
         uint256 minPremiumBps = strategyConfig.minPremiumBps;
         if (premiumEarned * 10_000 < collateral * minPremiumBps) revert StrategyConstraint();
-    }
-
-    function _virtualAssets() internal pure returns (uint256) {
-        return 1e6;
-    }
-
-    function _virtualShares() internal pure returns (uint256) {
-        return 1e6;
     }
 
     function _validateEthUsdcPut(address oTokenAddress) internal view {
