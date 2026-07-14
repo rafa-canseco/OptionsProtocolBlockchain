@@ -4,8 +4,8 @@ pragma solidity 0.8.24;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../core/AddressBook.sol";
-import "../core/BatchSettler.sol";
 import "../core/MarginPool.sol";
+import "./CspBatchSettler.sol";
 import "./interfaces/IEthCspStrategyAdapter.sol";
 
 contract EthCspStrategyAdapter is IEthCspStrategyAdapter {
@@ -18,14 +18,15 @@ contract EthCspStrategyAdapter is IEthCspStrategyAdapter {
 
     function openCspBatch(
         address vaultOwner,
+        address cspSettler_,
         address addressBook_,
         address usdc,
-        BatchSettler.Quote calldata quote,
+        CspBatchSettler.Quote calldata quote,
         bytes calldata signature,
         uint256 amount,
         uint256 collateral
     ) external returns (OpenResult memory result) {
-        if (vaultOwner == address(0) || addressBook_ == address(0) || usdc == address(0)) {
+        if (vaultOwner == address(0) || cspSettler_ == address(0) || addressBook_ == address(0) || usdc == address(0)) {
             revert InvalidAddress();
         }
         if (msg.sender != vaultOwner) revert Unauthorized();
@@ -36,7 +37,7 @@ contract EthCspStrategyAdapter is IEthCspStrategyAdapter {
         uint256 balanceBefore = IERC20(usdc).balanceOf(vaultOwner);
 
         result.protocolVaultId =
-            BatchSettler(book.batchSettler()).executeOrderFor(vaultOwner, quote, signature, amount, collateral);
+            CspBatchSettler(cspSettler_).executeOrderFor(vaultOwner, quote, signature, amount, collateral);
 
         uint256 balanceAfter = IERC20(usdc).balanceOf(vaultOwner);
         uint256 poolBalanceAfter = MarginPool(marginPool).getStoredBalance(usdc);

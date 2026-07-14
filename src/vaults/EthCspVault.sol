@@ -6,11 +6,11 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../core/AddressBook.sol";
-import "../core/BatchSettler.sol";
 import "../core/Controller.sol";
 import "../core/MarginPool.sol";
 import "../core/OToken.sol";
 import "../interfaces/IMarginVault.sol";
+import "./CspBatchSettler.sol";
 import "./interfaces/IEthCspOptionSelector.sol";
 import "./interfaces/IEthCspStrategyAdapter.sol";
 import "./modules/EthCspAssignmentLedger.sol";
@@ -23,7 +23,7 @@ import "./modules/EthCspWithdrawalQueue.sol";
 /**
  * @title EthCspVault
  * @notice First vault slice: users deposit USDC once and an allocator repeatedly
- *         sells ETH cash-secured puts through the existing BatchSettler flow.
+ *         sells ETH cash-secured puts through a dedicated CSP settlement module.
  * @dev Not ERC4626 by design. This keeps the V1 accounting explicit while the
  *      product is limited to one collateral asset, one underlying, and one
  *      strategy.
@@ -42,6 +42,7 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     AddressBook public immutable addressBook;
+    CspBatchSettler public immutable cspSettler;
     IERC20 public immutable usdc;
     IERC20 public immutable underlying;
     address public immutable ethUnderlying;
@@ -196,6 +197,7 @@ contract EthCspVault is ReentrancyGuard {
 
     constructor(
         address _addressBook,
+        address _cspSettler,
         address _usdc,
         address _ethUnderlying,
         address _allocator,
@@ -203,14 +205,15 @@ contract EthCspVault is ReentrancyGuard {
         uint256 _performanceFeeBps
     ) {
         if (
-            _addressBook == address(0) || _usdc == address(0) || _ethUnderlying == address(0)
-                || _allocator == address(0) || _feeRecipient == address(0)
+            _addressBook == address(0) || _cspSettler == address(0) || _usdc == address(0)
+                || _ethUnderlying == address(0) || _allocator == address(0) || _feeRecipient == address(0)
         ) {
             revert InvalidAddress();
         }
         if (_performanceFeeBps > MAX_PERFORMANCE_FEE_BPS) revert FeeTooHigh();
 
         addressBook = AddressBook(_addressBook);
+        cspSettler = CspBatchSettler(_cspSettler);
         usdc = IERC20(_usdc);
         underlying = IERC20(_ethUnderlying);
         ethUnderlying = _ethUnderlying;
@@ -414,7 +417,7 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function openCspBatch(
-        BatchSettler.Quote calldata quote,
+        CspBatchSettler.Quote calldata quote,
         bytes calldata signature,
         uint256 amount,
         uint256 collateral
@@ -440,8 +443,7 @@ contract EthCspVault is ReentrancyGuard {
             usdc.forceApprove(marginPool, collateral);
 
             uint256 balanceBefore = usdc.balanceOf(address(this));
-            protocolVaultId =
-                BatchSettler(addressBook.batchSettler()).executeOrder(quote, signature, amount, collateral);
+            protocolVaultId = cspSettler.executeOrder(quote, signature, amount, collateral);
             usdc.forceApprove(marginPool, 0);
             uint256 balanceAfter = usdc.balanceOf(address(this));
             uint256 poolBalanceAfter = MarginPool(marginPool).getStoredBalance(address(usdc));
@@ -457,7 +459,16 @@ contract EthCspVault is ReentrancyGuard {
             uint256 balanceBefore = usdc.balanceOf(address(this));
             usdc.forceApprove(marginPool, collateral);
             IEthCspStrategyAdapter.OpenResult memory result = IEthCspStrategyAdapter(adapter)
-                .openCspBatch(address(this), address(addressBook), address(usdc), quote, signature, amount, collateral);
+                .openCspBatch(
+                    address(this),
+                    address(cspSettler),
+                    address(addressBook),
+                    address(usdc),
+                    quote,
+                    signature,
+                    amount,
+                    collateral
+                );
             usdc.forceApprove(marginPool, 0);
             uint256 balanceAfter = usdc.balanceOf(address(this));
             uint256 poolBalanceAfter = MarginPool(marginPool).getStoredBalance(address(usdc));
@@ -487,7 +498,7 @@ contract EthCspVault is ReentrancyGuard {
             collateralReturned: 0,
             settled: false
         });
-        BatchSettler(addressBook.batchSettler()).reservePhysicalDelivery(protocolVaultId);
+        cspSettler.reservePhysicalDelivery(protocolVaultId);
 
         activeBatches++;
         activeCollateral += collateral;
@@ -523,11 +534,17 @@ contract EthCspVault is ReentrancyGuard {
         EthCspVaultTypes.CspBatch storage batch = batches[batchId];
         if (batch.protocolVaultId == 0) revert InvalidAmount();
         if (batch.settled) revert BatchAlreadySettled();
-        address physicalDeliveryCounterparty =
-            BatchSettler(addressBook.batchSettler()).vaultMM(address(this), batch.protocolVaultId);
+        address physicalDeliveryCounterparty = cspSettler.vaultMM(address(this), batch.protocolVaultId);
         if (physicalDeliveryCounterparty == address(0)) revert InvalidAddress();
         EthCspSettlementModule.SettlementResult memory result = EthCspSettlementModule.settle(
-            batch, addressBook, usdc, underlying, physicalDeliveryCounterparty, collateralReturned, underlyingReceived
+            batch,
+            cspSettler,
+            addressBook,
+            usdc,
+            underlying,
+            physicalDeliveryCounterparty,
+            collateralReturned,
+            underlyingReceived
         );
 
         address adapter = batchStrategyAdapter[batchId];
@@ -567,7 +584,7 @@ contract EthCspVault is ReentrancyGuard {
         uint256 observedCollateralReturned = usdc.balanceOf(address(this)) - usdcBefore;
         if (observedCollateralReturned != collateralReturned) revert CollateralAccountingMismatch();
 
-        BatchSettler(addressBook.batchSettler()).releasePhysicalDelivery(batch.protocolVaultId);
+        cspSettler.releasePhysicalDelivery(batch.protocolVaultId);
 
         address adapter = batchStrategyAdapter[batchId];
         batch.settled = true;
@@ -686,11 +703,11 @@ contract EthCspVault is ReentrancyGuard {
         if (activeBatches != 0) revert OpenBatches();
         address oldAdapter = strategyAdapter;
         if (oldAdapter != address(0)) {
-            BatchSettler(addressBook.batchSettler()).setOrderExecutor(oldAdapter, false);
+            cspSettler.setOrderExecutor(oldAdapter, false);
         }
         if (newStrategyAdapter != address(0)) {
             if (cap == 0) revert StrategyConstraint();
-            BatchSettler(addressBook.batchSettler()).setOrderExecutor(newStrategyAdapter, true);
+            cspSettler.setOrderExecutor(newStrategyAdapter, true);
             strategyAdapterCap[newStrategyAdapter] = cap;
         }
         strategyAdapter = newStrategyAdapter;

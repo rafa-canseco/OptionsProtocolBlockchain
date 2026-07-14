@@ -5,8 +5,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../../core/AddressBook.sol";
-import "../../core/BatchSettler.sol";
 import "../../core/Controller.sol";
+import "../CspBatchSettler.sol";
 import "./EthCspVaultTypes.sol";
 
 library EthCspSettlementModule {
@@ -36,6 +36,7 @@ library EthCspSettlementModule {
 
     function settle(
         EthCspVaultTypes.CspBatch storage batch,
+        CspBatchSettler cspSettler,
         AddressBook addressBook,
         IERC20 usdc,
         IERC20 underlying,
@@ -63,8 +64,9 @@ library EthCspSettlementModule {
         uint256 observedCollateralReturned = usdc.balanceOf(address(this)) - usdcBefore;
         if (observedCollateralReturned != collateralReturned) revert CollateralAccountingMismatch();
 
-        uint256 physicalPayout = BatchSettler(addressBook.batchSettler())
-            .settleReservedPhysicalDelivery(batch.protocolVaultId, payoutReceiver, result.expectedPhysicalPayout);
+        uint256 physicalPayout = cspSettler.settleReservedPhysicalDelivery(
+            batch.protocolVaultId, payoutReceiver, result.expectedPhysicalPayout
+        );
         if (physicalPayout != result.expectedPhysicalPayout) revert CollateralAccountingMismatch();
 
         batch.settled = true;

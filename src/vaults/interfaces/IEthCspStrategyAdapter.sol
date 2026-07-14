@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import "../../core/BatchSettler.sol";
+import "../CspBatchSettler.sol";
 
 interface IEthCspStrategyAdapter {
     struct OpenResult {
@@ -11,9 +11,10 @@ interface IEthCspStrategyAdapter {
 
     function openCspBatch(
         address vaultOwner,
+        address cspSettler,
         address addressBook,
         address usdc,
-        BatchSettler.Quote calldata quote,
+        CspBatchSettler.Quote calldata quote,
         bytes calldata signature,
         uint256 amount,
         uint256 collateral
