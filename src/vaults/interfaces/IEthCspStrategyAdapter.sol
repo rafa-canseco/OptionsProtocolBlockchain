@@ -9,10 +9,6 @@ interface IEthCspStrategyAdapter {
         uint256 premiumEarned;
     }
 
-    struct SettleResult {
-        uint256 collateralReturned;
-    }
-
     function openCspBatch(
         address vaultOwner,
         address addressBook,
@@ -22,12 +18,4 @@ interface IEthCspStrategyAdapter {
         uint256 amount,
         uint256 collateral
     ) external returns (OpenResult memory result);
-
-    function settleCspBatch(
-        address vaultOwner,
-        address addressBook,
-        address usdc,
-        uint256 protocolVaultId,
-        uint256 expectedCollateralReturned
-    ) external returns (SettleResult memory result);
 }

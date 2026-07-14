@@ -117,31 +117,16 @@ contract ForkUpgradeV3 is Test {
         assertEq(settler.escapeDelay(), 259200, "escapeDelay corrupted");
         assertEq(settler.owner(), owner, "owner corrupted");
         assertEq(settler.operator(), operatorAddr, "operator corrupted");
-        assertEq(
-            settler.treasury(),
-            0x0744e5Abb82A0337B2F6ac65aC83D1e9861C9740,
-            "treasury corrupted"
-        );
-        assertEq(
-            settler.aavePool(),
-            0xA238Dd80C259a72e81d7e4664a9801593F98d1c5,
-            "aavePool corrupted"
-        );
-        assertEq(
-            settler.swapRouter(),
-            0x2626664c2603336E57B271c5C0b26F421741e481,
-            "swapRouter corrupted"
-        );
+        assertEq(settler.treasury(), 0x0744e5Abb82A0337B2F6ac65aC83D1e9861C9740, "treasury corrupted");
+        assertEq(settler.aavePool(), 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5, "aavePool corrupted");
+        assertEq(settler.swapRouter(), 0x2626664c2603336E57B271c5C0b26F421741e481, "swapRouter corrupted");
     }
 
     function test_upgradeSetsCbbtcFeeTier() public {
         if (block.chainid != 8453) return;
 
         assertEq(settler.assetSwapFeeTier(CBBTC), 500, "cbBTC fee tier not set");
-        assertEq(
-            settler.assetSwapFeeTier(address(weth)), 0,
-            "WETH should have no override"
-        );
+        assertEq(settler.assetSwapFeeTier(address(weth)), 0, "WETH should have no override");
     }
 
     // ===== ETH vault + order execution still works post-upgrade =====
@@ -151,10 +136,7 @@ contract ForkUpgradeV3 is Test {
 
         uint256 strike = 2000e8;
         vm.prank(factoryOperator);
-        address oToken = factory.createOToken(
-            address(weth), address(usdc), address(usdc),
-            strike, expiry, true
-        );
+        address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strike, expiry, true);
 
         vm.prank(owner);
         whitelist.whitelistOToken(oToken);
@@ -163,10 +145,7 @@ contract ForkUpgradeV3 is Test {
         _executeOrder(oToken, user, 1e8, 2000e6, true);
 
         // Verify oTokens minted to settler (for MM)
-        assertEq(
-            settler.mmOTokenBalance(mm, oToken), 1e8,
-            "MM oToken balance should be 1e8"
-        );
+        assertEq(settler.mmOTokenBalance(mm, oToken), 1e8, "MM oToken balance should be 1e8");
 
         // Expire OTM (price stays above strike)
         vm.warp(expiry + 1);
@@ -177,10 +156,7 @@ contract ForkUpgradeV3 is Test {
         uint256 usdcBefore = usdc.balanceOf(user);
         _settleVault(user, 1);
 
-        assertEq(
-            usdc.balanceOf(user) - usdcBefore, 2000e6,
-            "ETH PUT OTM: full collateral returned"
-        );
+        assertEq(usdc.balanceOf(user) - usdcBefore, 2000e6, "ETH PUT OTM: full collateral returned");
     }
 
     // ===== cbBTC vault + order execution works post-upgrade =====
@@ -190,20 +166,14 @@ contract ForkUpgradeV3 is Test {
 
         uint256 strike = 71_337e8;
         vm.prank(factoryOperator);
-        address oToken = factory.createOToken(
-            CBBTC, address(usdc), address(usdc),
-            strike, expiry, true
-        );
+        address oToken = factory.createOToken(CBBTC, address(usdc), address(usdc), strike, expiry, true);
 
         vm.prank(owner);
         whitelist.whitelistOToken(oToken);
 
         _executeOrder(oToken, user, 1e8, 71_337e6, true);
 
-        assertEq(
-            settler.mmOTokenBalance(mm, oToken), 1e8,
-            "MM oToken balance should be 1e8"
-        );
+        assertEq(settler.mmOTokenBalance(mm, oToken), 1e8, "MM oToken balance should be 1e8");
 
         // Expire OTM (price stays above strike)
         vm.warp(expiry + 1);
@@ -214,10 +184,7 @@ contract ForkUpgradeV3 is Test {
         uint256 usdcBefore = usdc.balanceOf(user);
         _settleVault(user, 1);
 
-        assertEq(
-            usdc.balanceOf(user) - usdcBefore, 71_337e6,
-            "cbBTC PUT OTM: full collateral returned"
-        );
+        assertEq(usdc.balanceOf(user) - usdcBefore, 71_337e6, "cbBTC PUT OTM: full collateral returned");
     }
 
     function test_cbbtcCallSettlement_postUpgrade() public {
@@ -225,10 +192,7 @@ contract ForkUpgradeV3 is Test {
 
         uint256 strike = 71_337e8;
         vm.prank(factoryOperator);
-        address oToken = factory.createOToken(
-            CBBTC, address(usdc), address(cbbtc),
-            strike, expiry, false
-        );
+        address oToken = factory.createOToken(CBBTC, address(usdc), address(cbbtc), strike, expiry, false);
 
         vm.prank(owner);
         whitelist.whitelistOToken(oToken);
@@ -236,10 +200,7 @@ contract ForkUpgradeV3 is Test {
         // Call: collateral = cbBTC
         _executeOrder(oToken, user, 1e8, 1e8, false);
 
-        assertEq(
-            settler.mmOTokenBalance(mm, oToken), 1e8,
-            "MM oToken balance should be 1e8"
-        );
+        assertEq(settler.mmOTokenBalance(mm, oToken), 1e8, "MM oToken balance should be 1e8");
 
         // Expire OTM (price stays below strike)
         vm.warp(expiry + 1);
@@ -250,10 +211,7 @@ contract ForkUpgradeV3 is Test {
         uint256 btcBefore = cbbtc.balanceOf(user);
         _settleVault(user, 1);
 
-        assertEq(
-            cbbtc.balanceOf(user) - btcBefore, 1e8,
-            "cbBTC CALL OTM: full collateral returned"
-        );
+        assertEq(cbbtc.balanceOf(user) - btcBefore, 1e8, "cbBTC CALL OTM: full collateral returned");
     }
 
     // ===== Fee tier resolution verified via storage =====
@@ -288,13 +246,7 @@ contract ForkUpgradeV3 is Test {
 
     // ===== Helpers =====
 
-    function _executeOrder(
-        address oToken,
-        address buyer,
-        uint256 amount,
-        uint256 collateral,
-        bool isPut
-    ) internal {
+    function _executeOrder(address oToken, address buyer, uint256 amount, uint256 collateral, bool isPut) internal {
         vm.prank(buyer);
         IERC20(oToken).approve(address(settler), type(uint256).max);
 

@@ -717,20 +717,21 @@ contract ControllerTest is Test {
 
     // --- UnsupportedDecimals guard tests ---
 
-    function test_cannotMintPutWithTruncatedZeroCollateral() public {
+    function test_putCollateralRoundingRequiresAtLeastOneUnit() public {
         // Strike $50 (50e8), amount=1, USDC collateral (6 dec)
-        // required = (1 * 50e8) / 10^10 = 0 → should revert
+        // old floor math returned 0; required collateral now rounds up to 1.
         uint256 lowStrike = 50e8;
         address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), lowStrike, expiry, true);
         whitelist.whitelistOToken(oToken);
 
         vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
-        controller.depositCollateral(user, vaultId, address(usdc), 1e6); // deposit $1 to avoid CollateralMismatch
+        controller.depositCollateral(user, vaultId, address(usdc), 1);
 
-        vm.expectRevert(Controller.InsufficientCollateral.selector);
         controller.mintOtoken(user, vaultId, oToken, 1, user);
         vm.stopPrank();
+
+        assertEq(OToken(oToken).balanceOf(user), 1);
     }
 
     function test_revertPutCollateralTooFewDecimals() public {

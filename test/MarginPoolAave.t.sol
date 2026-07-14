@@ -402,13 +402,7 @@ contract MarginPoolAaveTest is Test {
         vm.prank(controller);
         pool.transferToPool(address(usdc), user, 1000e6);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                MarginPool.AaveNotDrained.selector,
-                address(usdc),
-                1000e6
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(MarginPool.AaveNotDrained.selector, address(usdc), 1000e6));
         pool.setAavePool(address(0x1));
     }
 
@@ -417,8 +411,7 @@ contract MarginPoolAaveTest is Test {
         MarginPool freshPool = MarginPool(
             address(
                 new ERC1967Proxy(
-                    address(new MarginPool()),
-                    abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
                 )
             )
         );
@@ -506,8 +499,7 @@ contract MarginPoolAaveTest is Test {
         MarginPool freshPool = MarginPool(
             address(
                 new ERC1967Proxy(
-                    address(new MarginPool()),
-                    abi.encodeCall(MarginPool.initialize, (address(addressBook)))
+                    address(new MarginPool()), abi.encodeCall(MarginPool.initialize, (address(addressBook)))
                 )
             )
         );
@@ -632,9 +624,7 @@ contract MarginPoolAaveTest is Test {
 
         // Withdraw 1000 but only 800 aTokens available
         vm.expectEmit(true, true, false, true);
-        emit MarginPool.ATokenFallback(
-            address(usdc), user, 1000e6, 800e6
-        );
+        emit MarginPool.ATokenFallback(address(usdc), user, 1000e6, 800e6);
 
         vm.prank(controller);
         pool.transferToUser(address(usdc), user, 1000e6);
@@ -660,9 +650,7 @@ contract MarginPoolAaveTest is Test {
         Vm.Log[] memory logs = vm.getRecordedLogs();
         for (uint256 i; i < logs.length; i++) {
             assertTrue(
-                logs[i].topics[0] != keccak256(
-                    "ATokenFallback(address,address,uint256,uint256)"
-                ),
+                logs[i].topics[0] != keccak256("ATokenFallback(address,address,uint256,uint256)"),
                 "Should not emit ATokenFallback"
             );
         }
@@ -706,13 +694,7 @@ contract MarginPoolAaveTest is Test {
         pool.transferToPool(address(usdc), user, 1000e6);
 
         // Try to swap pool — should revert (USDC auto-tracked)
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                MarginPool.AaveNotDrained.selector,
-                address(usdc),
-                1000e6
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(MarginPool.AaveNotDrained.selector, address(usdc), 1000e6));
         pool.setAavePool(address(0x1));
     }
 

@@ -48,22 +48,4 @@ contract EthCspStrategyAdapter is IEthCspStrategyAdapter {
         if (premiumEarnedWithCollateral < balanceBefore) revert PremiumAccountingMismatch();
         result.premiumEarned = premiumEarnedWithCollateral - balanceBefore;
     }
-
-    function settleCspBatch(
-        address vaultOwner,
-        address addressBook_,
-        address usdc,
-        uint256 protocolVaultId,
-        uint256 expectedCollateralReturned
-    ) external returns (SettleResult memory result) {
-        if (vaultOwner == address(0) || addressBook_ == address(0) || usdc == address(0)) {
-            revert InvalidAddress();
-        }
-        if (msg.sender != vaultOwner) revert Unauthorized();
-
-        uint256 usdcBefore = IERC20(usdc).balanceOf(vaultOwner);
-        BatchSettler(AddressBook(addressBook_).batchSettler()).settleVaultFor(vaultOwner, protocolVaultId);
-        result.collateralReturned = IERC20(usdc).balanceOf(vaultOwner) - usdcBefore;
-        if (result.collateralReturned != expectedCollateralReturned) revert CollateralAccountingMismatch();
-    }
 }
