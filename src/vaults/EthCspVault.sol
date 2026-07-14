@@ -234,6 +234,10 @@ contract EthCspVault is ReentrancyGuard {
 
         currentEpoch = 1;
         epochs[currentEpoch].startedAt = uint64(block.timestamp);
+
+        address controller = addressBook.controller();
+        if (controller == address(0)) revert InvalidAddress();
+        Controller(controller).setAuthorizedSettler(_cspSettler, true);
     }
 
     function deposit(uint256 amount) external nonReentrant returns (uint256 mintedShares) {
@@ -574,17 +578,22 @@ contract EthCspVault is ReentrancyGuard {
         EthCspVaultTypes.CspBatch storage batch = batches[batchId];
         if (batch.protocolVaultId == 0) revert InvalidAmount();
         if (batch.settled) revert BatchAlreadySettled();
-        if (collateralReturned > batch.collateral) revert CollateralAccountingMismatch();
 
         uint256 expiry = OToken(batch.oToken).expiry();
         if (block.timestamp < expiry + settlementDefaultDelay) revert SettlementDefaultNotReady();
+        if (collateralReturned != batch.collateral) revert CollateralAccountingMismatch();
 
         uint256 usdcBefore = usdc.balanceOf(address(this));
         Controller(addressBook.controller()).settleVault(address(this), batch.protocolVaultId);
         uint256 observedCollateralReturned = usdc.balanceOf(address(this)) - usdcBefore;
         if (observedCollateralReturned != collateralReturned) revert CollateralAccountingMismatch();
 
-        cspSettler.releasePhysicalDelivery(batch.protocolVaultId);
+        address physicalDeliveryCounterparty = cspSettler.vaultMM(address(this), batch.protocolVaultId);
+        if (physicalDeliveryCounterparty == address(0)) revert InvalidAddress();
+
+        uint256 physicalPayout =
+            cspSettler.settleReservedPhysicalDelivery(batch.protocolVaultId, physicalDeliveryCounterparty, 0);
+        if (physicalPayout != 0) revert CollateralAccountingMismatch();
 
         address adapter = batchStrategyAdapter[batchId];
         batch.settled = true;

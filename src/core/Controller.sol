@@ -66,7 +66,7 @@ contract Controller is Initializable, UUPSUpgradeable {
     event SystemUnpaused(address indexed caller);
     event EmergencyWithdraw(address indexed user, uint256 vaultId, address asset, uint256 amount);
     event PartialPauserUpdated(address indexed oldPauser, address indexed newPauser);
-    event AuthorizedSettlerUpdated(address indexed settler, bool status);
+    event AuthorizedSettlerUpdated(address indexed owner, address indexed settler, bool status);
     event VaultSettlerRecorded(address indexed owner, uint256 indexed vaultId, address indexed settler);
 
     error OnlyOwner();
@@ -96,7 +96,8 @@ contract Controller is Initializable, UUPSUpgradeable {
     }
 
     modifier onlyAuthorized(address _owner) {
-        if (msg.sender != _owner && msg.sender != addressBook.batchSettler() && !authorizedSettlers[msg.sender]) {
+        if (msg.sender != _owner && msg.sender != addressBook.batchSettler() && !authorizedSettlers[_owner][msg.sender])
+        {
             revert Unauthorized();
         }
         _;
@@ -294,10 +295,10 @@ contract Controller is Initializable, UUPSUpgradeable {
         partialPauser = _pauser;
     }
 
-    function setAuthorizedSettler(address _settler, bool _status) external onlyOwner {
+    function setAuthorizedSettler(address _settler, bool _status) external {
         if (_settler == address(0)) revert InvalidAddress();
-        authorizedSettlers[_settler] = _status;
-        emit AuthorizedSettlerUpdated(_settler, _status);
+        authorizedSettlers[msg.sender][_settler] = _status;
+        emit AuthorizedSettlerUpdated(msg.sender, _settler, _status);
     }
 
     function setSystemPartiallyPaused(bool _paused) external {
@@ -398,8 +399,8 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    /// @notice Additional settlement modules authorized without replacing AddressBook.batchSettler().
-    mapping(address => bool) public authorizedSettlers;
+    /// @notice Additional settler modules authorized by each vault owner without replacing AddressBook.batchSettler().
+    mapping(address => mapping(address => bool)) public authorizedSettlers;
 
     /// @notice Settler module that opened each vault. Empty falls back to legacy AddressBook.batchSettler().
     mapping(address => mapping(uint256 => address)) public vaultSettler;

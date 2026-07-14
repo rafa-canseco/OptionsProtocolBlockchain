@@ -141,7 +141,6 @@ contract EthCspVaultTest is Test {
         addressBook.setBatchSettler(address(legacySettler));
 
         factory.setOperator(address(this));
-        controller.setAuthorizedSettler(address(settler), true);
         settler.setWhitelistedMM(mm, true);
 
         whitelist.whitelistUnderlying(address(weth));
@@ -155,6 +154,7 @@ contract EthCspVaultTest is Test {
         );
         strategyAdapter = new EthCspStrategyAdapter();
         settler.setPhysicalDeliveryVault(address(vault), true);
+        assertTrue(controller.authorizedSettlers(address(vault), address(settler)));
 
         _computeExpiry();
 
@@ -385,7 +385,7 @@ contract EthCspVaultTest is Test {
         assertEq(settler.reservedPhysicalDeliveryBalance(mm, oToken), 0);
     }
 
-    function test_defaultSettlementUnsticksWhenMmWithholdsPhysicalDelivery() public {
+    function test_defaultSettlementCannotWriteOffAssignedBatchWhenMmWithholdsPhysicalDelivery() public {
         _depositAndOpenOnePut();
         address oToken = _currentBatchOToken(1);
 
@@ -403,31 +403,51 @@ contract EthCspVaultTest is Test {
         vm.warp(expiry + vault.settlementDefaultDelay());
 
         vm.prank(operator);
+        vm.expectRevert(EthCspVault.CollateralAccountingMismatch.selector);
         vault.settleDefaultedCspBatch(1, 0);
 
-        assertEq(vault.activeBatches(), 0);
-        assertEq(vault.activeCollateral(), 0);
+        assertEq(vault.activeBatches(), 1);
+        assertEq(vault.activeCollateral(), 2000e6);
         assertEq(vault.accountedIdleAssets(), 8063e6);
         assertEq(vault.accountedUnderlyingAssets(), 0);
         assertEq(vault.batchUnderlyingReceived(1), 0);
-        assertTrue(controller.vaultSettled(address(vault), 1));
-        assertFalse(settler.physicalDeliveryReservedVault(address(vault), 1));
-        assertEq(settler.reservedPhysicalDeliveryBalance(mm, oToken), 0);
+        assertFalse(controller.vaultSettled(address(vault), 1));
+        assertTrue(settler.physicalDeliveryReservedVault(address(vault), 1));
+        assertEq(settler.reservedPhysicalDeliveryBalance(mm, oToken), 1e8);
 
         (,,,, uint256 committedCollateral, uint256 returnedCollateral,, uint256 assignmentShortfall,,,,,) =
             vault.epochs(1);
         assertEq(committedCollateral, 2000e6);
         assertEq(returnedCollateral, 0);
-        assertEq(assignmentShortfall, 2000e6);
+        assertEq(assignmentShortfall, 0);
+    }
+
+    function test_defaultSettlementClearsOtmReservationAfterDelay() public {
+        _depositAndOpenOnePut();
+        address oToken = _currentBatchOToken(1);
+
+        vm.warp(expiry + vault.settlementDefaultDelay());
+        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
 
         vm.prank(operator);
-        vault.closeEpoch();
+        vault.settleDefaultedCspBatch(1, 2000e6);
 
-        uint256 aliceShares = vault.sharesOf(alice);
-        vm.prank(alice);
-        uint256 withdrawn = vault.withdrawIdle(aliceShares, receiver);
-        assertEq(withdrawn, 8063e6);
-        assertEq(usdc.balanceOf(receiver), 8063e6);
+        assertEq(vault.activeBatches(), 0);
+        assertEq(vault.activeCollateral(), 0);
+        assertEq(vault.accountedIdleAssets(), 10_063e6);
+        assertEq(vault.accountedUnderlyingAssets(), 0);
+        assertEq(vault.batchUnderlyingReceived(1), 0);
+        assertTrue(controller.vaultSettled(address(vault), 1));
+        assertFalse(settler.physicalDeliveryReservedVault(address(vault), 1));
+        assertEq(settler.reservedPhysicalDeliveryBalance(mm, oToken), 0);
+        assertEq(settler.vaultOTokenBalance(address(vault), 1), 0);
+        assertEq(settler.mmOTokenBalance(mm, oToken), 0);
+
+        (,,,, uint256 committedCollateral, uint256 returnedCollateral,, uint256 assignmentShortfall,,,,,) =
+            vault.epochs(1);
+        assertEq(committedCollateral, 2000e6);
+        assertEq(returnedCollateral, 2000e6);
+        assertEq(assignmentShortfall, 0);
     }
 
     function test_curatorCanSetSettlementDefaultDelayWithinCap() public {
@@ -1325,6 +1345,8 @@ contract EthCspVaultTest is Test {
         vm.prank(strategyVault);
         usdc.approve(address(pool), type(uint256).max);
         vm.prank(strategyVault);
+        controller.setAuthorizedSettler(address(settler), true);
+        vm.prank(strategyVault);
         settler.setOrderExecutor(address(strategyAdapter), true);
 
         address putToken = _createPut();
@@ -1345,8 +1367,6 @@ contract EthCspVaultTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
 
-        vm.prank(strategyVault);
-        settler.setSettlementExecutor(address(strategyAdapter), true);
         settler.setPhysicalDeliveryVault(strategyVault, true);
         vm.prank(strategyVault);
         settler.reservePhysicalDelivery(1);
@@ -1625,7 +1645,6 @@ contract EthCspVaultTest is Test {
     function _installStrategyAdapter(uint256 cap) internal {
         vault.setStrategyAdapter(address(strategyAdapter), cap);
         assertTrue(settler.orderExecutor(address(vault), address(strategyAdapter)));
-        assertFalse(settler.settlementExecutor(address(vault), address(strategyAdapter)));
         assertEq(vault.strategyAdapter(), address(strategyAdapter));
         assertEq(vault.strategyAdapterCap(address(strategyAdapter)), cap);
     }

@@ -54,7 +54,6 @@ contract CspBatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard {
     mapping(address => mapping(uint256 => address)) public vaultMM;
     mapping(address => mapping(uint256 => uint256)) public vaultOTokenBalance;
     mapping(address => mapping(address => bool)) public orderExecutor;
-    mapping(address => mapping(address => bool)) public settlementExecutor;
     mapping(address => mapping(uint256 => bool)) public physicalDeliveryReservedVault;
     mapping(address => mapping(address => uint256)) public reservedPhysicalDeliveryBalance;
     mapping(address => mapping(uint256 => uint256)) public physicalDeliveryReservedAmount;
@@ -78,7 +77,6 @@ contract CspBatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard {
     event MMBalanceCleared(address indexed mm, address indexed oToken, uint256 amount);
     event ProtocolFeeBpsUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event OrderExecutorUpdated(address indexed owner, address indexed executor, bool status);
-    event SettlementExecutorUpdated(address indexed owner, address indexed executor, bool status);
     event PhysicalDeliveryVaultUpdated(address indexed vault, bool status);
     event PhysicalDeliveryReserved(
         address indexed owner, uint256 indexed vaultId, address indexed mm, address oToken, uint256 amount
@@ -116,7 +114,6 @@ contract CspBatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard {
     error QuoteAlreadyCancelled();
     error OrderExecutorNotAuthorized();
     error PhysicalDeliveryVaultNotAuthorized();
-    error SettlementExecutorNotAuthorized();
     error RedeemPayoutMismatch();
     error VaultLedgerMismatch();
     error ReservedPhysicalDelivery();
@@ -209,12 +206,6 @@ contract CspBatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard {
         emit OrderExecutorUpdated(msg.sender, executor, status);
     }
 
-    function setSettlementExecutor(address executor, bool status) external {
-        if (executor == address(0)) revert InvalidAddress();
-        settlementExecutor[msg.sender][executor] = status;
-        emit SettlementExecutorUpdated(msg.sender, executor, status);
-    }
-
     function cancelQuote(bytes32 quoteHash) external {
         uint256 state = quoteState[msg.sender][quoteHash];
         if (state & CANCEL_BIT != 0) revert QuoteAlreadyCancelled();
@@ -260,13 +251,6 @@ contract CspBatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard {
         vaultId = _executeOrder(owner_, quote, signature, amount, collateral);
     }
 
-    function settleVaultFor(address owner_, uint256 vaultId) external nonReentrant {
-        if (owner_ == address(0)) revert InvalidAddress();
-        if (!settlementExecutor[owner_][msg.sender]) revert SettlementExecutorNotAuthorized();
-        if (physicalDeliveryReservedVault[owner_][vaultId]) revert ReservedPhysicalDelivery();
-        Controller(addressBook.controller()).settleVault(owner_, vaultId);
-    }
-
     function reservePhysicalDelivery(uint256 vaultId) external nonReentrant {
         if (!authorizedPhysicalDeliveryVault[msg.sender]) revert PhysicalDeliveryVaultNotAuthorized();
         _reservePhysicalDelivery(msg.sender, vaultId);
@@ -289,19 +273,6 @@ contract CspBatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard {
         }
         if (payoutReceiver == address(0)) revert InvalidAddress();
         payout = _settleReservedPhysicalDelivery(msg.sender, vaultId, payoutReceiver, expectedPayout);
-    }
-
-    function settleReservedVaultFor(address owner_, uint256 vaultId, address payoutReceiver, uint256 expectedPayout)
-        external
-        nonReentrant
-        returns (uint256 payout)
-    {
-        if (owner_ == address(0) || payoutReceiver == address(0)) revert InvalidAddress();
-        if (!settlementExecutor[owner_][msg.sender]) revert SettlementExecutorNotAuthorized();
-        if (!physicalDeliveryReservedVault[owner_][vaultId]) revert ReservedPhysicalDelivery();
-
-        Controller(addressBook.controller()).settleVault(owner_, vaultId);
-        payout = _settleReservedPhysicalDelivery(owner_, vaultId, payoutReceiver, expectedPayout);
     }
 
     function clearMMBalanceForVault(address vaultOwner, uint256 vaultId, address oToken, uint256 amount) external {
@@ -433,6 +404,7 @@ contract CspBatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard {
 
         address mm = vaultMM[owner_][vaultId];
         if (mm == address(0)) revert InvalidAddress();
+        if (payoutReceiver != mm) revert InvalidAddress();
         uint256 amount = physicalDeliveryReservedAmount[owner_][vaultId];
         if (amount == 0 || amount != vault.shortAmount) revert VaultLedgerMismatch();
 
