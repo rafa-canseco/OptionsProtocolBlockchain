@@ -39,18 +39,9 @@ contract MarginPool is Initializable, UUPSUpgradeable {
 
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
 
-    event ATokenFallback(
-        address indexed asset,
-        address indexed to,
-        uint256 requested,
-        uint256 transferred
-    );
+    event ATokenFallback(address indexed asset, address indexed to, uint256 requested, uint256 transferred);
 
-    event YieldHarvested(
-        address indexed asset,
-        address indexed recipient,
-        uint256 amount
-    );
+    event YieldHarvested(address indexed asset, address indexed recipient, uint256 amount);
 
     modifier onlyController() {
         if (msg.sender != addressBook.controller()) revert OnlyController();

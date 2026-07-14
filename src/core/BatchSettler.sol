@@ -8,6 +8,7 @@ import "./Controller.sol";
 import "./OToken.sol";
 import "./Oracle.sol";
 import "../interfaces/IFlashLoanSimple.sol";
+import "../interfaces/IMarginVault.sol";
 import "../interfaces/ISwapRouter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -122,6 +123,24 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     event ProtocolFeeBpsUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event SwapFeeTierUpdated(uint24 oldFeeTier, uint24 newFeeTier);
     event AssetSwapFeeTierUpdated(address indexed asset, uint24 oldFeeTier, uint24 newFeeTier);
+    event OrderExecutorUpdated(address indexed owner, address indexed executor, bool status);
+    event PhysicalDeliveryVaultUpdated(address indexed vault, bool status);
+    event PhysicalDeliveryReserved(
+        address indexed owner, uint256 indexed vaultId, address indexed mm, address oToken, uint256 amount
+    );
+    event PhysicalDeliveryReleased(
+        address indexed owner, uint256 indexed vaultId, address indexed mm, address oToken, uint256 amount
+    );
+    event PhysicalDeliverySettled(
+        address indexed owner,
+        uint256 indexed vaultId,
+        address indexed mm,
+        address oToken,
+        uint256 amount,
+        address payoutReceiver,
+        uint256 payout
+    );
+    event SettlementExecutorUpdated(address indexed owner, address indexed executor, bool status);
 
     // ===== Errors =====
 
@@ -153,6 +172,14 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     error OnlyController();
     error InsufficientSwapOutput();
     error UnsupportedDecimals();
+    error OrderExecutorNotAuthorized();
+    error ReservedPhysicalDelivery();
+    error PhysicalDeliveryVaultNotAuthorized();
+    error SettlementExecutorNotAuthorized();
+    error RedeemPayoutMismatch();
+    error VaultLedgerMismatch();
+    error PhysicalDeliveryRequired();
+    error VaultNotSettled();
 
     // Panic(uint256) selector: 0x4e487b71
     bytes4 private constant _PANIC_SELECTOR = 0x4e487b71;
@@ -235,6 +262,24 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         }
         emit AssetSwapFeeTierUpdated(_asset, assetSwapFeeTier[_asset], _feeTier);
         assetSwapFeeTier[_asset] = _feeTier;
+    }
+
+    function setOrderExecutor(address executor, bool status) external {
+        if (executor == address(0)) revert InvalidAddress();
+        orderExecutor[msg.sender][executor] = status;
+        emit OrderExecutorUpdated(msg.sender, executor, status);
+    }
+
+    function setSettlementExecutor(address executor, bool status) external {
+        if (executor == address(0)) revert InvalidAddress();
+        settlementExecutor[msg.sender][executor] = status;
+        emit SettlementExecutorUpdated(msg.sender, executor, status);
+    }
+
+    function setPhysicalDeliveryVault(address vault, bool status) external onlyOwner {
+        if (vault == address(0)) revert InvalidAddress();
+        authorizedPhysicalDeliveryVault[vault] = status;
+        emit PhysicalDeliveryVaultUpdated(vault, status);
     }
 
     uint256 public constant MIN_ESCAPE_DELAY = 3 days;
@@ -327,6 +372,72 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         nonReentrant
         returns (uint256 vaultId)
     {
+        vaultId = _executeOrder(msg.sender, quote, signature, amount, collateral);
+    }
+
+    function executeOrderFor(
+        address owner_,
+        Quote calldata quote,
+        bytes calldata signature,
+        uint256 amount,
+        uint256 collateral
+    ) external nonReentrant returns (uint256 vaultId) {
+        if (owner_ == address(0)) revert InvalidAddress();
+        if (!orderExecutor[owner_][msg.sender]) revert OrderExecutorNotAuthorized();
+        vaultId = _executeOrder(owner_, quote, signature, amount, collateral);
+    }
+
+    function settleVaultFor(address owner_, uint256 vaultId) external nonReentrant {
+        if (owner_ == address(0)) revert InvalidAddress();
+        if (!settlementExecutor[owner_][msg.sender]) revert SettlementExecutorNotAuthorized();
+        if (physicalDeliveryReservedVault[owner_][vaultId]) revert ReservedPhysicalDelivery();
+        Controller(addressBook.controller()).settleVault(owner_, vaultId);
+    }
+
+    function reservePhysicalDelivery(uint256 vaultId) external nonReentrant {
+        if (!authorizedPhysicalDeliveryVault[msg.sender]) revert PhysicalDeliveryVaultNotAuthorized();
+        _reservePhysicalDelivery(msg.sender, vaultId);
+    }
+
+    function releasePhysicalDelivery(uint256 vaultId) external nonReentrant {
+        if (!authorizedPhysicalDeliveryVault[msg.sender] && !physicalDeliveryReservedVault[msg.sender][vaultId]) {
+            revert PhysicalDeliveryVaultNotAuthorized();
+        }
+        _releasePhysicalDelivery(msg.sender, vaultId);
+    }
+
+    function settleReservedPhysicalDelivery(uint256 vaultId, address payoutReceiver, uint256 expectedPayout)
+        external
+        nonReentrant
+        returns (uint256 payout)
+    {
+        if (!authorizedPhysicalDeliveryVault[msg.sender] && !physicalDeliveryReservedVault[msg.sender][vaultId]) {
+            revert PhysicalDeliveryVaultNotAuthorized();
+        }
+        if (payoutReceiver == address(0)) revert InvalidAddress();
+        payout = _settleReservedPhysicalDelivery(msg.sender, vaultId, payoutReceiver, expectedPayout);
+    }
+
+    function settleReservedVaultFor(address owner_, uint256 vaultId, address payoutReceiver, uint256 expectedPayout)
+        external
+        nonReentrant
+        returns (uint256 payout)
+    {
+        if (owner_ == address(0) || payoutReceiver == address(0)) revert InvalidAddress();
+        if (!settlementExecutor[owner_][msg.sender]) revert SettlementExecutorNotAuthorized();
+        if (!physicalDeliveryReservedVault[owner_][vaultId]) revert ReservedPhysicalDelivery();
+
+        Controller(addressBook.controller()).settleVault(owner_, vaultId);
+        payout = _settleReservedPhysicalDelivery(owner_, vaultId, payoutReceiver, expectedPayout);
+    }
+
+    function _executeOrder(
+        address owner_,
+        Quote calldata quote,
+        bytes calldata signature,
+        uint256 amount,
+        uint256 collateral
+    ) internal returns (uint256 vaultId) {
         if (quote.oToken == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
 
@@ -353,22 +464,25 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
         // 5. Open vault for user
         Controller ctrl = Controller(addressBook.controller());
-        vaultId = ctrl.openVault(msg.sender);
-        vaultMM[msg.sender][vaultId] = mm;
+        vaultId = ctrl.openVault(owner_);
+        vaultMM[owner_][vaultId] = mm;
 
         // 6. Deposit user's collateral
         address collateralAsset = OToken(quote.oToken).collateralAsset();
-        ctrl.depositCollateral(msg.sender, vaultId, collateralAsset, collateral);
+        ctrl.depositCollateral(owner_, vaultId, collateralAsset, collateral);
 
         // 7. Mint oTokens to this contract (custodied for MM)
-        ctrl.mintOtoken(msg.sender, vaultId, quote.oToken, amount, address(this));
+        ctrl.mintOtoken(owner_, vaultId, quote.oToken, amount, address(this));
         mmOTokenBalance[mm][quote.oToken] += amount;
+        vaultOTokenBalance[owner_][vaultId] = amount;
+        attributedMMOTokenBalance[mm][quote.oToken] += amount;
 
         // 8. Transfer premium from MM to user (minus protocol fee)
-        _transferPremium(quote.oToken, amount, premium, collateral, vaultId, mm);
+        _transferPremium(owner_, quote.oToken, amount, premium, collateral, vaultId, mm);
     }
 
     function _transferPremium(
+        address owner_,
         address oToken,
         uint256 amount,
         uint256 premium,
@@ -383,12 +497,12 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         }
         uint256 netPremium = premium - fee;
 
-        IERC20(premiumAsset).safeTransferFrom(mm, msg.sender, netPremium);
+        IERC20(premiumAsset).safeTransferFrom(mm, owner_, netPremium);
         if (fee > 0) {
             IERC20(premiumAsset).safeTransferFrom(mm, treasury, fee);
         }
 
-        emit OrderExecuted(msg.sender, oToken, mm, amount, premium, netPremium, fee, collateral, vaultId);
+        emit OrderExecuted(owner_, oToken, mm, amount, premium, netPremium, fee, collateral, vaultId);
     }
 
     // ===== Post-Expiry Settlement =====
@@ -401,6 +515,12 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         Controller ctrl = Controller(addressBook.controller());
 
         for (uint256 i = 0; i < owners.length; i++) {
+            if (physicalDeliveryReservedVault[owners[i]][vaultIds[i]]) {
+                emit VaultSettleFailed(
+                    owners[i], vaultIds[i], abi.encodeWithSelector(ReservedPhysicalDelivery.selector)
+                );
+                continue;
+            }
             try ctrl.settleVault(owners[i], vaultIds[i]) {}
             catch (bytes memory reason) {
                 _revertOnPanic(reason);
@@ -433,10 +553,12 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
         address collateralAsset = OToken(oToken).collateralAsset();
         uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+        uint256 expectedPayout = _expectedPayout(OToken(oToken), amount);
 
         ctrl.redeem(oToken, amount);
 
         uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+        if (payout != expectedPayout) revert RedeemPayoutMismatch();
         if (payout > 0) {
             IERC20(collateralAsset).safeTransfer(caller, payout);
         }
@@ -475,19 +597,15 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         address contraAsset,
         uint256 contraAmount,
         uint256 slippageParam,
-        address mm
+        address mm,
+        bool debitMMBalance
     ) private returns (uint256 collateralUsed) {
-        // CEI: decrement MM balance before external calls
-        mmOTokenBalance[mm][oToken] -= oTokenAmount;
+        if (debitMMBalance) {
+            // CEI: decrement MM balance before external calls.
+            mmOTokenBalance[mm][oToken] -= oTokenAmount;
+        }
 
-        Controller ctrl = Controller(addressBook.controller());
-        address collateralAsset = OToken(oToken).collateralAsset();
-        uint256 collateralBefore = IERC20(collateralAsset).balanceOf(address(this));
-
-        // BatchSettler already holds oTokens — redeem burns from msg.sender (this)
-        ctrl.redeem(oToken, oTokenAmount);
-
-        uint256 collateralReceived = IERC20(collateralAsset).balanceOf(address(this)) - collateralBefore;
+        (address collateralAsset, uint256 collateralReceived) = _redeemCustodiedOTokens(oToken, oTokenAmount);
         if (collateralReceived == 0) revert RedeemReturnedZero();
 
         IERC20(collateralAsset).forceApprove(swapRouter, collateralReceived);
@@ -547,6 +665,21 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         IERC20(collateralAsset).forceApprove(swapRouter, 0);
     }
 
+    function _redeemCustodiedOTokens(address oToken, uint256 amount)
+        private
+        returns (address collateralAsset, uint256 payout)
+    {
+        OToken ot = OToken(oToken);
+        collateralAsset = ot.collateralAsset();
+        uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+        uint256 expectedPayout = _expectedPayout(ot, amount);
+
+        Controller(addressBook.controller()).redeem(oToken, amount);
+
+        payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+        if (payout != expectedPayout) revert RedeemPayoutMismatch();
+    }
+
     function batchPhysicalRedeem(
         address[] calldata oTokens,
         address[] calldata users,
@@ -590,6 +723,47 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         if (mmOTokenBalance[mm][oToken] < amount) revert InsufficientMMBalance();
 
         OToken ot = OToken(oToken);
+        (address contraAsset, uint256 contraAmount) = _physicalDeliveryTerms(ot, amount);
+        if (_availableMMBalance(mm, oToken) < amount) revert ReservedPhysicalDelivery();
+
+        uint256 collateralUsed =
+            _redeemAndSwap(oToken, user, amount, contraAsset, contraAmount, slippageParam, mm, true);
+        emit PhysicalDelivery(oToken, user, contraAmount, collateralUsed);
+    }
+
+    function operatorPhysicalRedeemVault(address owner_, uint256 vaultId, uint256 slippageParam)
+        external
+        onlyOperator
+        nonReentrant
+        returns (uint256 collateralUsed)
+    {
+        if (owner_ == address(0)) revert InvalidAddress();
+        if (physicalDeliveryReservedVault[owner_][vaultId]) revert ReservedPhysicalDelivery();
+
+        Controller ctrl = Controller(addressBook.controller());
+        if (!ctrl.vaultSettled(owner_, vaultId)) revert VaultNotSettled();
+
+        MarginVault.Vault memory vault = ctrl.getVault(owner_, vaultId);
+        if (vault.shortOtoken == address(0) || vault.shortAmount == 0) revert InvalidAmount();
+        uint256 amount = vaultOTokenBalance[owner_][vaultId];
+        if (amount == 0 || amount != vault.shortAmount) revert VaultLedgerMismatch();
+
+        address mm = vaultMM[owner_][vaultId];
+        if (mm == address(0)) revert InvalidAddress();
+
+        (address contraAsset, uint256 contraAmount) = _physicalDeliveryTerms(OToken(vault.shortOtoken), amount);
+        _clearVaultLedger(owner_, vaultId, mm, vault.shortOtoken, amount);
+
+        collateralUsed =
+            _redeemAndSwap(vault.shortOtoken, owner_, amount, contraAsset, contraAmount, slippageParam, mm, false);
+        emit PhysicalDelivery(vault.shortOtoken, owner_, contraAmount, collateralUsed);
+    }
+
+    function _physicalDeliveryTerms(OToken ot, uint256 amount)
+        private
+        view
+        returns (address contraAsset, uint256 contraAmount)
+    {
         if (block.timestamp < ot.expiry()) revert OptionNotExpired();
 
         Oracle oracle = Oracle(addressBook.oracle());
@@ -599,27 +773,18 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         uint256 strike = ot.strikePrice();
         if (ot.isPut()) {
             if (expiryPrice >= strike) revert OptionNotITM();
-        } else {
-            if (expiryPrice <= strike) revert OptionNotITM();
-        }
-
-        address contraAsset;
-        uint256 contraAmount;
-        if (ot.isPut()) {
             contraAsset = ot.underlying();
             uint256 ud = IERC20Metadata(contraAsset).decimals();
             if (ud < 8 || ud > 18) revert UnsupportedDecimals();
             contraAmount = amount * (10 ** (ud - 8));
         } else {
+            if (expiryPrice <= strike) revert OptionNotITM();
             contraAsset = ot.strikeAsset();
             uint256 sd = IERC20Metadata(contraAsset).decimals();
             if (sd < 6 || sd > 16) revert UnsupportedDecimals();
             contraAmount = (amount * strike) / (10 ** (16 - sd));
         }
         if (contraAmount == 0) revert InvalidAmount();
-
-        uint256 collateralUsed = _redeemAndSwap(oToken, user, amount, contraAsset, contraAmount, slippageParam, mm);
-        emit PhysicalDelivery(oToken, user, contraAmount, collateralUsed);
     }
 
     // ===== Operator-Triggered MM Redemption (cash settlement) =====
@@ -650,6 +815,8 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
 
         // CEI: decrement balance before external calls
         if (mmOTokenBalance[mm][oToken] < amount) revert InsufficientMMBalance();
+        if (_availableMMBalance(mm, oToken) < amount) revert ReservedPhysicalDelivery();
+        if (_expectedPayout(OToken(oToken), amount) != 0) revert PhysicalDeliveryRequired();
         mmOTokenBalance[mm][oToken] -= amount;
 
         address collateralAsset = OToken(oToken).collateralAsset();
@@ -658,6 +825,7 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         ctrl.redeem(oToken, amount);
 
         uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+        if (payout != 0) revert RedeemPayoutMismatch();
         if (payout > 0) {
             IERC20(collateralAsset).safeTransfer(mm, payout);
         }
@@ -679,6 +847,8 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         if (mmOTokenBalance[msg.sender][oToken] < amount) {
             revert InsufficientMMBalance();
         }
+        if (_availableMMBalance(msg.sender, oToken) < amount) revert ReservedPhysicalDelivery();
+        if (_expectedPayout(ot, amount) != 0) revert PhysicalDeliveryRequired();
         mmOTokenBalance[msg.sender][oToken] -= amount;
 
         Controller ctrl = Controller(addressBook.controller());
@@ -688,11 +858,161 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         ctrl.redeem(oToken, amount);
 
         uint256 payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+        if (payout != 0) revert RedeemPayoutMismatch();
         if (payout > 0) {
             IERC20(collateralAsset).safeTransfer(msg.sender, payout);
         }
 
         emit MMSelfRedeem(msg.sender, oToken, amount, payout);
+    }
+
+    function operatorRedeemVaultForMM(address owner_, uint256 vaultId, address payoutReceiver)
+        external
+        onlyOperator
+        nonReentrant
+        returns (uint256 payout)
+    {
+        if (owner_ == address(0) || payoutReceiver == address(0)) revert InvalidAddress();
+        if (physicalDeliveryReservedVault[owner_][vaultId]) revert ReservedPhysicalDelivery();
+        address mm = vaultMM[owner_][vaultId];
+        if (mm == address(0) || payoutReceiver != mm) revert InvalidAddress();
+        payout = _redeemAttributedVault(owner_, vaultId, payoutReceiver);
+    }
+
+    function mmSelfRedeemVault(address owner_, uint256 vaultId) external nonReentrant returns (uint256 payout) {
+        if (!whitelistedMMs[msg.sender]) revert MMNotWhitelisted();
+        if (escapeDelay == 0) revert EscapeNotReady();
+        if (owner_ == address(0)) revert InvalidAddress();
+        if (physicalDeliveryReservedVault[owner_][vaultId]) revert ReservedPhysicalDelivery();
+
+        MarginVault.Vault memory vault = Controller(addressBook.controller()).getVault(owner_, vaultId);
+        if (vault.shortOtoken == address(0) || vault.shortAmount == 0) revert InvalidAmount();
+        uint256 expiry = OToken(vault.shortOtoken).expiry();
+        if (block.timestamp < expiry + escapeDelay) revert EscapeNotReady();
+
+        address mm = vaultMM[owner_][vaultId];
+        if (mm != msg.sender) revert OrderExecutorNotAuthorized();
+        payout = _redeemAttributedVault(owner_, vaultId, msg.sender);
+    }
+
+    function _redeemAttributedVault(address owner_, uint256 vaultId, address payoutReceiver)
+        private
+        returns (uint256 payout)
+    {
+        MarginVault.Vault memory vault = Controller(addressBook.controller()).getVault(owner_, vaultId);
+        if (vault.shortOtoken == address(0) || vault.shortAmount == 0) revert InvalidAmount();
+        uint256 amount = vaultOTokenBalance[owner_][vaultId];
+        if (amount == 0) revert InvalidAmount();
+
+        address mm = vaultMM[owner_][vaultId];
+        if (mm == address(0)) revert InvalidAddress();
+        if (_expectedPayout(OToken(vault.shortOtoken), amount) != 0) revert PhysicalDeliveryRequired();
+        _clearVaultLedger(owner_, vaultId, mm, vault.shortOtoken, amount);
+
+        address collateralAsset = OToken(vault.shortOtoken).collateralAsset();
+        uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+
+        Controller(addressBook.controller()).redeem(vault.shortOtoken, amount);
+
+        payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+        if (payout != 0) revert RedeemPayoutMismatch();
+        if (payout > 0) {
+            IERC20(collateralAsset).safeTransfer(payoutReceiver, payout);
+        }
+
+        emit MMBalanceCleared(mm, vault.shortOtoken, amount);
+    }
+
+    function _reservePhysicalDelivery(address owner_, uint256 vaultId) private {
+        if (vaultId == 0) revert InvalidAmount();
+        if (physicalDeliveryReservedVault[owner_][vaultId]) return;
+
+        MarginVault.Vault memory vault = Controller(addressBook.controller()).getVault(owner_, vaultId);
+        if (vault.shortOtoken == address(0) || vault.shortAmount == 0) revert InvalidAmount();
+
+        address mm = vaultMM[owner_][vaultId];
+        if (mm == address(0)) revert InvalidAddress();
+        if (mmOTokenBalance[mm][vault.shortOtoken] < vault.shortAmount) revert InsufficientMMBalance();
+        if (vaultOTokenBalance[owner_][vaultId] < vault.shortAmount) revert VaultLedgerMismatch();
+
+        physicalDeliveryReservedVault[owner_][vaultId] = true;
+        physicalDeliveryReservedAmount[owner_][vaultId] = vault.shortAmount;
+        reservedPhysicalDeliveryBalance[mm][vault.shortOtoken] += vault.shortAmount;
+        emit PhysicalDeliveryReserved(owner_, vaultId, mm, vault.shortOtoken, vault.shortAmount);
+    }
+
+    function _settleReservedPhysicalDelivery(
+        address owner_,
+        uint256 vaultId,
+        address payoutReceiver,
+        uint256 expectedPayout
+    ) private returns (uint256 payout) {
+        if (!physicalDeliveryReservedVault[owner_][vaultId]) revert ReservedPhysicalDelivery();
+
+        MarginVault.Vault memory vault = Controller(addressBook.controller()).getVault(owner_, vaultId);
+        if (vault.shortOtoken == address(0) || vault.shortAmount == 0) revert InvalidAmount();
+
+        address mm = vaultMM[owner_][vaultId];
+        if (mm == address(0)) revert InvalidAddress();
+        uint256 amount = physicalDeliveryReservedAmount[owner_][vaultId];
+        if (amount == 0 || amount != vault.shortAmount) revert VaultLedgerMismatch();
+
+        _releasePhysicalDelivery(owner_, vaultId);
+        _clearVaultLedger(owner_, vaultId, mm, vault.shortOtoken, amount);
+
+        address collateralAsset = OToken(vault.shortOtoken).collateralAsset();
+        uint256 balBefore = IERC20(collateralAsset).balanceOf(address(this));
+
+        Controller(addressBook.controller()).redeem(vault.shortOtoken, amount);
+
+        payout = IERC20(collateralAsset).balanceOf(address(this)) - balBefore;
+        if (payout != expectedPayout) revert RedeemPayoutMismatch();
+        if (payout > 0) {
+            IERC20(collateralAsset).safeTransfer(payoutReceiver, payout);
+        }
+
+        emit PhysicalDeliverySettled(owner_, vaultId, mm, vault.shortOtoken, amount, payoutReceiver, payout);
+    }
+
+    function _releasePhysicalDelivery(address owner_, uint256 vaultId) private {
+        if (!physicalDeliveryReservedVault[owner_][vaultId]) return;
+
+        MarginVault.Vault memory vault = Controller(addressBook.controller()).getVault(owner_, vaultId);
+        address mm = vaultMM[owner_][vaultId];
+        if (mm == address(0) || vault.shortOtoken == address(0)) revert InvalidAddress();
+
+        physicalDeliveryReservedVault[owner_][vaultId] = false;
+        uint256 reservedForVault = physicalDeliveryReservedAmount[owner_][vaultId];
+        physicalDeliveryReservedAmount[owner_][vaultId] = 0;
+        uint256 reserved = reservedPhysicalDeliveryBalance[mm][vault.shortOtoken];
+        uint256 releaseAmount = reservedForVault < reserved ? reservedForVault : reserved;
+        if (releaseAmount > 0) {
+            reservedPhysicalDeliveryBalance[mm][vault.shortOtoken] = reserved - releaseAmount;
+        }
+        emit PhysicalDeliveryReleased(owner_, vaultId, mm, vault.shortOtoken, releaseAmount);
+    }
+
+    function _clearVaultLedger(address owner_, uint256 vaultId, address mm, address oToken, uint256 amount) private {
+        uint256 vaultBalance = vaultOTokenBalance[owner_][vaultId];
+        if (vaultBalance < amount) revert VaultLedgerMismatch();
+        uint256 mmBalance = mmOTokenBalance[mm][oToken];
+        if (mmBalance < amount) revert InsufficientMMBalance();
+        uint256 attributedBalance = attributedMMOTokenBalance[mm][oToken];
+        if (attributedBalance < amount) revert VaultLedgerMismatch();
+
+        vaultOTokenBalance[owner_][vaultId] = vaultBalance - amount;
+        mmOTokenBalance[mm][oToken] = mmBalance - amount;
+        attributedMMOTokenBalance[mm][oToken] = attributedBalance - amount;
+    }
+
+    function _availableMMBalance(address mm, address oToken) private view returns (uint256) {
+        uint256 balance = mmOTokenBalance[mm][oToken];
+        uint256 reserved = reservedPhysicalDeliveryBalance[mm][oToken];
+        uint256 attributed = attributedMMOTokenBalance[mm][oToken];
+        uint256 locked = attributed;
+        if (reserved > locked) locked = reserved;
+        if (balance <= locked) return 0;
+        return balance - locked;
     }
 
     // ===== Emergency Ledger Clearance =====
@@ -705,11 +1025,44 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
         address mm = vaultMM[vaultOwner][vaultId];
         if (mm == address(0)) return; // pre-migration vault, safe no-op
 
-        uint256 balance = mmOTokenBalance[mm][oToken];
-        uint256 toClear = amount < balance ? amount : balance;
+        uint256 toClear = amount;
         if (toClear > 0) {
-            mmOTokenBalance[mm][oToken] = balance - toClear;
+            _clearVaultLedger(vaultOwner, vaultId, mm, oToken, toClear);
+            if (physicalDeliveryReservedVault[vaultOwner][vaultId]) {
+                uint256 reserved = reservedPhysicalDeliveryBalance[mm][oToken];
+                uint256 reservedForVault = physicalDeliveryReservedAmount[vaultOwner][vaultId];
+                uint256 reservedToClear = toClear < reservedForVault ? toClear : reservedForVault;
+                if (reservedToClear > reserved) reservedToClear = reserved;
+                if (reservedToClear > 0) {
+                    reservedPhysicalDeliveryBalance[mm][oToken] = reserved - reservedToClear;
+                }
+                physicalDeliveryReservedVault[vaultOwner][vaultId] = false;
+                physicalDeliveryReservedAmount[vaultOwner][vaultId] = 0;
+                emit PhysicalDeliveryReleased(vaultOwner, vaultId, mm, oToken, reservedToClear);
+            }
             emit MMBalanceCleared(mm, oToken, toClear);
+        }
+    }
+
+    function _expectedPayout(OToken oToken, uint256 amount) private view returns (uint256) {
+        Oracle oracle = Oracle(addressBook.oracle());
+        (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(oToken.underlying(), oToken.expiry());
+        if (!isSet) revert ExpiryPriceNotSet();
+        return _calculatePayout(oToken, amount, expiryPrice);
+    }
+
+    function _calculatePayout(OToken oToken, uint256 amount, uint256 expiryPrice) private view returns (uint256) {
+        uint256 strike = oToken.strikePrice();
+        uint256 cd = IERC20Metadata(oToken.collateralAsset()).decimals();
+
+        if (oToken.isPut()) {
+            if (cd < 6 || cd > 16) revert UnsupportedDecimals();
+            if (expiryPrice >= strike) return 0;
+            return (amount * strike) / (10 ** (16 - cd));
+        } else {
+            if (cd < 8 || cd > 18) revert UnsupportedDecimals();
+            if (expiryPrice <= strike) return 0;
+            return amount * (10 ** (cd - 8));
         }
     }
 
@@ -765,5 +1118,29 @@ contract BatchSettler is Initializable, UUPSUpgradeable, ReentrancyGuard, IFlash
     /// @notice Per-asset swap fee tier override. Key = underlying asset.
     mapping(address => uint24) public assetSwapFeeTier;
 
-    uint256[32] private __gap;
+    /// @notice Per-owner order executors authorized to open/settle vaults through strategy adapters.
+    mapping(address => mapping(address => bool)) public orderExecutor;
+
+    /// @notice Owner vaults whose custodied oToken balance is reserved for physical delivery settlement.
+    mapping(address => mapping(uint256 => bool)) public physicalDeliveryReservedVault;
+
+    /// @notice Per-MM oToken balance that cannot be redeemed through cash escape paths until released by vault owner.
+    mapping(address => mapping(address => uint256)) public reservedPhysicalDeliveryBalance;
+
+    /// @notice Exact reserved amount for each owner vault.
+    mapping(address => mapping(uint256 => uint256)) public physicalDeliveryReservedAmount;
+
+    /// @notice Product/vault contracts allowed to reserve physical delivery balances.
+    mapping(address => bool) public authorizedPhysicalDeliveryVault;
+
+    /// @notice Custodied oTokens attributable to a specific writer vault.
+    mapping(address => mapping(uint256 => uint256)) public vaultOTokenBalance;
+
+    /// @notice Aggregate oTokens attributed to writer vaults and excluded from legacy free-form redeem paths.
+    mapping(address => mapping(address => uint256)) public attributedMMOTokenBalance;
+
+    /// @notice Per-owner settlement executors authorized to settle vaults outside the owner flow.
+    mapping(address => mapping(address => bool)) public settlementExecutor;
+
+    uint256[24] private __gap;
 }

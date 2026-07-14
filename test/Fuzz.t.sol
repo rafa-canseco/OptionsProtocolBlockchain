@@ -899,14 +899,12 @@ contract PhysicalRedeemFuzzTest is Test {
 
         uint256 aliceWethBefore = weth.balanceOf(alice);
 
-        // Physical delivery
         vm.prank(mm);
+        vm.expectRevert(BatchSettler.ReservedPhysicalDelivery.selector);
         settler.physicalRedeem(oToken, alice, amount, collateral, mm);
 
-        // User receives exactly amount * 1e10 WETH
-        assertEq(weth.balanceOf(alice), aliceWethBefore + amount * 1e10);
+        assertEq(weth.balanceOf(alice), aliceWethBefore);
 
-        // Settler retains no residual tokens
         assertEq(weth.balanceOf(address(settler)), 0);
         assertEq(usdc.balanceOf(address(settler)), 0);
     }
@@ -944,15 +942,13 @@ contract PhysicalRedeemFuzzTest is Test {
 
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
 
-        // Physical delivery — slippageParam = minAmountOut for calls
         uint256 minOut = (amount * strikePrice) / 1e10;
         vm.prank(mm);
+        vm.expectRevert(BatchSettler.ReservedPhysicalDelivery.selector);
         settler.physicalRedeem(oToken, alice, amount, minOut, mm);
 
-        // User receives exactly (amount * strikePrice) / 1e10 USDC
-        assertEq(usdc.balanceOf(alice), aliceUsdcBefore + (amount * strikePrice) / 1e10);
+        assertEq(usdc.balanceOf(alice), aliceUsdcBefore);
 
-        // Settler retains no residual tokens
         assertEq(weth.balanceOf(address(settler)), 0);
         assertEq(usdc.balanceOf(address(settler)), 0);
     }
@@ -989,14 +985,12 @@ contract PhysicalRedeemFuzzTest is Test {
 
         uint256 aliceWethBefore = weth.balanceOf(alice);
 
-        // Physical delivery
         vm.prank(mm);
+        vm.expectRevert(BatchSettler.ReservedPhysicalDelivery.selector);
         settler.physicalRedeem(oToken, alice, amount, collateral, mm);
 
-        // User receives exactly amount * 1e10 WETH
-        assertEq(weth.balanceOf(alice), aliceWethBefore + amount * 1e10);
+        assertEq(weth.balanceOf(alice), aliceWethBefore);
 
-        // Settler retains no residual tokens
         assertEq(weth.balanceOf(address(settler)), 0);
         assertEq(usdc.balanceOf(address(settler)), 0);
     }
@@ -1033,15 +1027,13 @@ contract PhysicalRedeemFuzzTest is Test {
 
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
 
-        // Physical delivery — slippageParam = minAmountOut for calls
         uint256 minOut = (amount * strikePrice) / 1e10;
         vm.prank(mm);
+        vm.expectRevert(BatchSettler.ReservedPhysicalDelivery.selector);
         settler.physicalRedeem(oToken, alice, amount, minOut, mm);
 
-        // User receives exactly (amount * strikePrice) / 1e10 USDC
-        assertEq(usdc.balanceOf(alice), aliceUsdcBefore + (amount * strikePrice) / 1e10);
+        assertEq(usdc.balanceOf(alice), aliceUsdcBefore);
 
-        // Settler retains no residual tokens
         assertEq(weth.balanceOf(address(settler)), 0);
         assertEq(usdc.balanceOf(address(settler)), 0);
     }

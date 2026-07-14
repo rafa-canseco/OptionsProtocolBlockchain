@@ -15,7 +15,7 @@ import "../interfaces/IMarginVault.sol";
 interface IBatchSettlerClearance {
     function clearMMBalanceForVault(address owner, uint256 vaultId, address oToken, uint256 amount) external;
     function vaultMM(address owner, uint256 vaultId) external view returns (address);
-    function mmOTokenBalance(address mm, address oToken) external view returns (uint256);
+    function vaultOTokenBalance(address owner, uint256 vaultId) external view returns (uint256);
 }
 
 /**
@@ -256,7 +256,8 @@ contract Controller is Initializable, UUPSUpgradeable {
         uint256 cd = IERC20Metadata(oToken.collateralAsset()).decimals();
         if (oToken.isPut()) {
             if (cd < 6 || cd > 16) revert UnsupportedDecimals();
-            uint256 required = (_amount * oToken.strikePrice()) / (10 ** (16 - cd));
+            uint256 denominator = 10 ** (16 - cd);
+            uint256 required = (_amount * oToken.strikePrice() + denominator - 1) / denominator;
             if (required == 0 && _amount > 0) revert InsufficientCollateral();
             return required;
         } else {
@@ -334,13 +335,10 @@ contract Controller is Initializable, UUPSUpgradeable {
             if (settler != address(0)) {
                 OToken ot = OToken(vault.shortOtoken);
 
-                // Use per-MM balance check (not aggregate settlerBal) to
-                // prevent cross-vault double-claim. Aggregate balanceOf
-                // includes oTokens from OTHER vaults, masking redemptions.
                 address mm = IBatchSettlerClearance(settler).vaultMM(msg.sender, _vaultId);
                 if (mm != address(0)) {
-                    uint256 mmBal = IBatchSettlerClearance(settler).mmOTokenBalance(mm, vault.shortOtoken);
-                    if (mmBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
+                    uint256 vaultBal = IBatchSettlerClearance(settler).vaultOTokenBalance(msg.sender, _vaultId);
+                    if (vaultBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
                 } else {
                     // Pre-migration vault (no MM attribution): aggregate check
                     uint256 settlerBal = ot.balanceOf(settler);

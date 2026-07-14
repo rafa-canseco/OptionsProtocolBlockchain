@@ -14,6 +14,7 @@ import "../src/core/Whitelist.sol";
 contract MockSettler {
     mapping(address => mapping(uint256 => address)) public vaultMM;
     mapping(address => mapping(address => uint256)) public mmOTokenBalance;
+    mapping(address => mapping(uint256 => uint256)) public vaultOTokenBalance;
 
     function setVaultMM(address _owner, uint256 _vaultId, address _mm) external {
         vaultMM[_owner][_vaultId] = _mm;
@@ -23,6 +24,10 @@ contract MockSettler {
         mmOTokenBalance[_mm][_oToken] = _bal;
     }
 
+    function setVaultOTokenBalance(address _owner, uint256 _vaultId, uint256 _bal) external {
+        vaultOTokenBalance[_owner][_vaultId] = _bal;
+    }
+
     function clearMMBalanceForVault(address _vaultOwner, uint256 _vaultId, address _oToken, uint256 _amount) external {
         address mm = vaultMM[_vaultOwner][_vaultId];
         if (mm == address(0)) return;
@@ -30,6 +35,7 @@ contract MockSettler {
         uint256 toClear = _amount < balance ? _amount : balance;
         if (toClear > 0) {
             mmOTokenBalance[mm][_oToken] = balance - toClear;
+            vaultOTokenBalance[_vaultOwner][_vaultId] -= toClear;
         }
     }
 }
@@ -679,6 +685,8 @@ contract EmergencyTest is Test {
         mockSettler.setVaultMM(bob, vaultB, mm2);
         mockSettler.setMMBalance(mm1, oToken, 1e8);
         mockSettler.setMMBalance(mm2, oToken, 1e8);
+        mockSettler.setVaultOTokenBalance(alice, vaultA, 1e8);
+        mockSettler.setVaultOTokenBalance(bob, vaultB, 1e8);
 
         // settler holds 2e8 oTokens, MarginPool holds 4000 USDC
         assertEq(OToken(oToken).balanceOf(address(mockSettler)), 2e8);
@@ -693,6 +701,7 @@ contract EmergencyTest is Test {
         controller.redeem(oToken, 1e8);
         // settler now has 1e8 oTokens (Bob's), pool paid 2000 USDC
         mockSettler.setMMBalance(mm1, oToken, 0);
+        mockSettler.setVaultOTokenBalance(alice, vaultA, 0);
 
         assertEq(OToken(oToken).balanceOf(address(mockSettler)), 1e8);
         assertEq(usdc.balanceOf(address(pool)), 2000e6);
