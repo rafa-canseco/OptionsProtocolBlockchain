@@ -7,6 +7,7 @@ pragma solidity 0.8.24;
  *         Price uses 8 decimals (e.g., $2500 = 2500e8 = 250_000_000_000).
  */
 contract MockChainlinkFeed {
+    address public immutable owner = msg.sender;
     int256 public price;
 
     constructor(int256 _price) {
@@ -15,6 +16,7 @@ contract MockChainlinkFeed {
     }
 
     function setPrice(int256 _price) external {
+        require(msg.sender == owner, "MockChainlinkFeed: only owner");
         require(_price > 0, "MockChainlinkFeed: price must be positive");
         price = _price;
     }

@@ -20,6 +20,18 @@ contract MockUSDC is ERC20 {
     }
 }
 
+contract FeeOnTransferUSDC is MockUSDC {
+    function _update(address from, address to, uint256 value) internal override {
+        if (from != address(0) && to != address(0)) {
+            uint256 fee = value / 10;
+            super._update(from, address(0), fee);
+            super._update(from, to, value - fee);
+            return;
+        }
+        super._update(from, to, value);
+    }
+}
+
 /// @dev Mock aToken that tracks deposits and simulates yield via `addYield`.
 contract MockAToken is ERC20 {
     address public underlying;
@@ -148,6 +160,17 @@ contract MarginPoolAaveTest is Test {
         assertEq(usdc.balanceOf(address(aavePool)), 1000e6);
         // MarginPool should hold aTokens
         assertEq(aUsdc.balanceOf(address(pool)), 1000e6);
+    }
+
+    function test_transferToPool_rejectsIncompleteCollateralTransfer() public {
+        FeeOnTransferUSDC feeToken = new FeeOnTransferUSDC();
+        feeToken.mint(user, 1000e6);
+        vm.prank(user);
+        feeToken.approve(address(pool), 1000e6);
+
+        vm.prank(controller);
+        vm.expectRevert(abi.encodeWithSelector(MarginPool.CollateralTransferMismatch.selector, 1000e6, 900e6));
+        pool.transferToPool(address(feeToken), user, 1000e6);
     }
 
     function test_transferToUser_withdrawsFromAave() public {
@@ -612,7 +635,7 @@ contract MarginPoolAaveTest is Test {
     //  NEM-3: ATokenFallback event on partial transfer
     // ============================================================
 
-    function test_aTokenFallback_emitsOnPartialTransfer() public {
+    function test_aTokenFallback_rejectsPartialTransfer() public {
         vm.prank(controller);
         pool.transferToPool(address(usdc), user, 1000e6);
 
@@ -622,38 +645,24 @@ contract MarginPoolAaveTest is Test {
         // Make Aave withdraw revert to trigger fallback
         aavePool.setShouldRevert(true);
 
-        // Withdraw 1000 but only 800 aTokens available
-        vm.expectEmit(true, true, false, true);
-        emit MarginPool.ATokenFallback(address(usdc), user, 1000e6, 800e6);
-
         vm.prank(controller);
+        vm.expectRevert(abi.encodeWithSelector(MarginPool.AaveWithdrawalMismatch.selector, 1000e6, 800e6));
         pool.transferToUser(address(usdc), user, 1000e6);
 
-        // User got 800 aTokens (not 1000)
-        assertEq(aUsdc.balanceOf(user), 800e6);
-
-        // FIX #1: totalDeposited restored by shortfall (200e6)
-        assertEq(pool.totalDeposited(address(usdc)), 200e6);
+        assertEq(aUsdc.balanceOf(user), 0);
+        assertEq(pool.totalDeposited(address(usdc)), 1000e6);
     }
 
-    function test_aTokenFallback_noEventOnFullTransfer() public {
+    function test_aTokenFallback_emitsOnFullTransfer() public {
         vm.prank(controller);
         pool.transferToPool(address(usdc), user, 1000e6);
 
         aavePool.setShouldRevert(true);
 
-        // Full aToken balance available → no event
-        vm.recordLogs();
+        vm.expectEmit(true, true, false, true);
+        emit MarginPool.ATokenFallback(address(usdc), user, 500e6, 500e6);
         vm.prank(controller);
         pool.transferToUser(address(usdc), user, 500e6);
-
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        for (uint256 i; i < logs.length; i++) {
-            assertTrue(
-                logs[i].topics[0] != keccak256("ATokenFallback(address,address,uint256,uint256)"),
-                "Should not emit ATokenFallback"
-            );
-        }
     }
 
     // ============================================================
@@ -667,7 +676,7 @@ contract MarginPoolAaveTest is Test {
     //  PAV-1: Fallback accounting fix — totalDeposited restored
     // ============================================================
 
-    function test_fallbackAccounting_restoresTotalDeposited() public {
+    function test_fallbackAccounting_revertsOnPrincipalShortfall() public {
         vm.prank(controller);
         pool.transferToPool(address(usdc), user, 1000e6);
 
@@ -676,12 +685,11 @@ contract MarginPoolAaveTest is Test {
         aavePool.setShouldRevert(true);
 
         vm.prank(controller);
+        vm.expectRevert(abi.encodeWithSelector(MarginPool.AaveWithdrawalMismatch.selector, 1000e6, 400e6));
         pool.transferToUser(address(usdc), user, 1000e6);
 
-        // User got 400 aTokens (all that was available)
-        assertEq(aUsdc.balanceOf(user), 400e6);
-        // Shortfall of 600 restored to totalDeposited
-        assertEq(pool.totalDeposited(address(usdc)), 600e6);
+        assertEq(aUsdc.balanceOf(user), 0);
+        assertEq(pool.totalDeposited(address(usdc)), 1000e6);
     }
 
     // ============================================================

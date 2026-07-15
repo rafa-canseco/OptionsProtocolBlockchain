@@ -2325,9 +2325,9 @@ contract EscapeHatchTest is BatchSettlerTestBase {
         assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
     }
 
-    // ===== Emergency Withdrawal Ledger Clearance (Finding 2 fix) =====
+    // ===== Emergency Withdrawal With Outstanding Shorts =====
 
-    function test_emergencyWithdraw_clearsMMBalance() public {
+    function test_emergencyWithdraw_revertsWithMMBalance() public {
         address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
@@ -2336,13 +2336,13 @@ contract EscapeHatchTest is BatchSettlerTestBase {
         assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
         assertEq(settler.vaultMM(alice, 1), mm1);
 
-        // Full pause + emergency withdraw
+        // Outstanding claims must be settled normally; emergency withdrawal cannot burn them.
         controller.setSystemFullyPaused(true);
         vm.prank(alice);
+        vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
         controller.emergencyWithdrawVault(1);
 
-        // mm1's balance should be cleared
-        assertEq(settler.mmOTokenBalance(mm1, oToken), 0);
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
     }
 
     function test_emergencyWithdraw_preventsCrossMMTheft() public {
@@ -2355,12 +2355,12 @@ contract EscapeHatchTest is BatchSettlerTestBase {
         assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
         assertEq(settler.mmOTokenBalance(mm2, oToken), 2e8);
 
-        // Emergency: Alice withdraws, mm1's balance cleared
+        // Alice cannot invalidate either MM's outstanding claim.
         controller.setSystemFullyPaused(true);
         vm.prank(alice);
+        vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
         controller.emergencyWithdrawVault(1);
-        assertEq(settler.mmOTokenBalance(mm1, oToken), 0);
-        // mm2's balance untouched
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
         assertEq(settler.mmOTokenBalance(mm2, oToken), 2e8);
 
         // Unpause and settle OTM for mm2 through the cash path.
@@ -2374,7 +2374,7 @@ contract EscapeHatchTest is BatchSettlerTestBase {
         assertEq(settler.mmOTokenBalance(mm2, oToken), 0);
     }
 
-    function test_emergencyWithdraw_clearUsesMinForPartialBalance() public {
+    function test_emergencyWithdraw_revertsWithoutMutatingSharedBalance() public {
         address oToken = factory.createOToken(address(weth), address(usdc), address(usdc), strikePrice, expiry, true);
         whitelist.whitelistOToken(oToken);
 
@@ -2383,20 +2383,16 @@ contract EscapeHatchTest is BatchSettlerTestBase {
         _executeOrderForMM(mm1Key, bob, oToken, 2e8, 4000e6);
         assertEq(settler.mmOTokenBalance(mm1, oToken), 3e8);
 
-        // Full pause + Alice emergency withdraws vault 1 (shortAmount=1e8)
+        // Neither owner can withdraw while their short remains outstanding.
         controller.setSystemFullyPaused(true);
         vm.prank(alice);
+        vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
         controller.emergencyWithdrawVault(1);
-
-        // 1e8 cleared from mm1's balance, 2e8 remains (Bob's vault)
-        assertEq(settler.mmOTokenBalance(mm1, oToken), 2e8);
-
-        // Bob also emergency withdraws vault 1 (shortAmount=2e8)
         vm.prank(bob);
+        vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
         controller.emergencyWithdrawVault(1);
 
-        // All cleared, no underflow
-        assertEq(settler.mmOTokenBalance(mm1, oToken), 0);
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 3e8);
     }
 
     function test_clearMMBalance_onlyController() public {
@@ -2476,19 +2472,21 @@ contract EscapeHatchTest is BatchSettlerTestBase {
 
         controller.setSystemFullyPaused(true);
         vm.prank(bob);
+        vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
         controller.emergencyWithdrawVault(1);
 
         assertTrue(settler.physicalDeliveryReservedVault(alice, 1));
         assertEq(settler.physicalDeliveryReservedAmount(alice, 1), 1e8);
-        assertEq(settler.mmOTokenBalance(mm1, oToken), 1e8);
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 2e8);
         assertEq(settler.reservedPhysicalDeliveryBalance(mm1, oToken), 1e8);
 
         vm.prank(alice);
+        vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
         controller.emergencyWithdrawVault(1);
 
-        assertFalse(settler.physicalDeliveryReservedVault(alice, 1));
-        assertEq(settler.physicalDeliveryReservedAmount(alice, 1), 0);
-        assertEq(settler.mmOTokenBalance(mm1, oToken), 0);
-        assertEq(settler.reservedPhysicalDeliveryBalance(mm1, oToken), 0);
+        assertTrue(settler.physicalDeliveryReservedVault(alice, 1));
+        assertEq(settler.physicalDeliveryReservedAmount(alice, 1), 1e8);
+        assertEq(settler.mmOTokenBalance(mm1, oToken), 2e8);
+        assertEq(settler.reservedPhysicalDeliveryBalance(mm1, oToken), 1e8);
     }
 }
