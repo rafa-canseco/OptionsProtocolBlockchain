@@ -12,24 +12,21 @@ import "../src/core/OTokenFactory.sol";
 import "../src/core/Oracle.sol";
 import "../src/core/Whitelist.sol";
 import "../src/mocks/MockERC20.sol";
-import "../src/vaults/CspBatchSettler.sol";
+import "../src/mocks/MockChainlinkFeed.sol";
+import "../src/mocks/MockSwapRouter.sol";
 import "../src/vaults/EthCspVault.sol";
 import "../src/vaults/EthCspOptionSelector.sol";
 import "../src/vaults/EthCspStrategyAdapter.sol";
 import "../src/vaults/interfaces/IEthCspOptionSelector.sol";
 import "../src/vaults/interfaces/IEthCspStrategyAdapter.sol";
+import "../src/vaults/modules/EthCspAssignmentLedger.sol";
 
 contract BadEthCspStrategyAdapter is IEthCspStrategyAdapter {
-    function openCspBatch(
-        address,
-        address,
-        address,
-        address,
-        CspBatchSettler.Quote calldata,
-        bytes calldata,
-        uint256,
-        uint256
-    ) external pure returns (OpenResult memory result) {
+    function openCspBatch(address, address, address, BatchSettler.Quote calldata, bytes calldata, uint256, uint256)
+        external
+        pure
+        returns (OpenResult memory result)
+    {
         result = OpenResult({protocolVaultId: 1, premiumEarned: 0});
     }
 }
@@ -41,13 +38,14 @@ contract EthCspVaultTest is Test {
     OTokenFactory public factory;
     Oracle public oracle;
     Whitelist public whitelist;
-    BatchSettler public legacySettler;
-    CspBatchSettler public settler;
+    BatchSettler public settler;
     EthCspVault public vault;
     EthCspStrategyAdapter public strategyAdapter;
 
     MockERC20 public weth;
     MockERC20 public usdc;
+    MockChainlinkFeed public swapPriceFeed;
+    MockSwapRouter public swapRouter;
 
     address public alice = address(0xA11CE);
     address public bob = address(0xB0B);
@@ -116,7 +114,7 @@ contract EthCspVaultTest is Test {
                 )
             )
         );
-        legacySettler = BatchSettler(
+        settler = BatchSettler(
             address(
                 new ERC1967Proxy(
                     address(new BatchSettler()),
@@ -124,24 +122,21 @@ contract EthCspVaultTest is Test {
                 )
             )
         );
-        settler = CspBatchSettler(
-            address(
-                new ERC1967Proxy(
-                    address(new CspBatchSettler()),
-                    abi.encodeCall(CspBatchSettler.initialize, (address(addressBook), address(this)))
-                )
-            )
-        );
+        swapPriceFeed = new MockChainlinkFeed(1800e8);
+        swapRouter = new MockSwapRouter(address(usdc));
+        swapRouter.setPriceFeed(address(weth), address(swapPriceFeed));
 
         addressBook.setController(address(controller));
         addressBook.setMarginPool(address(pool));
         addressBook.setOTokenFactory(address(factory));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
-        addressBook.setBatchSettler(address(legacySettler));
+        addressBook.setBatchSettler(address(settler));
 
         factory.setOperator(address(this));
         settler.setWhitelistedMM(mm, true);
+        settler.setSwapRouter(address(swapRouter));
+        settler.setSwapFeeTier(500);
 
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
@@ -149,12 +144,9 @@ contract EthCspVaultTest is Test {
         whitelist.whitelistProduct(address(weth), address(usdc), address(usdc), true);
         whitelist.whitelistProduct(address(weth), address(usdc), address(weth), false);
 
-        vault = new EthCspVault(
-            address(addressBook), address(settler), address(usdc), address(weth), operator, feeRecipient, 1000
-        );
+        vault = new EthCspVault(address(addressBook), address(usdc), address(weth), operator, feeRecipient, 1000);
         strategyAdapter = new EthCspStrategyAdapter();
         settler.setPhysicalDeliveryVault(address(vault), true);
-        assertTrue(controller.authorizedSettlers(address(vault), address(settler)));
 
         _computeExpiry();
 
@@ -188,12 +180,12 @@ contract EthCspVaultTest is Test {
         assertEq(startedAt, uint64(block.timestamp));
     }
 
-    function test_openCspBatchUsesDedicatedCspSettlerAndLeavesLegacyRegistered() public {
+    function test_openCspBatchUsesExistingBatchSettlerFlow() public {
         vm.prank(alice);
         vault.deposit(10_000e6);
 
         address oToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
 
         vm.prank(operator);
         (uint256 batchId, uint256 protocolVaultId) = vault.openCspBatch(quote, sig, 1e8, 2000e6);
@@ -228,7 +220,7 @@ contract EthCspVaultTest is Test {
         pool.setAaveEnabled(address(usdc), true);
 
         address oToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
 
         vm.prank(operator);
         vm.expectRevert(EthCspVault.StrategyConstraint.selector);
@@ -277,12 +269,12 @@ contract EthCspVaultTest is Test {
 
         _computeExpiry();
         address oToken = _createPut();
-        (CspBatchSettler.Quote memory tooLargeQuote, bytes memory tooLargeSig) = _signQuote(oToken, 0, 503_200_000);
+        (BatchSettler.Quote memory tooLargeQuote, bytes memory tooLargeSig) = _signQuote(oToken, 0, 503_200_000);
         vm.prank(operator);
         vm.expectRevert(EthCspVault.InsufficientAvailableAssets.selector);
         vault.openCspBatch(tooLargeQuote, tooLargeSig, 503_200_000, 10_064e6);
 
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1e8, 2_000e6);
@@ -367,14 +359,14 @@ contract EthCspVaultTest is Test {
         assertTrue(closed);
     }
 
-    function test_emergencyWithdrawBatchUnsticksPausedCoreSettlement() public {
+    function test_defaultSettlementUsesCoreEmergencyWhenFullyPaused() public {
         _depositAndOpenOnePut();
         address oToken = _currentBatchOToken(1);
 
         controller.setSystemFullyPaused(true);
 
         vm.prank(operator);
-        vault.emergencyWithdrawBatch(1);
+        vault.settleDefaultedCspBatch(1);
 
         assertEq(vault.activeBatches(), 0);
         assertEq(vault.activeCollateral(), 0);
@@ -385,7 +377,7 @@ contract EthCspVaultTest is Test {
         assertEq(settler.reservedPhysicalDeliveryBalance(mm, oToken), 0);
     }
 
-    function test_defaultSettlementCannotWriteOffAssignedBatchWhenMmWithholdsPhysicalDelivery() public {
+    function test_defaultSettlementReturnsCollateralWithoutMmWeth() public {
         _depositAndOpenOnePut();
         address oToken = _currentBatchOToken(1);
 
@@ -393,44 +385,13 @@ contract EthCspVaultTest is Test {
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
         vm.prank(operator);
-        vm.expectRevert();
-        vault.settleCspBatch(1, 0, 1e18);
-
-        vm.prank(operator);
         vm.expectRevert(EthCspVault.SettlementDefaultNotReady.selector);
-        vault.settleDefaultedCspBatch(1, 0);
+        vault.settleDefaultedCspBatch(1);
 
         vm.warp(expiry + vault.settlementDefaultDelay());
 
         vm.prank(operator);
-        vm.expectRevert(EthCspVault.CollateralAccountingMismatch.selector);
-        vault.settleDefaultedCspBatch(1, 0);
-
-        assertEq(vault.activeBatches(), 1);
-        assertEq(vault.activeCollateral(), 2000e6);
-        assertEq(vault.accountedIdleAssets(), 8063e6);
-        assertEq(vault.accountedUnderlyingAssets(), 0);
-        assertEq(vault.batchUnderlyingReceived(1), 0);
-        assertFalse(controller.vaultSettled(address(vault), 1));
-        assertTrue(settler.physicalDeliveryReservedVault(address(vault), 1));
-        assertEq(settler.reservedPhysicalDeliveryBalance(mm, oToken), 1e8);
-
-        (,,,, uint256 committedCollateral, uint256 returnedCollateral,, uint256 assignmentShortfall,,,,,) =
-            vault.epochs(1);
-        assertEq(committedCollateral, 2000e6);
-        assertEq(returnedCollateral, 0);
-        assertEq(assignmentShortfall, 0);
-    }
-
-    function test_defaultSettlementClearsOtmReservationAfterDelay() public {
-        _depositAndOpenOnePut();
-        address oToken = _currentBatchOToken(1);
-
-        vm.warp(expiry + vault.settlementDefaultDelay());
-        oracle.setExpiryPrice(address(weth), expiry, 2100e8);
-
-        vm.prank(operator);
-        vault.settleDefaultedCspBatch(1, 2000e6);
+        vault.settleDefaultedCspBatch(1);
 
         assertEq(vault.activeBatches(), 0);
         assertEq(vault.activeCollateral(), 0);
@@ -440,14 +401,21 @@ contract EthCspVaultTest is Test {
         assertTrue(controller.vaultSettled(address(vault), 1));
         assertFalse(settler.physicalDeliveryReservedVault(address(vault), 1));
         assertEq(settler.reservedPhysicalDeliveryBalance(mm, oToken), 0);
-        assertEq(settler.vaultOTokenBalance(address(vault), 1), 0);
-        assertEq(settler.mmOTokenBalance(mm, oToken), 0);
 
         (,,,, uint256 committedCollateral, uint256 returnedCollateral,, uint256 assignmentShortfall,,,,,) =
             vault.epochs(1);
         assertEq(committedCollateral, 2000e6);
         assertEq(returnedCollateral, 2000e6);
         assertEq(assignmentShortfall, 0);
+
+        vm.prank(operator);
+        vault.closeEpoch();
+
+        uint256 aliceShares = vault.sharesOf(alice);
+        vm.prank(alice);
+        uint256 withdrawn = vault.withdrawIdle(aliceShares, receiver);
+        assertEq(withdrawn, 10_063e6);
+        assertEq(usdc.balanceOf(receiver), 10_063e6);
     }
 
     function test_curatorCanSetSettlementDefaultDelayWithinCap() public {
@@ -455,7 +423,29 @@ contract EthCspVaultTest is Test {
         assertEq(vault.settlementDefaultDelay(), 2 days);
 
         vm.expectRevert(EthCspVault.StrategyConstraint.selector);
+        vault.setSettlementDefaultDelay(0);
+
+        vm.expectRevert(EthCspVault.StrategyConstraint.selector);
         vault.setSettlementDefaultDelay(31 days);
+    }
+
+    function test_defaultDelayChangeOnlyAffectsFutureBatches() public {
+        _depositAndOpenOnePut();
+        vault.setSettlementDefaultDelay(1 hours);
+
+        vm.warp(expiry + 1 hours);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.SettlementDefaultNotReady.selector);
+        vault.settleDefaultedCspBatch(1);
+
+        vm.warp(expiry + 1 days);
+        vm.prank(operator);
+        vault.settleDefaultedCspBatch(1);
+
+        assertEq(vault.activeBatches(), 0);
+        assertEq(vault.accountedIdleAssets(), 10_063e6);
     }
 
     function test_settleRejectsAllocatorCollateralReportNotBackedByControllerDelta() public {
@@ -466,7 +456,7 @@ contract EthCspVaultTest is Test {
 
         vm.prank(operator);
         vm.expectRevert(EthCspVault.CollateralAccountingMismatch.selector);
-        vault.settleCspBatch(1, 100e6, 0);
+        vault.prepareCspBatchSettlement(1, 100e6);
 
         assertEq(vault.activeBatches(), 1);
         assertEq(vault.activeCollateral(), 2000e6);
@@ -494,7 +484,7 @@ contract EthCspVaultTest is Test {
 
         _computeExpiry();
         address oToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1e8, 2000e6);
@@ -521,18 +511,93 @@ contract EthCspVaultTest is Test {
         assertEq(performanceFee, 7e6);
     }
 
-    function test_settleItmRejectsMissingAssignedUnderlying() public {
+    function test_settleItmCannotFinalizeBeforeBatchSettlerDelivery() public {
         _depositAndOpenOnePut();
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
         vm.prank(operator);
+        vault.prepareCspBatchSettlement(1, 0);
+
+        vm.prank(operator);
         vm.expectRevert(EthCspVault.CollateralAccountingMismatch.selector);
-        vault.settleCspBatch(1, 0, 0);
+        vault.finalizeCspBatchSettlement(1);
 
         assertEq(vault.activeBatches(), 1);
         assertEq(vault.activeCollateral(), 2000e6);
+    }
+
+    function test_settleItmIgnoresUnderlyingDonationDuringPreparedState() public {
+        _depositAndOpenOnePut();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        vm.prank(operator);
+        vault.prepareCspBatchSettlement(1, 0);
+        weth.mint(address(vault), 1);
+
+        vm.prank(operator);
+        settler.operatorPhysicalRedeemVault(address(vault), 1, 2000e6);
+        vm.prank(operator);
+        vault.finalizeCspBatchSettlement(1);
+
+        assertEq(vault.accountedUnderlyingAssets(), 1e18);
+        assertEq(weth.balanceOf(address(vault)), 1e18 + 1);
+    }
+
+    function test_defaultSettlementRecoversAfterPhysicalSwapFailure() public {
+        _depositAndOpenOnePut();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        vm.prank(operator);
+        vault.prepareCspBatchSettlement(1, 0);
+
+        swapPriceFeed.setPrice(2500e8);
+        vm.prank(operator);
+        vm.expectRevert();
+        settler.operatorPhysicalRedeemVault(address(vault), 1, 2000e6);
+
+        vm.warp(expiry + vault.settlementDefaultDelay());
+        vm.prank(operator);
+        vault.settleDefaultedCspBatch(1);
+
+        assertEq(vault.activeBatches(), 0);
+        assertEq(vault.accountedIdleAssets(), 10_063e6);
+        assertEq(vault.accountedUnderlyingAssets(), 0);
+        assertEq(settler.vaultOTokenBalance(address(vault), 1), 0);
+    }
+
+    function test_preparedSettlementDuringFullPauseRecoversAfterUnpause() public {
+        _depositAndOpenOnePut();
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        vm.prank(operator);
+        vault.prepareCspBatchSettlement(1, 0);
+        controller.setSystemFullyPaused(true);
+
+        vm.warp(expiry + vault.settlementDefaultDelay());
+        vm.prank(operator);
+        vm.expectRevert(EthCspVault.CollateralAccountingMismatch.selector);
+        vault.settleDefaultedCspBatch(1);
+
+        assertEq(vault.preparedSettlementBatchId(), 1);
+        assertEq(vault.activeBatches(), 1);
+        assertEq(settler.vaultOTokenBalance(address(vault), 1), 1e8);
+
+        controller.setSystemFullyPaused(false);
+        vm.prank(operator);
+        vault.settleDefaultedCspBatch(1);
+
+        assertEq(vault.preparedSettlementBatchId(), 0);
+        assertEq(vault.activeBatches(), 0);
+        assertEq(vault.accountedIdleAssets(), 10_063e6);
+        assertEq(settler.vaultOTokenBalance(address(vault), 1), 0);
     }
 
     function test_withdrawIdleRevertsBeforeAssignedUnderlyingIsAllocated() public {
@@ -639,7 +704,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(1_000e6);
 
         address oToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
 
         vm.prank(operator);
         vm.expectRevert(EthCspVault.InsufficientAvailableAssets.selector);
@@ -783,7 +848,7 @@ contract EthCspVaultTest is Test {
         assertEq(vault.deployableIdleAssets(), 9_000e6);
 
         address oToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
 
         vm.prank(operator);
         vm.expectRevert(EthCspVault.PendingWithdrawalsOpen.selector);
@@ -872,7 +937,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(1e6);
 
         address oToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1e8, 2_000e6);
@@ -906,7 +971,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(1_000e6);
 
         address oToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1e8, 2_000e6);
@@ -945,12 +1010,12 @@ contract EthCspVaultTest is Test {
         vault.claimAssignedUnderlying(carol);
     }
 
-    function test_assignedUnderlyingRoundingResidualIsSweptOnce() public {
+    function test_assignedUnderlyingRoundingResidualRemainsAsBacking() public {
         vm.prank(alice);
         vault.deposit(3e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 0, 1);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 0, 1);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1, 20);
@@ -963,12 +1028,28 @@ contract EthCspVaultTest is Test {
         vm.prank(operator);
         vault.closeEpoch();
 
-        assertEq(weth.balanceOf(feeRecipient) - feeRecipientBefore, 1);
+        assertEq(weth.balanceOf(feeRecipient) - feeRecipientBefore, 0);
         assertEq(vault.availableUnderlyingAssets(), 0);
-        assertEq(vault.allocatedUnderlyingAssets(), 9_999_999_999);
+        assertEq(vault.allocatedUnderlyingAssets(), 1e10);
 
         vm.prank(alice);
         assertEq(vault.claimAssignedUnderlying(alice), 9_999_999_999);
+        assertEq(vault.allocatedUnderlyingAssets(), 1);
+    }
+
+    function test_assignmentIndexCarryNeverExceedsReservedBacking() public pure {
+        uint256 total = 4_001_000_000;
+        EthCspAssignmentLedger.AllocationResult memory first =
+            EthCspAssignmentLedger.allocate(1e18, total, 1e18, 0, 0, 1e14);
+        EthCspAssignmentLedger.AllocationResult memory second = EthCspAssignmentLedger.allocate(
+            1e18, total, 2e18, first.newAllocatedUnderlyingAssets, first.newCumulativeUnderlyingPerShare, 1e14
+        );
+
+        uint256 smallHolderClaim = (1_000_000 * second.newCumulativeUnderlyingPerShare) / 1e18;
+        uint256 largeHolderClaim = (4_000_000_000 * second.newCumulativeUnderlyingPerShare) / 1e18;
+
+        assertEq(second.newAllocatedUnderlyingAssets, 2e18);
+        assertLe(smallHolderClaim + largeHolderClaim, second.newAllocatedUnderlyingAssets);
     }
 
     function test_settleItmAcceptsRoundedCollateralResidual() public {
@@ -976,7 +1057,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(1_000e6);
 
         address putToken = _createPutWithStrike(200_001_000_000);
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 0, 1);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 0, 1);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1, 21);
@@ -996,7 +1077,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(1_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 0, 50_000_000);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 0, 50_000_000);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 50_000_000, 1_000e6);
@@ -1035,7 +1116,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(1_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 0, 50_000_000);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 0, 50_000_000);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 50_000_000, 1_000e6);
@@ -1085,7 +1166,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(1_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 0, 50_000_000);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 0, 50_000_000);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 50_000_000, 1_000e6);
@@ -1155,7 +1236,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address callToken = factory.createOToken(address(weth), address(usdc), address(weth), 2300e8, expiry, false);
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(callToken, 50e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(callToken, 50e6, 100e8);
 
         vm.prank(operator);
         vm.expectRevert(EthCspVault.InvalidOToken.selector);
@@ -1178,7 +1259,7 @@ contract EthCspVaultTest is Test {
         assertEq(vault.allocator(), newAllocator);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(alice);
         vault.deposit(10_000e6);
@@ -1234,7 +1315,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         vm.expectRevert(EthCspVault.StrategyConstraint.selector);
@@ -1274,7 +1355,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 25e7, 5_000e6);
@@ -1306,7 +1387,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         vm.expectRevert(EthCspVault.StrategyConstraint.selector);
@@ -1332,7 +1413,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         vm.expectRevert(EthCspOptionSelector.StrategyConstraint.selector);
@@ -1345,17 +1426,14 @@ contract EthCspVaultTest is Test {
         vm.prank(strategyVault);
         usdc.approve(address(pool), type(uint256).max);
         vm.prank(strategyVault);
-        controller.setAuthorizedSettler(address(settler), true);
-        vm.prank(strategyVault);
         settler.setOrderExecutor(address(strategyAdapter), true);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(strategyVault);
-        IEthCspStrategyAdapter.OpenResult memory opened = strategyAdapter.openCspBatch(
-            strategyVault, address(settler), address(addressBook), address(usdc), quote, sig, 1e8, 2000e6
-        );
+        IEthCspStrategyAdapter.OpenResult memory opened =
+            strategyAdapter.openCspBatch(strategyVault, address(addressBook), address(usdc), quote, sig, 1e8, 2000e6);
 
         assertEq(opened.protocolVaultId, 1);
         assertEq(opened.premiumEarned, 70e6);
@@ -1367,6 +1445,8 @@ contract EthCspVaultTest is Test {
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 2100e8);
 
+        vm.prank(strategyVault);
+        settler.setSettlementExecutor(address(strategyAdapter), true);
         settler.setPhysicalDeliveryVault(strategyVault, true);
         vm.prank(strategyVault);
         settler.reservePhysicalDelivery(1);
@@ -1389,12 +1469,10 @@ contract EthCspVaultTest is Test {
     function test_strategyAdapterRejectsThirdPartyCalls() public {
         address strategyVault = address(0x5157);
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.expectRevert(EthCspStrategyAdapter.Unauthorized.selector);
-        strategyAdapter.openCspBatch(
-            strategyVault, address(settler), address(addressBook), address(usdc), quote, sig, 1e8, 2000e6
-        );
+        strategyAdapter.openCspBatch(strategyVault, address(addressBook), address(usdc), quote, sig, 1e8, 2000e6);
     }
 
     function test_vaultUsesStrategyAdapterWithBoundedAllowance() public {
@@ -1404,7 +1482,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         (uint256 batchId, uint256 protocolVaultId) = vault.openCspBatch(quote, sig, 1e8, 2000e6);
@@ -1420,47 +1498,39 @@ contract EthCspVaultTest is Test {
         assertEq(vault.totalManagedAssets(), 10_063e6);
     }
 
-    function test_strategyAdapterDoesNotPullUnderlyingFromArbitrarySource() public {
+    function test_strategyAdapterSettlementUsesBatchSettlerInsteadOfMmWeth() public {
         _installStrategyAdapter(type(uint256).max);
         _depositAndOpenOnePut();
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1800e8);
 
-        weth.mint(operator, 1e18);
         vm.prank(operator);
-        weth.approve(address(vault), type(uint256).max);
+        vault.prepareCspBatchSettlement(1, 0);
 
         vm.prank(operator);
-        vm.expectRevert();
-        vault.settleCspBatch(1, 0, 1e18);
+        settler.operatorPhysicalRedeemVault(address(vault), 1, 2000e6);
 
-        assertEq(weth.balanceOf(address(vault)), 0);
-
-        weth.mint(mm, 1e18);
-        vm.prank(mm);
-        weth.approve(address(vault), 1e18);
         vm.prank(operator);
-        vault.settleCspBatch(1, 0, 1e18);
+        vault.finalizeCspBatchSettlement(1);
 
         assertEq(weth.balanceOf(address(vault)), 1e18);
+        assertEq(weth.balanceOf(mm), 0);
     }
 
-    function test_cspReservationsStayOffLegacyBatchSettler() public {
+    function test_mmSelfRedeemCannotConsumeVaultReservedPhysicalDelivery() public {
         _depositAndOpenOnePut();
         address oToken = _currentBatchOToken(1);
-
-        assertEq(addressBook.batchSettler(), address(legacySettler));
         assertTrue(settler.physicalDeliveryReservedVault(address(vault), 1));
         assertEq(settler.reservedPhysicalDeliveryBalance(mm, oToken), 1e8);
-        assertEq(settler.mmOTokenBalance(mm, oToken), 1e8);
-        assertEq(OToken(oToken).balanceOf(address(settler)), 1e8);
-        assertEq(legacySettler.mmOTokenBalance(mm, oToken), 0);
-        assertEq(OToken(oToken).balanceOf(address(legacySettler)), 0);
+        settler.setEscapeDelay(settler.MIN_ESCAPE_DELAY());
 
-        vm.prank(alice);
-        vm.expectRevert(CspBatchSettler.PhysicalDeliveryVaultNotAuthorized.selector);
-        settler.releasePhysicalDelivery(1);
+        vm.warp(expiry + settler.MIN_ESCAPE_DELAY());
+        oracle.setExpiryPrice(address(weth), expiry, 1800e8);
+
+        vm.prank(mm);
+        vm.expectRevert(BatchSettler.ReservedPhysicalDelivery.selector);
+        settler.mmSelfRedeem(oToken, 1e8);
     }
 
     function test_vaultSettlementReleasesReservedPhysicalDelivery() public {
@@ -1483,7 +1553,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         vm.expectRevert(EthCspVault.StrategyConstraint.selector);
@@ -1497,7 +1567,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 75_000_000, 1500e6);
@@ -1517,7 +1587,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1e8, 2000e6);
@@ -1534,7 +1604,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1e8, 2000e6);
@@ -1573,7 +1643,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         vm.expectRevert(EthCspVault.CollateralAccountingMismatch.selector);
@@ -1625,7 +1695,7 @@ contract EthCspVaultTest is Test {
 
         _computeExpiry();
         address putToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 70e6, 100e8);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1e8, 2_000e6);
@@ -1636,7 +1706,7 @@ contract EthCspVaultTest is Test {
         vault.deposit(10_000e6);
 
         address oToken = _createPut();
-        (CspBatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(oToken, 70e6, 100e8);
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1e8, 2000e6);
@@ -1645,6 +1715,7 @@ contract EthCspVaultTest is Test {
     function _installStrategyAdapter(uint256 cap) internal {
         vault.setStrategyAdapter(address(strategyAdapter), cap);
         assertTrue(settler.orderExecutor(address(vault), address(strategyAdapter)));
+        assertFalse(settler.settlementExecutor(address(vault), address(strategyAdapter)));
         assertEq(vault.strategyAdapter(), address(strategyAdapter));
         assertEq(vault.strategyAdapterCap(address(strategyAdapter)), cap);
     }
@@ -1658,14 +1729,16 @@ contract EthCspVaultTest is Test {
         (,, uint256 protocolVaultId,,,,,) = vault.batches(batchId);
         assertEq(protocolVaultId, expectedVaultId);
 
-        if (expectedUnderlyingReceived > 0) {
-            weth.mint(mm, expectedUnderlyingReceived);
-            vm.prank(mm);
-            weth.approve(address(vault), expectedUnderlyingReceived);
-        }
-
         vm.prank(operator);
-        vault.settleCspBatch(batchId, expectedCollateralReturned, expectedUnderlyingReceived);
+        vault.prepareCspBatchSettlement(batchId, expectedCollateralReturned);
+
+        if (expectedUnderlyingReceived > 0) {
+            vm.prank(operator);
+            settler.operatorPhysicalRedeemVault(address(vault), expectedVaultId, 2000e6);
+
+            vm.prank(operator);
+            vault.finalizeCspBatchSettlement(batchId);
+        }
 
         returned = expectedCollateralReturned;
     }
@@ -1684,9 +1757,9 @@ contract EthCspVaultTest is Test {
 
     function _signQuote(address oToken, uint256 bidPrice, uint256 maxAmount)
         internal
-        returns (CspBatchSettler.Quote memory quote, bytes memory sig)
+        returns (BatchSettler.Quote memory quote, bytes memory sig)
     {
-        quote = CspBatchSettler.Quote({
+        quote = BatchSettler.Quote({
             oToken: oToken,
             bidPrice: bidPrice,
             deadline: block.timestamp + 1 hours,

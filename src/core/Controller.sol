@@ -12,7 +12,7 @@ import "./Oracle.sol";
 import "./Whitelist.sol";
 import "../interfaces/IMarginVault.sol";
 
-interface ISettlerClearance {
+interface IBatchSettlerClearance {
     function clearMMBalanceForVault(address owner, uint256 vaultId, address oToken, uint256 amount) external;
     function vaultMM(address owner, uint256 vaultId) external view returns (address);
     function vaultOTokenBalance(address owner, uint256 vaultId) external view returns (uint256);
@@ -66,8 +66,6 @@ contract Controller is Initializable, UUPSUpgradeable {
     event SystemUnpaused(address indexed caller);
     event EmergencyWithdraw(address indexed user, uint256 vaultId, address asset, uint256 amount);
     event PartialPauserUpdated(address indexed oldPauser, address indexed newPauser);
-    event AuthorizedSettlerUpdated(address indexed owner, address indexed settler, bool status);
-    event VaultSettlerRecorded(address indexed owner, uint256 indexed vaultId, address indexed settler);
 
     error OnlyOwner();
     error InvalidVault();
@@ -96,8 +94,7 @@ contract Controller is Initializable, UUPSUpgradeable {
     }
 
     modifier onlyAuthorized(address _owner) {
-        if (msg.sender != _owner && msg.sender != addressBook.batchSettler() && !authorizedSettlers[_owner][msg.sender])
-        {
+        if (msg.sender != _owner && msg.sender != addressBook.batchSettler()) {
             revert Unauthorized();
         }
         _;
@@ -135,10 +132,6 @@ contract Controller is Initializable, UUPSUpgradeable {
     {
         uint256 vaultId = vaultCount[_owner] + 1;
         vaultCount[_owner] = vaultId;
-        if (msg.sender != _owner) {
-            vaultSettler[_owner][vaultId] = msg.sender;
-            emit VaultSettlerRecorded(_owner, vaultId, msg.sender);
-        }
 
         emit VaultOpened(_owner, vaultId);
         return vaultId;
@@ -295,12 +288,6 @@ contract Controller is Initializable, UUPSUpgradeable {
         partialPauser = _pauser;
     }
 
-    function setAuthorizedSettler(address _settler, bool _status) external {
-        if (_settler == address(0)) revert InvalidAddress();
-        authorizedSettlers[msg.sender][_settler] = _status;
-        emit AuthorizedSettlerUpdated(msg.sender, _settler, _status);
-    }
-
     function setSystemPartiallyPaused(bool _paused) external {
         if (msg.sender != partialPauser && msg.sender != owner) {
             revert OnlyPartialPauser();
@@ -328,7 +315,7 @@ contract Controller is Initializable, UUPSUpgradeable {
     /// @notice Allows a vault owner to rescue their collateral when the
     ///         system is fully paused (emergency circuit breaker).
     /// @dev    Marks the vault as settled to prevent double-claims.
-    ///         Burns outstanding oTokens from the vault's settler and clears
+    ///         Burns outstanding oTokens from BatchSettler and clears
     ///         the MM's custodied balance to prevent phantom redemption.
     function emergencyWithdrawVault(uint256 _vaultId) external {
         if (!systemFullyPaused) revert SystemNotFullyPaused();
@@ -344,16 +331,13 @@ contract Controller is Initializable, UUPSUpgradeable {
 
         // Burn oTokens and clear MM ledger to prevent phantom redemption
         if (vault.shortOtoken != address(0) && vault.shortAmount > 0) {
-            address settler = vaultSettler[msg.sender][_vaultId];
-            if (settler == address(0)) {
-                settler = addressBook.batchSettler();
-            }
+            address settler = addressBook.batchSettler();
             if (settler != address(0)) {
                 OToken ot = OToken(vault.shortOtoken);
 
-                address mm = ISettlerClearance(settler).vaultMM(msg.sender, _vaultId);
+                address mm = IBatchSettlerClearance(settler).vaultMM(msg.sender, _vaultId);
                 if (mm != address(0)) {
-                    uint256 vaultBal = ISettlerClearance(settler).vaultOTokenBalance(msg.sender, _vaultId);
+                    uint256 vaultBal = IBatchSettlerClearance(settler).vaultOTokenBalance(msg.sender, _vaultId);
                     if (vaultBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
                 } else {
                     // Pre-migration vault (no MM attribution): aggregate check
@@ -363,7 +347,7 @@ contract Controller is Initializable, UUPSUpgradeable {
 
                 ot.burnOtoken(settler, vault.shortAmount);
 
-                ISettlerClearance(settler)
+                IBatchSettlerClearance(settler)
                     .clearMMBalanceForVault(msg.sender, _vaultId, vault.shortOtoken, vault.shortAmount);
             }
         }
@@ -399,11 +383,5 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    /// @notice Additional settler modules authorized by each vault owner without replacing AddressBook.batchSettler().
-    mapping(address => mapping(address => bool)) public authorizedSettlers;
-
-    /// @notice Settler module that opened each vault. Empty falls back to legacy AddressBook.batchSettler().
-    mapping(address => mapping(uint256 => address)) public vaultSettler;
-
-    uint256[41] private __gap;
+    uint256[43] private __gap;
 }

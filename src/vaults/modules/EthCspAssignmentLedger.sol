@@ -45,16 +45,11 @@ library EthCspAssignmentLedger {
             return result;
         }
 
-        result.distributed = (delta * totalShares) / 1e18;
-        uint256 residual = amount - result.distributed;
-        if (residual > 0) {
-            if (residual > dustThreshold) revert AssignedUnderlyingTooLarge();
-            result.swept = residual;
-            result.newAccountedUnderlyingAssets = accountedUnderlyingAssets - residual;
-        }
-
+        // The cumulative index retains fractional entitlements across allocations.
+        // Keep the full amount reserved so later index carry cannot outgrow backing.
+        result.distributed = amount;
         result.newCumulativeUnderlyingPerShare = cumulativeUnderlyingPerShare + delta;
-        result.newAllocatedUnderlyingAssets = allocatedUnderlyingAssets + result.distributed;
+        result.newAllocatedUnderlyingAssets = allocatedUnderlyingAssets + amount;
     }
 
     function accrue(
