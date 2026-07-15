@@ -19,6 +19,7 @@ contract MockSwapRouter is ISwapRouter {
     using SafeERC20 for IERC20;
 
     address public immutable usdc;
+    address public immutable owner = msg.sender;
 
     /// @notice asset → Chainlink feed (USD price, 8 decimals)
     mapping(address => address) public priceFeeds;
@@ -29,6 +30,7 @@ contract MockSwapRouter is ISwapRouter {
     }
 
     function setPriceFeed(address _asset, address _feed) external {
+        require(msg.sender == owner, "MockSwapRouter: only owner");
         require(_asset != address(0) && _feed != address(0), "Zero address");
         priceFeeds[_asset] = _feed;
     }
