@@ -1,0 +1,110 @@
+{
+  "ticket": "B1N-336",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532,
+    "rpcEnv": "BASE_SEPOLIA_RPC_URL",
+    "rpcDefault": "https://sepolia.base.org",
+    "explorer": "https://base-sepolia.blockscout.com"
+  },
+  "deployment": {
+    "deployer": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "broadcastFile": "broadcast/DeployCspVaultBaseSepolia.s.sol/84532/run-latest.json",
+    "verifiedOnBlockscout": true
+  },
+  "tokens": {
+    "mockUsdc": {
+      "address": "0xAB51a471493832C1D70cef8ff937A850cf37c860",
+      "decimals": 6,
+      "mintable": true,
+      "reused": true
+    },
+    "mockWeth": {
+      "address": "0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6",
+      "decimals": 18,
+      "mintable": true,
+      "reused": true
+    }
+  },
+  "contracts": {
+    "mockChainlinkFeedEth": "0x08BE9b11ac8bbdeF7a53E4C05F5f7B76c3E441Ad",
+    "mockSwapRouter": "0x7442287A564D7A7f412a12Ff986a242E1A969abB",
+    "addressBook": "0x033d9d37Baf83dBc71935239b6fA22a6905dbaa0",
+    "controller": "0xD52EFbBaA1b02BA65A7f0A1604A5dFb4C4dB1572",
+    "marginPool": "0xeEab53b8022C32349A80C8d905492EBa6b2deaE9",
+    "oTokenFactory": "0x193ED89eB64d0179b4dB08E87E541b7b3c30002A",
+    "oracle": "0xF95CC4aED4a0bD68e0F1BE7c779BC281189F8187",
+    "whitelist": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
+    "cspBatchSettler": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
+    "ethCspVault": "0xcf2c5b2e065bB7ADD2a29ed4d3A61910e6a59645",
+    "ethCspOptionSelector": "0x5F43F229CDb6cD12929207f521B733c250E0Ab21"
+  },
+  "implementations": {
+    "addressBook": "0x21aBa53771dDfE58DB867D5C47Cd0DA94ba5c5A4",
+    "controller": "0x5cfB9ca0437D4a5b3735bba0d9E2490a05F532bc",
+    "marginPool": "0x972E135596451001D01cB78417E1A2dB968954b3",
+    "oTokenFactory": "0xC5A9aCe7B4cFf1471e32286532398E2B3c090B46",
+    "oracle": "0xaB1D8DD33909600a593261c6D26fDCfc65EF2816",
+    "whitelist": "0x440FF0Bba13D35dD9bCe388C8A5970ceeCdB53b9",
+    "cspBatchSettler": "0x040219e594de2862D1480a6A3c1d45c5c032aCE6"
+  },
+  "roles": {
+    "owner": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "curator": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "allocator": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "settlementExecutor": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "marketMaker": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "feeRecipient": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "physicalDeliveryVaultAuthorized": true,
+    "custodiedRedemptionOnly": true
+  },
+  "caps": {
+    "maxCollateralPerBatch": "1000e6",
+    "maxUtilizationBps": 2500,
+    "minPremiumBps": 1,
+    "minExpiryDelaySeconds": 3600,
+    "maxExpiryDelaySeconds": 2592000,
+    "minStrike": "100e8",
+    "maxStrike": "10000e8",
+    "settlementDefaultDelaySeconds": 3600,
+    "performanceFeeBps": 1000,
+    "protocolFeeBps": 400,
+    "swapFeeTier": 500
+  },
+  "transactionHashes": {
+    "mockChainlinkFeedDeploy": "0xf79ef55d71552ec7091113e03d413bf2c8549df59713accc58413b5296b350b7",
+    "mockSwapRouterDeploy": "0x687ac79e15b2eb617cda782a2f9a583a16d558efe9a8eb1e5473fadfc2f1790e",
+    "addressBookProxyDeploy": "0x1f5fb5562b57d3021b83b4613e6bb41af900b8ea3d1635b528bcafeb9ce3f68b",
+    "controllerProxyDeploy": "0x6236a7c437c2eaaf21ef8ea1e2b560e9a85dbd8e0a83c70ff009e2e9dd930ca1",
+    "marginPoolProxyDeploy": "0xf828ce098dceef3a9f99244b326fe062edb21eaf12b3653b096bb14b3687f80e",
+    "oTokenFactoryProxyDeploy": "0xfa42eb8a0b950cfebb792b4e7835b5bf9fe51ce14707123c0022ee0c40d1c83a",
+    "oracleProxyDeploy": "0x745b5f99cb9dd5dbd4c52ad37efe8ce5730d0be20d65aae28289778af368424d",
+    "whitelistProxyDeploy": "0xa7da2108a266fa17b1ad25084bac591e0932c00c9ca210bbf4466e0dcd2a255d",
+    "cspBatchSettlerProxyDeploy": "0xc8221da93dfc28c788a3a61e325092c0273356afc42ad94d2119fe6c3916e251",
+    "ethCspVaultDeploy": "0x0a08dbe208a6071d83ba27cb4a60b0e6e1c9bab238755e163e3729c11cf0396a",
+    "ethCspOptionSelectorDeploy": "0x79c71e2048cad2c03a30ae4d9811f78a48baa0b5ad0b59b4c083a6df76ee21cc",
+    "physicalDeliveryVaultAuthorization": "0x7770bcad46702f220a0997ea097dc3062f39d53310daba3c25f92a9b69b43535",
+    "settlementExecutorAuthorization": "0x1fba34a5b33f5e7b17e4eeb7355859bfe288f415672188f9388635da68ddb974"
+  },
+  "integrationEnv": {
+    "BASE_SEPOLIA_RPC_URL": "https://sepolia.base.org",
+    "CHAIN_ID": "84532",
+    "CSP_MOCK_USDC_ADDRESS": "0xAB51a471493832C1D70cef8ff937A850cf37c860",
+    "CSP_MOCK_WETH_ADDRESS": "0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6",
+    "CSP_ADDRESS_BOOK_ADDRESS": "0x033d9d37Baf83dBc71935239b6fA22a6905dbaa0",
+    "CSP_CONTROLLER_ADDRESS": "0xD52EFbBaA1b02BA65A7f0A1604A5dFb4C4dB1572",
+    "CSP_MARGIN_POOL_ADDRESS": "0xeEab53b8022C32349A80C8d905492EBa6b2deaE9",
+    "CSP_OTOKEN_FACTORY_ADDRESS": "0x193ED89eB64d0179b4dB08E87E541b7b3c30002A",
+    "CSP_ORACLE_ADDRESS": "0xF95CC4aED4a0bD68e0F1BE7c779BC281189F8187",
+    "CSP_WHITELIST_ADDRESS": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
+    "CSP_BATCH_SETTLER_ADDRESS": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
+    "CSP_VAULT_ADDRESS": "0xcf2c5b2e065bB7ADD2a29ed4d3A61910e6a59645",
+    "CSP_OPTION_SELECTOR_ADDRESS": "0x5F43F229CDb6cD12929207f521B733c250E0Ab21"
+  },
+  "legacyV1": {
+    "status": "untouched and operational",
+    "batchSettler": "0x766bD3aF1D102f7EbcB65a7B7bC12478C2DbA918",
+    "note": "The CSP stack is isolated and does not modify or depend on the deployed V1 AddressBook."
+  },
+  "scope": "isolated smoke testing only; mock oracle, mock router and EOA roles are not production configuration"
+}
