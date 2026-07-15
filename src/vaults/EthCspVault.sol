@@ -16,7 +16,6 @@ import "./interfaces/IEthCspStrategyAdapter.sol";
 import "./modules/EthCspAssignmentLedger.sol";
 import "./modules/EthCspDepositQueue.sol";
 import "./modules/EthCspEpochAccounting.sol";
-import "./modules/EthCspSettlementModule.sol";
 import "./modules/EthCspVaultTypes.sol";
 import "./modules/EthCspWithdrawalQueue.sol";
 
@@ -44,7 +43,6 @@ contract EthCspVault is ReentrancyGuard {
     AddressBook public immutable addressBook;
     IERC20 public immutable usdc;
     IERC20 public immutable underlying;
-    address public immutable ethUnderlying;
 
     address public owner;
     address public curator;
@@ -92,7 +90,12 @@ contract EthCspVault is ReentrancyGuard {
     mapping(address => uint256) public activeAdapterCollateral;
     mapping(uint256 => address) public batchStrategyAdapter;
 
+    uint256 public preparedSettlementBatchId;
+    uint256 private _preparedSettlementCollateralReturned;
+    mapping(uint256 => uint256) private _batchDefaultEligibleAt;
+
     uint256 private constant MAX_PERFORMANCE_FEE_BPS = 2000;
+    uint256 private constant MIN_SETTLEMENT_DEFAULT_DELAY = 1 hours;
     uint256 private constant MAX_SETTLEMENT_DEFAULT_DELAY = 30 days;
     uint256 public constant MIN_DEPOSIT_ASSETS = 1e6;
     uint256 public constant MAX_UNDERLYING_DUST_THRESHOLD = 1e14;
@@ -155,7 +158,6 @@ contract EthCspVault is ReentrancyGuard {
     );
     event ExpiredSharesBurned(address indexed user, uint256 indexed expiredGeneration, uint256 shares);
     event UnderlyingDustThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
-    event UnaccountedUsdcSwept(address indexed receiver, uint256 amount);
 
     error InvalidAddress();
     error InvalidAmount();
@@ -213,7 +215,6 @@ contract EthCspVault is ReentrancyGuard {
         addressBook = AddressBook(_addressBook);
         usdc = IERC20(_usdc);
         underlying = IERC20(_ethUnderlying);
-        ethUnderlying = _ethUnderlying;
         owner = msg.sender;
         curator = msg.sender;
         allocator = _allocator;
@@ -487,6 +488,7 @@ contract EthCspVault is ReentrancyGuard {
             collateralReturned: 0,
             settled: false
         });
+        _batchDefaultEligibleAt[batchId] = OToken(quote.oToken).expiry() + settlementDefaultDelay;
         BatchSettler(addressBook.batchSettler()).reservePhysicalDelivery(protocolVaultId);
 
         activeBatches++;
@@ -511,11 +513,10 @@ contract EthCspVault is ReentrancyGuard {
         emit CspBatchOpened(batchId, currentEpoch, quote.oToken, protocolVaultId, amount, collateral, premiumEarned);
     }
 
-    /// @notice Settles the protocol vault and finalizes vault accounting from observed balance deltas.
-    /// @dev USDC collateral returned is derived from the Controller settlement performed here. Assigned
-    ///      WETH is pulled from the batch's recorded MM during this call, so unsolicited WETH already
-    ///      sitting in the vault cannot be promoted into assignment accounting.
-    function settleCspBatch(uint256 batchId, uint256 collateralReturned, uint256 underlyingReceived)
+    /// @notice Settles the writer vault and releases an ITM position for BatchSettler's physical-delivery bot.
+    /// @dev OTM positions finalize immediately. ITM positions are finalized only after
+    ///      operatorPhysicalRedeemVault clears the attributed oTokens and delivers WETH.
+    function prepareCspBatchSettlement(uint256 batchId, uint256 collateralReturned)
         external
         onlyAllocator
         nonReentrant
@@ -523,12 +524,114 @@ contract EthCspVault is ReentrancyGuard {
         EthCspVaultTypes.CspBatch storage batch = batches[batchId];
         if (batch.protocolVaultId == 0) revert InvalidAmount();
         if (batch.settled) revert BatchAlreadySettled();
-        address physicalDeliveryCounterparty =
-            BatchSettler(addressBook.batchSettler()).vaultMM(address(this), batch.protocolVaultId);
-        if (physicalDeliveryCounterparty == address(0)) revert InvalidAddress();
-        EthCspSettlementModule.SettlementResult memory result = EthCspSettlementModule.settle(
-            batch, addressBook, usdc, underlying, physicalDeliveryCounterparty, collateralReturned, underlyingReceived
-        );
+        if (preparedSettlementBatchId != 0) revert OpenBatches();
+        if (collateralReturned > batch.collateral) revert CollateralAccountingMismatch();
+
+        BatchSettler settler = BatchSettler(addressBook.batchSettler());
+        address mm = settler.vaultMM(address(this), batch.protocolVaultId);
+        if (mm == address(0)) revert InvalidAddress();
+
+        uint256 usdcBefore = usdc.balanceOf(address(this));
+        Controller(addressBook.controller()).settleVault(address(this), batch.protocolVaultId);
+        uint256 observedCollateralReturned = usdc.balanceOf(address(this)) - usdcBefore;
+        if (observedCollateralReturned != collateralReturned) revert CollateralAccountingMismatch();
+
+        uint256 expectedUnderlying = collateralReturned == batch.collateral ? 0 : batch.amount * 1e10;
+        if (expectedUnderlying == 0) {
+            uint256 payout = settler.settleReservedPhysicalDelivery(batch.protocolVaultId, mm, 0);
+            if (payout != 0) revert CollateralAccountingMismatch();
+            _finalizeCspBatch(batchId, collateralReturned, 0);
+            return;
+        }
+
+        settler.releasePhysicalDelivery(batch.protocolVaultId);
+        preparedSettlementBatchId = batchId;
+        _preparedSettlementCollateralReturned = collateralReturned;
+    }
+
+    /// @notice Finalizes an ITM batch after the existing BatchSettler operator delivers WETH.
+    function finalizeCspBatchSettlement(uint256 batchId) external onlyAllocator nonReentrant {
+        if (preparedSettlementBatchId != batchId) revert InvalidAmount();
+
+        EthCspVaultTypes.CspBatch storage batch = batches[batchId];
+        if (batch.protocolVaultId == 0) revert InvalidAmount();
+        if (batch.settled) revert BatchAlreadySettled();
+
+        BatchSettler settler = BatchSettler(addressBook.batchSettler());
+        if (settler.physicalDeliveryReservedVault(address(this), batch.protocolVaultId)) {
+            revert CollateralAccountingMismatch();
+        }
+        if (settler.vaultOTokenBalance(address(this), batch.protocolVaultId) != 0) {
+            revert CollateralAccountingMismatch();
+        }
+
+        uint256 collateralReturned = _preparedSettlementCollateralReturned;
+        uint256 underlyingReceived = collateralReturned == batch.collateral ? 0 : batch.amount * 1e10;
+        if (underlying.balanceOf(address(this)) < accountedUnderlyingAssets + underlyingReceived) {
+            revert CollateralAccountingMismatch();
+        }
+
+        _clearPreparedSettlement();
+        _finalizeCspBatch(batchId, collateralReturned, underlyingReceived);
+    }
+
+    /// @notice Cash fallback when physical delivery was not completed before the configured timeout.
+    /// @dev Reserved oTokens are redeemed back to this vault, so the batch closes without MM WETH
+    ///      or a protocol-wide pause. If physical delivery already occurred, finalize must be used.
+    function settleDefaultedCspBatch(uint256 batchId) external onlyAllocator nonReentrant {
+        EthCspVaultTypes.CspBatch storage batch = batches[batchId];
+        if (batch.protocolVaultId == 0) revert InvalidAmount();
+        if (batch.settled) revert BatchAlreadySettled();
+
+        bool wasPrepared = preparedSettlementBatchId == batchId;
+        if (preparedSettlementBatchId != 0 && !wasPrepared) revert OpenBatches();
+
+        Controller controller = Controller(addressBook.controller());
+        if (controller.systemFullyPaused()) {
+            if (wasPrepared) revert CollateralAccountingMismatch();
+            uint256 beforeEmergency = usdc.balanceOf(address(this));
+            controller.emergencyWithdrawVault(batch.protocolVaultId);
+            uint256 emergencyCollateral = usdc.balanceOf(address(this)) - beforeEmergency;
+            if (emergencyCollateral != batch.collateral) revert CollateralAccountingMismatch();
+            _finalizeCspBatch(batchId, emergencyCollateral, 0);
+            return;
+        }
+
+        if (block.timestamp < _batchDefaultEligibleAt[batchId]) revert SettlementDefaultNotReady();
+
+        uint256 collateralReturned;
+        if (controller.vaultSettled(address(this), batch.protocolVaultId)) {
+            if (!wasPrepared) revert CollateralAccountingMismatch();
+            collateralReturned = _preparedSettlementCollateralReturned;
+        } else {
+            uint256 usdcBeforeSettlement = usdc.balanceOf(address(this));
+            controller.settleVault(address(this), batch.protocolVaultId);
+            collateralReturned = usdc.balanceOf(address(this)) - usdcBeforeSettlement;
+        }
+        if (collateralReturned > batch.collateral) revert CollateralAccountingMismatch();
+
+        BatchSettler settler = BatchSettler(addressBook.batchSettler());
+        if (!settler.physicalDeliveryReservedVault(address(this), batch.protocolVaultId)) {
+            settler.reservePhysicalDelivery(batch.protocolVaultId);
+        }
+
+        uint256 expectedPayout = batch.collateral - collateralReturned;
+        uint256 usdcBeforePayout = usdc.balanceOf(address(this));
+        uint256 payout = settler.settleReservedPhysicalDelivery(batch.protocolVaultId, address(this), expectedPayout);
+        if (payout != expectedPayout || usdc.balanceOf(address(this)) - usdcBeforePayout != expectedPayout) {
+            revert CollateralAccountingMismatch();
+        }
+        collateralReturned += payout;
+        if (collateralReturned != batch.collateral) revert CollateralAccountingMismatch();
+
+        if (wasPrepared) _clearPreparedSettlement();
+        _finalizeCspBatch(batchId, collateralReturned, 0);
+    }
+
+    function _finalizeCspBatch(uint256 batchId, uint256 collateralReturned, uint256 underlyingReceived) internal {
+        EthCspVaultTypes.CspBatch storage batch = batches[batchId];
+        batch.settled = true;
+        batch.collateralReturned = collateralReturned;
 
         address adapter = batchStrategyAdapter[batchId];
 
@@ -541,7 +644,7 @@ contract EthCspVault is ReentrancyGuard {
             activeAdapterCollateral[adapter] -= batch.collateral;
         }
 
-        uint256 assignmentShortfall = result.assignmentShortfall;
+        uint256 assignmentShortfall = batch.collateral - collateralReturned;
 
         EthCspVaultTypes.Epoch storage epoch = epochs[batch.epochId];
         epoch.returnedCollateral += collateralReturned;
@@ -553,65 +656,9 @@ contract EthCspVault is ReentrancyGuard {
         );
     }
 
-    function settleDefaultedCspBatch(uint256 batchId, uint256 collateralReturned) external onlyAllocator nonReentrant {
-        EthCspVaultTypes.CspBatch storage batch = batches[batchId];
-        if (batch.protocolVaultId == 0) revert InvalidAmount();
-        if (batch.settled) revert BatchAlreadySettled();
-        if (collateralReturned > batch.collateral) revert CollateralAccountingMismatch();
-
-        uint256 expiry = OToken(batch.oToken).expiry();
-        if (block.timestamp < expiry + settlementDefaultDelay) revert SettlementDefaultNotReady();
-
-        uint256 usdcBefore = usdc.balanceOf(address(this));
-        Controller(addressBook.controller()).settleVault(address(this), batch.protocolVaultId);
-        uint256 observedCollateralReturned = usdc.balanceOf(address(this)) - usdcBefore;
-        if (observedCollateralReturned != collateralReturned) revert CollateralAccountingMismatch();
-
-        BatchSettler(addressBook.batchSettler()).releasePhysicalDelivery(batch.protocolVaultId);
-
-        address adapter = batchStrategyAdapter[batchId];
-        batch.settled = true;
-        batch.collateralReturned = collateralReturned;
-        batchUnderlyingReceived[batchId] = 0;
-        accountedIdleAssets += collateralReturned;
-        activeBatches--;
-        activeCollateral -= batch.collateral;
-        if (adapter != address(0)) {
-            activeAdapterCollateral[adapter] -= batch.collateral;
-        }
-
-        uint256 assignmentShortfall = batch.collateral - collateralReturned;
-        EthCspVaultTypes.Epoch storage epoch = epochs[batch.epochId];
-        epoch.returnedCollateral += collateralReturned;
-        epoch.assignmentShortfall += assignmentShortfall;
-
-        emit CspBatchSettled(batchId, batch.epochId, batch.protocolVaultId, collateralReturned, 0, assignmentShortfall);
-    }
-
-    function emergencyWithdrawBatch(uint256 batchId) external onlyAllocator nonReentrant {
-        EthCspVaultTypes.CspBatch storage batch = batches[batchId];
-        if (batch.protocolVaultId == 0) revert InvalidAmount();
-        if (batch.settled) revert BatchAlreadySettled();
-
-        uint256 balanceBefore = usdc.balanceOf(address(this));
-        Controller(addressBook.controller()).emergencyWithdrawVault(batch.protocolVaultId);
-        uint256 collateralReturned = usdc.balanceOf(address(this)) - balanceBefore;
-        if (collateralReturned == 0 || collateralReturned > batch.collateral) revert CollateralAccountingMismatch();
-
-        address adapter = batchStrategyAdapter[batchId];
-        batch.settled = true;
-        batch.collateralReturned = collateralReturned;
-        accountedIdleAssets += collateralReturned;
-        activeBatches--;
-        activeCollateral -= batch.collateral;
-        if (adapter != address(0)) {
-            activeAdapterCollateral[adapter] -= batch.collateral;
-        }
-
-        EthCspVaultTypes.Epoch storage epoch = epochs[batch.epochId];
-        epoch.returnedCollateral += collateralReturned;
-
-        emit CspBatchSettled(batchId, batch.epochId, batch.protocolVaultId, collateralReturned, 0, 0);
+    function _clearPreparedSettlement() internal {
+        preparedSettlementBatchId = 0;
+        _preparedSettlementCollateralReturned = 0;
     }
 
     function closeEpoch() external onlyAllocator nonReentrant returns (uint256 nextEpoch) {
@@ -712,7 +759,9 @@ contract EthCspVault is ReentrancyGuard {
     }
 
     function setSettlementDefaultDelay(uint256 newDelay) external onlyCurator {
-        if (newDelay > MAX_SETTLEMENT_DEFAULT_DELAY) revert StrategyConstraint();
+        if (newDelay < MIN_SETTLEMENT_DEFAULT_DELAY || newDelay > MAX_SETTLEMENT_DEFAULT_DELAY) {
+            revert StrategyConstraint();
+        }
         emit SettlementDefaultDelayUpdated(settlementDefaultDelay, newDelay);
         settlementDefaultDelay = newDelay;
     }
@@ -721,15 +770,6 @@ contract EthCspVault is ReentrancyGuard {
         if (newThreshold > MAX_UNDERLYING_DUST_THRESHOLD) revert StrategyConstraint();
         emit UnderlyingDustThresholdUpdated(underlyingDustThreshold, newThreshold);
         underlyingDustThreshold = newThreshold;
-    }
-
-    function sweepUnaccountedUsdc(address receiver) external onlyOwner nonReentrant returns (uint256 amount) {
-        if (receiver == address(0)) revert InvalidAddress();
-        uint256 balance = usdc.balanceOf(address(this));
-        if (balance <= accountedIdleAssets) revert InvalidAmount();
-        amount = balance - accountedIdleAssets;
-        usdc.safeTransfer(receiver, amount);
-        emit UnaccountedUsdcSwept(receiver, amount);
     }
 
     function sweepAssignedUnderlyingDust() external onlyAllocator nonReentrant returns (uint256 amount) {
@@ -940,7 +980,12 @@ contract EthCspVault is ReentrancyGuard {
         if (selector != address(0)) {
             IEthCspOptionSelector(selector)
                 .validateOption(
-                    oTokenAddress, ethUnderlying, address(usdc), collateral, activeCollateral, totalManagedAssets()
+                    oTokenAddress,
+                    address(underlying),
+                    address(usdc),
+                    collateral,
+                    activeCollateral,
+                    totalManagedAssets()
                 );
             return;
         }
@@ -1013,7 +1058,7 @@ contract EthCspVault is ReentrancyGuard {
         if (oTokenAddress == address(0)) revert InvalidOToken();
         OToken oToken = OToken(oTokenAddress);
         if (
-            !oToken.isPut() || oToken.underlying() != ethUnderlying || oToken.strikeAsset() != address(usdc)
+            !oToken.isPut() || oToken.underlying() != address(underlying) || oToken.strikeAsset() != address(usdc)
                 || oToken.collateralAsset() != address(usdc)
         ) {
             revert InvalidOToken();
