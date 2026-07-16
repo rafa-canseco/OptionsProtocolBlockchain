@@ -11,11 +11,9 @@ contract NavReportHarness is EIP712 {
     bytes32 private constant NAV_REPORT_TYPEHASH =
         keccak256("NavReport(address fund,uint64 reporterSetVersion,bytes32 reportsHash)");
 
-    error DuplicateReporter(address reporter);
     error InvalidChain(uint256 chainId);
     error InvalidFund(address fund);
     error InvalidReportWindow();
-    error InvalidReporter(address reporter);
     error InvalidSignatureCount();
     error LiabilityExceedsAssets(bytes32 componentId);
 
@@ -33,6 +31,7 @@ contract NavReportHarness is EIP712 {
     uint64 public reporterSetVersion;
     uint16 public reporterThreshold;
     bytes32[] public activeComponents;
+    address[] public activeReporters;
     mapping(bytes32 componentId => ComponentConfig config) public componentConfig;
     mapping(address reporter => bool active) public isReporter;
 
@@ -52,8 +51,22 @@ contract NavReportHarness is EIP712 {
     }
 
     function configureReporters(address[] calldata reporters, uint16 threshold, uint64 version) external {
+        if (version <= reporterSetVersion) revert IFundAccounting.InvalidReporterSet(version);
+        if (threshold == 0 || threshold > reporters.length) {
+            revert IFundAccounting.InvalidReporterThreshold(threshold, reporters.length);
+        }
+        for (uint256 i; i < activeReporters.length; ++i) {
+            isReporter[activeReporters[i]] = false;
+        }
+        delete activeReporters;
         for (uint256 i; i < reporters.length; ++i) {
-            isReporter[reporters[i]] = true;
+            address reporter = reporters[i];
+            if (reporter == address(0)) revert IFundAccounting.InvalidReporter(reporter);
+            for (uint256 j; j < i; ++j) {
+                if (reporters[j] == reporter) revert IFundAccounting.DuplicateReporter(reporter);
+            }
+            isReporter[reporter] = true;
+            activeReporters.push(reporter);
         }
         reporterThreshold = threshold;
         reporterSetVersion = version;
@@ -120,6 +133,7 @@ contract NavReportHarness is EIP712 {
         nav.reporterSetVersion = reporterSetVersion;
         nav.positionsHash = aggregatePositionsHash;
         nav.reportHash = acceptedReportHash;
+        nav.signaturesHash = keccak256(abi.encode(reporters, signatures));
     }
 
     function isActive(FundTypes.NavCommit calldata nav) external view returns (bool) {
@@ -132,9 +146,11 @@ contract NavReportHarness is EIP712 {
     {
         for (uint256 i; i < reporters.length; ++i) {
             address recovered = ECDSA.recover(digest, signatures[i]);
-            if (recovered != reporters[i] || !isReporter[recovered]) revert InvalidReporter(recovered);
+            if (recovered != reporters[i] || !isReporter[recovered]) {
+                revert IFundAccounting.InvalidReporter(recovered);
+            }
             for (uint256 j; j < i; ++j) {
-                if (reporters[j] == recovered) revert DuplicateReporter(recovered);
+                if (reporters[j] == recovered) revert IFundAccounting.DuplicateReporter(recovered);
             }
         }
     }
@@ -210,6 +226,7 @@ contract NavReportSpecTest is Test {
         assertEq(nav.liabilities, 100e6);
         assertEq(nav.netAssets, 1_000e6);
         assertEq(nav.liquidAccountingAssets, 600e6);
+        assertEq(nav.signaturesHash, keccak256(abi.encode(reporters, signatures)));
         assertFalse(harness.isActive(nav));
         vm.roll(101);
         assertTrue(harness.isActive(nav));
@@ -297,7 +314,7 @@ contract NavReportSpecTest is Test {
         FundTypes.ComponentReport[] memory reports = _validReports();
         (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, attackerKey);
 
-        vm.expectRevert(abi.encodeWithSelector(NavReportHarness.InvalidReporter.selector, vm.addr(attackerKey)));
+        vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidReporter.selector, vm.addr(attackerKey)));
         harness.submitNav(reports, reporters, signatures);
     }
 
@@ -305,8 +322,48 @@ contract NavReportSpecTest is Test {
         FundTypes.ComponentReport[] memory reports = _validReports();
         (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, reporterOneKey);
 
-        vm.expectRevert(abi.encodeWithSelector(NavReportHarness.DuplicateReporter.selector, reporterOne));
+        vm.expectRevert(abi.encodeWithSelector(IFundAccounting.DuplicateReporter.selector, reporterOne));
         harness.submitNav(reports, reporters, signatures);
+    }
+
+    function test_rejectsZeroReporterThreshold() public {
+        address[] memory reporters = new address[](1);
+        reporters[0] = reporterOne;
+
+        vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidReporterThreshold.selector, 0, 1));
+        harness.configureReporters(reporters, 0, 2);
+    }
+
+    function test_rejectsReporterThresholdAboveSetSize() public {
+        address[] memory reporters = new address[](1);
+        reporters[0] = reporterOne;
+
+        vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidReporterThreshold.selector, 2, 1));
+        harness.configureReporters(reporters, 2, 2);
+    }
+
+    function test_rejectsDuplicateReporterInNewSet() public {
+        address[] memory reporters = new address[](2);
+        reporters[0] = reporterOne;
+        reporters[1] = reporterOne;
+
+        vm.expectRevert(abi.encodeWithSelector(IFundAccounting.DuplicateReporter.selector, reporterOne));
+        harness.configureReporters(reporters, 1, 2);
+    }
+
+    function test_rejectsZeroReporterInNewSet() public {
+        address[] memory reporters = new address[](1);
+
+        vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidReporter.selector, address(0)));
+        harness.configureReporters(reporters, 1, 2);
+    }
+
+    function test_rejectsNonMonotonicReporterSetVersion() public {
+        address[] memory reporters = new address[](1);
+        reporters[0] = reporterOne;
+
+        vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidReporterSet.selector, 1));
+        harness.configureReporters(reporters, 1, 1);
     }
 
     function _validReports() private view returns (FundTypes.ComponentReport[] memory reports) {

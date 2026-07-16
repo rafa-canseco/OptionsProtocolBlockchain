@@ -57,7 +57,7 @@ contract FundStateHandler is Test {
         uint256 balance = vault.balanceOf(from);
         if (balance == 0) return;
         vm.prank(from);
-        vault.transfer(to, bound(sharesSeed, 1, balance));
+        assertTrue(vault.transfer(to, bound(sharesSeed, 1, balance)));
     }
 
     function donate(uint96 assets) external {

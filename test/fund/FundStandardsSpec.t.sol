@@ -338,7 +338,7 @@ contract FundStandardsSpecTest is Test {
 
     function test_partialProcessingIsProRataAndClaimIsPullBased() public {
         vm.prank(alice);
-        vault.transfer(bob, 200e6);
+        assertTrue(vault.transfer(bob, 200e6));
         vm.prank(alice);
         vault.requestRedeem(400e6, alice, alice);
         vm.prank(bob);

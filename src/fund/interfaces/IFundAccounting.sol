@@ -5,9 +5,12 @@ import {FundTypes} from "../FundTypes.sol";
 
 interface IFundAccounting {
     error DuplicateComponent(bytes32 componentId);
+    error DuplicateReporter(address reporter);
     error IncompleteComponentSet();
     error InvalidPositionState(bytes32 componentId);
+    error InvalidReporter(address reporter);
     error InvalidReporterSet(uint64 version);
+    error InvalidReporterThreshold(uint16 threshold, uint256 reporterCount);
     error InvalidSnapshotBlock(uint64 snapshotBlock);
     error StaleComponent(bytes32 componentId);
 

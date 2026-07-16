@@ -116,6 +116,8 @@ The accounting implementation must reject:
 - Mixed snapshot/window values in one aggregate.
 - Reporter-set version mismatch.
 - Invalid or duplicate reporters.
+- Invalid thresholds, zero/duplicate reporters, or non-monotonic reporter-set
+  versions.
 - Component nonce or position hash mismatch.
 - Component liabilities greater than component gross assets.
 
@@ -123,6 +125,8 @@ Reporter signatures use EIP-712. The domain name is `b1nary Fund NAV`, version
 `1`, current chain ID, and the `FundAccounting` proxy as verifying contract. The
 signed struct commits to the fund, reporter-set version, and hash of every
 component report. Two funds or two accounting proxies cannot replay reports.
+The accepted commit also stores a hash of the quorum addresses and signatures
+for onchain auditability without duplicating variable-length signature data.
 
 An accepted `NavCommit` is executable only from `validAfterBlock` through
 `validUntilBlock`. Informational NAV may remain readable after expiry, but
@@ -283,11 +287,12 @@ npm ci --ignore-scripts
 npm run deps:check
 forge fmt --check
 forge build --offline
-forge test --offline --match-path 'test/fund/*'
-forge test --offline --match-path test/fund/StorageLayoutSpec.t.sol --force
+npm_config_offline=true forge test --offline --match-path 'test/fund/*' --force
 npm run storage:check
 ```
 
 The stateful invariant suite checks supply, pending escrow, claims, reserves,
 accounted NAV, and unsynchronized donations across randomized operation
-sequences.
+sequences. `--force` is mandatory for any test run containing
+`StorageLayoutSpec`: OpenZeppelin intentionally rejects partial/incremental
+Foundry build-info.

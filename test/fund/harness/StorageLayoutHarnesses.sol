@@ -112,6 +112,7 @@ abstract contract FundVaultStorageV2Definition {
         uint256 reservedDistributionAssets;
         bytes32 positionsHash;
         bytes32 reportHash;
+        bytes32 signaturesHash;
         uint64 snapshotBlock;
         uint64 navValidAfterBlock;
         uint64 navValidUntilBlock;
@@ -175,6 +176,7 @@ abstract contract FundVaultStorageBadTypeDefinition {
         uint256 reservedDistributionAssets;
         bytes32 positionsHash;
         bytes32 reportHash;
+        bytes32 signaturesHash;
         uint64 snapshotBlock;
         uint64 navValidAfterBlock;
         uint64 navValidUntilBlock;

@@ -46,10 +46,12 @@ forge fmt
 ### Fund Core Specifications
 
 ```shell
-forge test --offline --match-path 'test/fund/*'
-forge test --offline --match-path test/fund/StorageLayoutSpec.t.sol --force
+npm_config_offline=true forge test --offline --match-path 'test/fund/*' --force
 npm run storage:check
 ```
+
+The `--force` flag is required because OpenZeppelin upgrade validation rejects
+incremental Foundry build-info files.
 
 ### Gas Snapshots
 
