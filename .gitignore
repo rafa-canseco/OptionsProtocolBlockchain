@@ -4,6 +4,7 @@ out/
 
 # Dependencies
 lib/
+node_modules/
 
 # Environment / secrets
 .env
