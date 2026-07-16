@@ -121,6 +121,8 @@ abstract contract FundVaultStorageV2Definition {
         uint64 compatibilityVersion;
         uint256 executionLockNonce;
         address executionLockOwner;
+        uint8 accountingAssetDecimals;
+        uint8 shareDecimalsOffset;
         bool depositsPaused;
         bool redemptionsPaused;
         mapping(address asset => uint256 amount) unaccountedBalances;
@@ -185,6 +187,8 @@ abstract contract FundVaultStorageBadTypeDefinition {
         uint64 compatibilityVersion;
         uint256 executionLockNonce;
         address executionLockOwner;
+        uint8 accountingAssetDecimals;
+        uint8 shareDecimalsOffset;
         bool depositsPaused;
         bool redemptionsPaused;
         mapping(address asset => uint256 amount) unaccountedBalances;

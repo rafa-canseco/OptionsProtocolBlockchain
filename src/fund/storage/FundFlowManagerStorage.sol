@@ -9,13 +9,16 @@ abstract contract FundFlowManagerStorage {
         address fund;
         address claimEscrow;
         uint64 compatibilityVersion;
-        uint64 nextBatchId;
+        uint64 nextProcessBatchId;
+        uint64 openBatchId;
         uint256 totalPendingShares;
         uint256 totalClaimableShares;
         uint256 totalReservedAssets;
         mapping(address controller => mapping(address operator => bool approved)) operators;
         mapping(address controller => FundTypes.RedemptionState state) redemptions;
         mapping(uint64 batchId => FundTypes.RedemptionBatch batch) batches;
+        mapping(uint64 batchId => address[] controllers) batchControllers;
+        mapping(uint64 batchId => mapping(address controller => FundTypes.RedemptionAccount account)) batchAccounts;
     }
 
     bytes32 internal constant FUND_FLOW_MANAGER_STORAGE_LOCATION =

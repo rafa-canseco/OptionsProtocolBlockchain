@@ -11,25 +11,28 @@ contract FundStateHandler is Test {
     AsyncRedeemVaultHarness public immutable vault;
     address public immutable alice;
     address public immutable bob;
+    address public immutable accounting;
 
-    constructor(MockERC20 asset_, AsyncRedeemVaultHarness vault_, address alice_, address bob_) {
+    constructor(MockERC20 asset_, AsyncRedeemVaultHarness vault_, address alice_, address bob_, address accounting_) {
         asset = asset_;
         vault = vault_;
         alice = alice_;
         bob = bob_;
+        accounting = accounting_;
     }
 
     function request(uint256 actorSeed, uint256 sharesSeed) external {
         address actor = actorSeed % 2 == 0 ? alice : bob;
         uint256 balance = vault.balanceOf(actor);
-        if (balance == 0) return;
+        if (balance == 0 || vault.pendingRedeemRequest(0, actor) != 0) return;
         uint256 shares = bound(sharesSeed, 1, balance);
         vm.prank(actor);
         vault.requestRedeem(shares, actor, actor);
     }
 
     function process(uint256 sharesSeed) external {
-        uint256 pending = vault.totalPendingShares();
+        if (vault.unaccountedBalance() != 0) return;
+        uint256 pending = vault.batchPendingShares(vault.nextProcessBatchId());
         if (pending == 0) return;
         vault.processBatch(bound(sharesSeed, 1, pending));
     }
@@ -46,7 +49,7 @@ contract FundStateHandler is Test {
     function cancel(uint256 actorSeed, uint256 sharesSeed) external {
         address actor = actorSeed % 2 == 0 ? alice : bob;
         uint256 pending = vault.pendingRedeemRequest(0, actor);
-        if (pending == 0 || vault.claimableRedeemRequest(0, actor) != 0) return;
+        if (pending == 0 || !vault.isCancellationAvailable(actor)) return;
         vm.prank(actor);
         vault.cancelPending(bound(sharesSeed, 1, pending));
     }
@@ -65,7 +68,9 @@ contract FundStateHandler is Test {
     }
 
     function syncDonation() external {
-        vault.syncDonation();
+        uint64 nextNonce = vault.lastDonationReportNonce() + 1;
+        vm.prank(accounting);
+        vault.syncDonation(nextNonce);
     }
 }
 
@@ -91,7 +96,7 @@ contract FundStateInvariantTest is StdInvariant, Test {
         vault.deposit(1_000e6, bob);
         vm.stopPrank();
 
-        handler = new FundStateHandler(asset, vault, alice, bob);
+        handler = new FundStateHandler(asset, vault, alice, bob, address(this));
         targetContract(address(handler));
     }
 
@@ -112,5 +117,13 @@ contract FundStateInvariantTest is StdInvariant, Test {
     function invariant_navExcludesClaimsAndUnaccountedDonations() public view {
         assertEq(vault.totalAssets() + vault.totalReservedAssets(), vault.accountedGrossAssets());
         assertEq(asset.balanceOf(address(vault)), vault.accountedGrossAssets() + vault.unaccountedBalance());
+    }
+
+    function test_handlerCanSynchronizeDonationWithFreshNonce() public {
+        asset.mint(address(vault), 1e6);
+        handler.syncDonation();
+
+        assertEq(vault.unaccountedBalance(), 0);
+        assertEq(vault.lastDonationReportNonce(), 1);
     }
 }

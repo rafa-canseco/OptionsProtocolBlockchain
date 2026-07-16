@@ -55,14 +55,23 @@ library FundTypes {
         uint48 lastManagementAccrual;
         uint48 lastCrystallization;
         uint256 highWaterMark;
+        uint256 distributionRemainder;
+        uint256 distributionRemainderSupply;
     }
 
     struct RedemptionState {
         uint256 pendingShares;
+        uint256 pendingMinAssetsOut;
         uint256 claimableShares;
         uint256 claimableAssets;
         uint64 latestBatchId;
         bool unwindCommitted;
+    }
+
+    struct RedemptionAccount {
+        uint256 pendingShares;
+        uint256 pendingMinAssetsOut;
+        uint16 indexPlusOne;
     }
 
     struct RedemptionBatch {
@@ -72,8 +81,18 @@ library FundTypes {
         uint256 marginalExitCost;
         uint256 processingNav;
         uint256 eligibleSupply;
+        uint256 roundPendingShares;
+        uint256 roundTargetShares;
+        uint256 roundCumulativeShares;
+        uint256 roundAllocatedShares;
+        uint256 roundAssetBudget;
+        uint256 roundAllocatedAssets;
         uint64 processingBlock;
+        uint16 processingCursor;
         RequestMode mode;
+        bool isSealed;
+        bool processing;
+        bool unwindCommitted;
     }
 
     struct StrategyConfig {

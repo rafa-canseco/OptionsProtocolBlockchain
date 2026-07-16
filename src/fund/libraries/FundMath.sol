@@ -8,6 +8,7 @@ library FundMath {
     error FeeExceedsNav();
     error InvalidBps(uint256 bps);
     error InvalidSupply();
+    error UnsupportedAssetDecimals(uint8 decimals);
     error ZeroNavWithExistingSupply();
 
     function managementFeeShares(uint256 preFeeNav, uint256 supply, uint256 annualRateWad, uint256 elapsed)
@@ -42,13 +43,35 @@ library FundMath {
         uint256 highWaterMark,
         uint256 distributionAssets,
         uint256 eligibleSupply,
-        uint256 shareScale
-    ) internal pure returns (uint256) {
-        if (distributionAssets == 0) return highWaterMark;
+        uint256 shareScale,
+        uint256 priorRemainder,
+        uint256 priorRemainderSupply
+    ) internal pure returns (uint256 adjustedHighWaterMark, uint256 newRemainder, uint256 newRemainderSupply) {
         if (eligibleSupply == 0) revert InvalidSupply();
+        if (priorRemainderSupply != eligibleSupply) priorRemainder = 0;
+        if (priorRemainder >= eligibleSupply) revert InvalidSupply();
+        if (distributionAssets == 0) return (highWaterMark, priorRemainder, eligibleSupply);
 
         uint256 distributionPerShare = Math.mulDiv(distributionAssets, shareScale, eligibleSupply);
-        return distributionPerShare >= highWaterMark ? 0 : highWaterMark - distributionPerShare;
+        uint256 currentRemainder = mulmod(distributionAssets, shareScale, eligibleSupply);
+        if (currentRemainder >= eligibleSupply - priorRemainder) {
+            distributionPerShare += 1;
+            newRemainder = currentRemainder - (eligibleSupply - priorRemainder);
+        } else {
+            newRemainder = currentRemainder + priorRemainder;
+        }
+
+        if (distributionPerShare >= highWaterMark) return (0, 0, eligibleSupply);
+        return (highWaterMark - distributionPerShare, newRemainder, eligibleSupply);
+    }
+
+    function shareDecimalsOffset(uint8 assetDecimals) internal pure returns (uint8) {
+        if (assetDecimals > FundConstants.SHARE_DECIMALS) revert UnsupportedAssetDecimals(assetDecimals);
+        return FundConstants.SHARE_DECIMALS - assetDecimals;
+    }
+
+    function initialVirtualShares(uint8 assetDecimals) internal pure returns (uint256) {
+        return 10 ** shareDecimalsOffset(assetDecimals);
     }
 
     function redemptionPayout(

@@ -9,6 +9,7 @@ interface IFundAccounting {
     error IncompleteComponentSet();
     error InvalidPositionState(bytes32 componentId);
     error InvalidReporter(address reporter);
+    error InvalidReportNonce(uint64 expected, uint64 actual);
     error InvalidReporterSet(uint64 version);
     error InvalidReporterThreshold(uint16 threshold, uint256 reporterCount);
     error InvalidSnapshotBlock(uint64 snapshotBlock);
@@ -19,6 +20,7 @@ interface IFundAccounting {
     function reporterSetVersion() external view returns (uint64);
     function componentNonce(bytes32 componentId) external view returns (uint64);
     function submitNav(
+        uint64 reportNonce,
         FundTypes.ComponentReport[] calldata reports,
         address[] calldata reporters,
         bytes[] calldata signatures

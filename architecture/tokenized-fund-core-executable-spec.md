@@ -52,6 +52,22 @@ Required interface IDs:
 `maxWithdraw` expose only claimable shares/assets. ERC-4626 entry previews
 remain synchronous.
 
+Fund shares always use 18 decimals. Accounting assets with more than 18
+decimals are rejected at initialization. For an accounting asset with `d`
+decimals:
+
+```text
+decimalsOffset = 18 - d
+shareScale = 1e18
+virtualAssets = 1
+virtualShares = 10 ** decimalsOffset
+```
+
+These values match OpenZeppelin ERC-4626 conversion math. The vault exposes
+`depositWithMinShares(assets, receiver, minSharesOut)` as the protected entry
+used by the product. The standard two-argument `deposit` remains available for
+ERC-4626 compatibility.
+
 Canonical interfaces are under `src/fund/interfaces/`. B1N-350 implements these
 interfaces without changing selectors.
 
@@ -60,6 +76,10 @@ interfaces without changing selectors.
 The standard request ID is always zero. ERC-7540 state is aggregated by
 controller. Operational unwind groups use an internal `uint64 batchId`; they are
 not exposed as ERC-7540 request IDs.
+
+For exact ERC-7540 conformance, `pendingRedeemRequest` and
+`claimableRedeemRequest` return zero for every nonzero request ID. They never
+revert because an ID is unsupported.
 
 ```text
 Pending
@@ -94,6 +114,45 @@ Cancellation is an extension, not part of ERC-7540. It is allowed only while
 the controller has no claimable portion and no unwind is committed. It returns
 escrowed shares without changing supply.
 
+`requestRedeemWithMinAssets` is the slippage-protected extension used by the
+product. Its `minAssetsOut` is stored with the controller's pending shares. On
+partial processing the minimum is allocated pro rata with ceiling rounding;
+processing starts only after every member's allocated output satisfies its
+persisted minimum. The standard `requestRedeem` records a minimum of zero.
+
+### Bounded operational batches
+
+There is no global or historical controller scan. An open batch accepts at most
+64 unique controllers. A complete cancellation removes its member slot with a
+bounded swap-and-pop, so request/cancel recycling cannot consume capacity.
+
+Processing has three explicit phases:
+
+1. `sealRedeemBatch` freezes membership, commits the unwind, disables
+   cancellation, and opens the next batch.
+2. `startRedeemBatch` records one processing NAV, eligible supply, target
+   shares, marginal exit cost, and validates every persisted minimum. It closes
+   primary entry and reserves the round's maximum
+   accounting-asset budget before any page executes.
+3. `processRedeemBatch` advances a persistent cursor over at most 16 controllers
+   per transaction.
+
+Allocation uses cumulative pro-rata differences:
+
+```text
+allocatedThroughI = floor(cumulativePendingThroughI * target / roundPending)
+controllerAllocation = allocatedThroughI - allocatedThroughPrevious
+```
+
+This assigns exactly the target shares across all pages without a last-user
+rounding subsidy. A partially processed batch may start another round only with
+a fresh NAV checkpoint. New requests cannot join a sealed batch, and one
+controller cannot hold pending shares in multiple operational batches. Sealed
+batches start only in monotonic `nextProcessBatchId` order. The
+primary market reopens only after the final page releases any rounding dust from
+the reserved round budget. When no pending shares remain, that final page also
+advances `nextProcessBatchId`.
+
 ## 4. NAV Reports
 
 NAV is never accepted as one opaque signed integer. Every active component
@@ -120,11 +179,15 @@ The accounting implementation must reject:
   versions.
 - Component nonce or position hash mismatch.
 - Component liabilities greater than component gross assets.
+- A report nonce other than `lastReportNonce + 1`.
 
 Reporter signatures use EIP-712. The domain name is `b1nary Fund NAV`, version
 `1`, current chain ID, and the `FundAccounting` proxy as verifying contract. The
-signed struct commits to the fund, reporter-set version, and hash of every
-component report. Two funds or two accounting proxies cannot replay reports.
+signed struct commits to the fund, reporter-set version, monotonic
+`reportNonce`, and hash of every component report. `submitNav` consumes the
+nonce in state and requires exactly `lastReportNonce + 1`. Two funds, two
+accounting proxies, or two report nonces cannot replay reports, and reports
+cannot be accepted out of order.
 The accepted commit also stores a hash of the quorum addresses and signatures
 for onchain auditability without duplicating variable-length signature data.
 
@@ -160,8 +223,20 @@ eligible. Burned claimable shares do not.
 ### Distribution adjustment
 
 ```text
-adjustedHwm = max(hwm - distributionAssets * shareScale / eligibleSupply, 0)
+numerator = distributionAssets * shareScale + priorRemainder
+distributionPerShare = floor(numerator / eligibleSupply)
+newRemainder = numerator % eligibleSupply
+adjustedHwm = max(hwm - distributionPerShare, 0)
 ```
+
+The remainder persists in fee state so repeated sub-unit distributions do not
+create permanent HWM drift. It is tagged with the eligible supply that defines
+its denominator. If supply changes before the next distribution, the old
+remainder is discarded rather than mixed across denominators; this can only
+undercharge the protocol by less than one accounting-asset base unit per share.
+Performance gain and fee assets round down; minted fee shares round up.
+Therefore fee rounding never overcharges shareholders and sub-unit fee dust
+remains fund NAV.
 
 ### Redemption and swing pricing
 
@@ -178,7 +253,11 @@ Only marginal unwind cost caused by the exiting batch is charged to that batch.
 If supply is nonzero and NAV is zero, deposits, fee minting, and NAV-priced
 processing stop. Virtual assets/shares protect initial deposits. Raw token
 donations enter `unaccountedBalances` and do not affect NAV until a fresh report
-authorizes synchronization.
+authorizes synchronization. While any raw accounting-asset surplus is
+unaccounted, `maxDeposit` and `maxMint` return zero and deposit, mint, allocation,
+distribution, and NAV-priced redemption processing revert. Fixed claims remain
+claimable. Only `FundAccounting.commitNav` may recognize the surplus atomically
+with the fresh NAV commit.
 
 ## 6. Strategy Boundary
 
@@ -267,11 +346,15 @@ decisions:
    pause modules from the pinned release.
 3. Keep ERC-7540 redemption state in `FundFlowManager`, while standard calls and
    events remain on `FundVault`.
+   Implement the bounded 64-controller batches and 16-controller processing
+   pages; do not add a global controller array.
 4. Keep NAV/report/fee state in `FundAccounting`.
 5. Keep adapter caps and position nonces in `StrategyManager`.
 6. Keep module proxy addresses fixed after initialization; topology changes use
    migration, not setters.
 7. Reuse the tests in `test/fund/` as the baseline conformance suite.
+8. Keep shares at 18 decimals and implement the exact offset/virtual values and
+   protected entry/redemption extensions specified above.
 
 B1N-350 does not integrate CSP. B1N-351 supplies the CSP adapter and valuator.
 The later deploy must authorize that adapter through the existing

@@ -7,6 +7,7 @@ import {AccessManaged} from "@openzeppelin/contracts/access/manager/AccessManage
 import {IAccessManaged} from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import {FundAccessPolicy} from "../../src/fund/libraries/FundAccessPolicy.sol";
 import {FundConstants} from "../../src/fund/FundConstants.sol";
+import {IFundFlowManager} from "../../src/fund/interfaces/IFundFlowManager.sol";
 import {IFundVault} from "../../src/fund/interfaces/IFundVault.sol";
 import {IStrategyManager} from "../../src/fund/interfaces/IStrategyManager.sol";
 
@@ -138,6 +139,16 @@ contract AccessPolicySpecTest is Test {
         assertEq(rules[1].selector, IFundVault.pauseDeposits.selector);
         assertEq(rules[3].selector, IFundVault.resumeDeposits.selector);
         assertTrue(rules[1].selector != rules[3].selector);
+    }
+
+    function test_processorRoleControlsEveryBoundedBatchPhase() public pure {
+        FundAccessPolicy.Rule[] memory rules = FundAccessPolicy.flowRules();
+        assertEq(rules[1].selector, IFundFlowManager.sealRedeemBatch.selector);
+        assertEq(rules[2].selector, IFundFlowManager.startRedeemBatch.selector);
+        assertEq(rules[3].selector, IFundFlowManager.processRedeemBatch.selector);
+        assertEq(rules[1].role, FundConstants.PROCESSOR_ROLE);
+        assertEq(rules[2].role, FundConstants.PROCESSOR_ROLE);
+        assertEq(rules[3].role, FundConstants.PROCESSOR_ROLE);
     }
 
     function _applyRules(FundAccessPolicy.Rule[] memory rules) private {

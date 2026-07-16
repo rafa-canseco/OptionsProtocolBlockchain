@@ -36,10 +36,12 @@ library FundAccessPolicy {
     }
 
     function flowRules() internal pure returns (Rule[] memory rules) {
-        rules = new Rule[](3);
+        rules = new Rule[](5);
         rules[0] = Rule(UPGRADE_TO_AND_CALL_SELECTOR, FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
-        rules[1] = Rule(IFundFlowManager.processRedeemBatch.selector, FundConstants.PROCESSOR_ROLE, 0);
-        rules[2] =
+        rules[1] = Rule(IFundFlowManager.sealRedeemBatch.selector, FundConstants.PROCESSOR_ROLE, 0);
+        rules[2] = Rule(IFundFlowManager.startRedeemBatch.selector, FundConstants.PROCESSOR_ROLE, 0);
+        rules[3] = Rule(IFundFlowManager.processRedeemBatch.selector, FundConstants.PROCESSOR_ROLE, 0);
+        rules[4] =
             Rule(IFundFlowManager.setExitPolicy.selector, FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
     }
 

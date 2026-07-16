@@ -9,7 +9,7 @@ import {IFundAccounting} from "../../src/fund/interfaces/IFundAccounting.sol";
 
 contract NavReportHarness is EIP712 {
     bytes32 private constant NAV_REPORT_TYPEHASH =
-        keccak256("NavReport(address fund,uint64 reporterSetVersion,bytes32 reportsHash)");
+        keccak256("NavReport(address fund,uint64 reporterSetVersion,uint64 reportNonce,bytes32 reportsHash)");
 
     error InvalidChain(uint256 chainId);
     error InvalidFund(address fund);
@@ -29,6 +29,7 @@ contract NavReportHarness is EIP712 {
     uint64 public immutable maxWindowLength;
 
     uint64 public reporterSetVersion;
+    uint64 public lastReportNonce;
     uint16 public reporterThreshold;
     bytes32[] public activeComponents;
     address[] public activeReporters;
@@ -72,28 +73,42 @@ contract NavReportHarness is EIP712 {
         reporterSetVersion = version;
     }
 
-    function reportHash(FundTypes.ComponentReport[] calldata reports) public view returns (bytes32) {
-        return
-            keccak256(abi.encode(NAV_REPORT_TYPEHASH, expectedFund, reporterSetVersion, keccak256(abi.encode(reports))));
+    function reportHash(uint64 reportNonce, FundTypes.ComponentReport[] calldata reports)
+        public
+        view
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encode(
+                NAV_REPORT_TYPEHASH, expectedFund, reporterSetVersion, reportNonce, keccak256(abi.encode(reports))
+            )
+        );
     }
 
-    function signatureDigest(FundTypes.ComponentReport[] calldata reports) external view returns (bytes32) {
-        return _hashTypedDataV4(reportHash(reports));
+    function signatureDigest(uint64 reportNonce, FundTypes.ComponentReport[] calldata reports)
+        external
+        view
+        returns (bytes32)
+    {
+        return _hashTypedDataV4(reportHash(reportNonce, reports));
     }
 
     function submitNav(
+        uint64 reportNonce,
         FundTypes.ComponentReport[] calldata reports,
         address[] calldata reporters,
         bytes[] calldata signatures
-    ) external view returns (FundTypes.NavCommit memory nav) {
-        if (reports.length != activeComponents.length) {
+    ) external returns (FundTypes.NavCommit memory nav) {
+        uint64 expectedNonce = lastReportNonce + 1;
+        if (reportNonce != expectedNonce) revert IFundAccounting.InvalidReportNonce(expectedNonce, reportNonce);
+        if (reports.length == 0 || reports.length != activeComponents.length) {
             revert IFundAccounting.IncompleteComponentSet();
         }
         if (reporters.length != signatures.length || reporters.length < reporterThreshold) {
             revert InvalidSignatureCount();
         }
 
-        bytes32 acceptedReportHash = reportHash(reports);
+        bytes32 acceptedReportHash = reportHash(reportNonce, reports);
         bytes32 digest = _hashTypedDataV4(acceptedReportHash);
         _validateReporters(reporters, signatures, digest);
 
@@ -131,9 +146,11 @@ contract NavReportHarness is EIP712 {
         nav.validAfterBlock = validAfterBlock;
         nav.validUntilBlock = validUntilBlock;
         nav.reporterSetVersion = reporterSetVersion;
+        nav.reportNonce = reportNonce;
         nav.positionsHash = aggregatePositionsHash;
         nav.reportHash = acceptedReportHash;
         nav.signaturesHash = keccak256(abi.encode(reporters, signatures));
+        lastReportNonce = reportNonce;
     }
 
     function isActive(FundTypes.NavCommit calldata nav) external view returns (bool) {
@@ -218,14 +235,15 @@ contract NavReportSpecTest is Test {
 
     function test_validComponentReportsProduceDelayedNavCommit() public {
         FundTypes.ComponentReport[] memory reports = _validReports();
-        (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, reporterTwoKey);
+        (address[] memory reporters, bytes[] memory signatures) = _sign(1, reports, reporterOneKey, reporterTwoKey);
 
-        FundTypes.NavCommit memory nav = harness.submitNav(reports, reporters, signatures);
+        FundTypes.NavCommit memory nav = harness.submitNav(1, reports, reporters, signatures);
 
         assertEq(nav.grossAssets, 1_100e6);
         assertEq(nav.liabilities, 100e6);
         assertEq(nav.netAssets, 1_000e6);
         assertEq(nav.liquidAccountingAssets, 600e6);
+        assertEq(nav.reportNonce, 1);
         assertEq(nav.signaturesHash, keccak256(abi.encode(reporters, signatures)));
         assertFalse(harness.isActive(nav));
         vm.roll(101);
@@ -234,13 +252,44 @@ contract NavReportSpecTest is Test {
         assertFalse(harness.isActive(nav));
     }
 
+    function test_rejectsReplayOfConsumedReportNonce() public {
+        FundTypes.ComponentReport[] memory reports = _validReports();
+        (address[] memory reporters, bytes[] memory signatures) = _sign(1, reports, reporterOneKey, reporterTwoKey);
+        harness.submitNav(1, reports, reporters, signatures);
+
+        vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidReportNonce.selector, 2, 1));
+        harness.submitNav(1, reports, reporters, signatures);
+    }
+
+    function test_rejectsOutOfOrderReportNonce() public {
+        FundTypes.ComponentReport[] memory reports = _validReports();
+        (address[] memory reporters, bytes[] memory signatures) = _sign(2, reports, reporterOneKey, reporterTwoKey);
+
+        vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidReportNonce.selector, 1, 2));
+        harness.submitNav(2, reports, reporters, signatures);
+    }
+
+    function test_acceptsStrictlyMonotonicReportNonces() public {
+        FundTypes.ComponentReport[] memory reports = _validReports();
+        (address[] memory reportersOne, bytes[] memory signaturesOne) =
+            _sign(1, reports, reporterOneKey, reporterTwoKey);
+        harness.submitNav(1, reports, reportersOne, signaturesOne);
+
+        (address[] memory reportersTwo, bytes[] memory signaturesTwo) =
+            _sign(2, reports, reporterOneKey, reporterTwoKey);
+        FundTypes.NavCommit memory second = harness.submitNav(2, reports, reportersTwo, signaturesTwo);
+
+        assertEq(second.reportNonce, 2);
+        assertEq(harness.lastReportNonce(), 2);
+    }
+
     function test_rejectsMissingComponent() public {
         FundTypes.ComponentReport[] memory reports = new FundTypes.ComponentReport[](1);
         reports[0] = _validReports()[0];
-        (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, reporterTwoKey);
+        (address[] memory reporters, bytes[] memory signatures) = _sign(1, reports, reporterOneKey, reporterTwoKey);
 
         vm.expectRevert(IFundAccounting.IncompleteComponentSet.selector);
-        harness.submitNav(reports, reporters, signatures);
+        harness.submitNav(1, reports, reporters, signatures);
     }
 
     function test_rejectsDuplicateComponent() public {
@@ -248,19 +297,19 @@ contract NavReportSpecTest is Test {
         reports[1].componentId = IDLE_COMPONENT;
         reports[1].componentNonce = 3;
         reports[1].positionStateHash = IDLE_HASH;
-        (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, reporterTwoKey);
+        (address[] memory reporters, bytes[] memory signatures) = _sign(1, reports, reporterOneKey, reporterTwoKey);
 
         vm.expectRevert(abi.encodeWithSelector(IFundAccounting.DuplicateComponent.selector, IDLE_COMPONENT));
-        harness.submitNav(reports, reporters, signatures);
+        harness.submitNav(1, reports, reporters, signatures);
     }
 
     function test_rejectsMismatchedPositionHash() public {
         FundTypes.ComponentReport[] memory reports = _validReports();
         reports[1].positionStateHash = keccak256("changed-after-snapshot");
-        (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, reporterTwoKey);
+        (address[] memory reporters, bytes[] memory signatures) = _sign(1, reports, reporterOneKey, reporterTwoKey);
 
         vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidPositionState.selector, STRATEGY_COMPONENT));
-        harness.submitNav(reports, reporters, signatures);
+        harness.submitNav(1, reports, reporters, signatures);
     }
 
     function test_rejectsStaleSnapshot() public {
@@ -270,10 +319,10 @@ contract NavReportSpecTest is Test {
             reports[i].snapshotBlock = 70;
             reports[i].snapshotBlockHash = keccak256("block-70");
         }
-        (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, reporterTwoKey);
+        (address[] memory reporters, bytes[] memory signatures) = _sign(1, reports, reporterOneKey, reporterTwoKey);
 
         vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidSnapshotBlock.selector, 70));
-        harness.submitNav(reports, reporters, signatures);
+        harness.submitNav(1, reports, reporters, signatures);
     }
 
     function test_rejectsWrongBlockHash() public {
@@ -281,10 +330,10 @@ contract NavReportSpecTest is Test {
         for (uint256 i; i < reports.length; ++i) {
             reports[i].snapshotBlockHash = keccak256("wrong");
         }
-        (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, reporterTwoKey);
+        (address[] memory reporters, bytes[] memory signatures) = _sign(1, reports, reporterOneKey, reporterTwoKey);
 
         vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidSnapshotBlock.selector, 99));
-        harness.submitNav(reports, reporters, signatures);
+        harness.submitNav(1, reports, reporters, signatures);
     }
 
     function test_rejectsSameBlockActivation() public {
@@ -292,10 +341,10 @@ contract NavReportSpecTest is Test {
         for (uint256 i; i < reports.length; ++i) {
             reports[i].validAfterBlock = 100;
         }
-        (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, reporterTwoKey);
+        (address[] memory reporters, bytes[] memory signatures) = _sign(1, reports, reporterOneKey, reporterTwoKey);
 
         vm.expectRevert(NavReportHarness.InvalidReportWindow.selector);
-        harness.submitNav(reports, reporters, signatures);
+        harness.submitNav(1, reports, reporters, signatures);
     }
 
     function test_rejectsWrongReporterSetVersion() public {
@@ -303,27 +352,27 @@ contract NavReportSpecTest is Test {
         for (uint256 i; i < reports.length; ++i) {
             reports[i].reporterSetVersion = 2;
         }
-        (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, reporterTwoKey);
+        (address[] memory reporters, bytes[] memory signatures) = _sign(1, reports, reporterOneKey, reporterTwoKey);
 
         vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidReporterSet.selector, 2));
-        harness.submitNav(reports, reporters, signatures);
+        harness.submitNav(1, reports, reporters, signatures);
     }
 
     function test_rejectsUnapprovedReporter() public {
         uint256 attackerKey = 0xBAD;
         FundTypes.ComponentReport[] memory reports = _validReports();
-        (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, attackerKey);
+        (address[] memory reporters, bytes[] memory signatures) = _sign(1, reports, reporterOneKey, attackerKey);
 
         vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidReporter.selector, vm.addr(attackerKey)));
-        harness.submitNav(reports, reporters, signatures);
+        harness.submitNav(1, reports, reporters, signatures);
     }
 
     function test_rejectsDuplicateReporterForQuorum() public {
         FundTypes.ComponentReport[] memory reports = _validReports();
-        (address[] memory reporters, bytes[] memory signatures) = _sign(reports, reporterOneKey, reporterOneKey);
+        (address[] memory reporters, bytes[] memory signatures) = _sign(1, reports, reporterOneKey, reporterOneKey);
 
         vm.expectRevert(abi.encodeWithSelector(IFundAccounting.DuplicateReporter.selector, reporterOne));
-        harness.submitNav(reports, reporters, signatures);
+        harness.submitNav(1, reports, reporters, signatures);
     }
 
     function test_rejectsZeroReporterThreshold() public {
@@ -404,12 +453,12 @@ contract NavReportSpecTest is Test {
         });
     }
 
-    function _sign(FundTypes.ComponentReport[] memory reports, uint256 firstKey, uint256 secondKey)
+    function _sign(uint64 reportNonce, FundTypes.ComponentReport[] memory reports, uint256 firstKey, uint256 secondKey)
         private
         view
         returns (address[] memory reporters, bytes[] memory signatures)
     {
-        bytes32 digest = harness.signatureDigest(reports);
+        bytes32 digest = harness.signatureDigest(reportNonce, reports);
         reporters = new address[](2);
         signatures = new bytes[](2);
         reporters[0] = vm.addr(firstKey);

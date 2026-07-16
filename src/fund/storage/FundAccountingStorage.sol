@@ -17,8 +17,10 @@ abstract contract FundAccountingStorage {
         address fund;
         uint64 compatibilityVersion;
         uint64 reporterSetVersion;
+        uint64 lastReportNonce;
         uint16 reporterThreshold;
         bytes32[] activeComponentIds;
+        address[] activeReporters;
         mapping(bytes32 componentId => ComponentState state) components;
         mapping(address reporter => bool active) reporters;
         FundTypes.FeeConfig feeConfig;

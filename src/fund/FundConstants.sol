@@ -5,7 +5,12 @@ library FundConstants {
     uint256 internal constant WAD = 1e18;
     uint256 internal constant BPS = 10_000;
     uint256 internal constant YEAR = 365 days;
+    uint256 internal constant SHARE_SCALE = 1e18;
+    uint256 internal constant VIRTUAL_ASSETS = 1;
     uint256 internal constant ERC7540_REQUEST_ID = 0;
+    uint8 internal constant SHARE_DECIMALS = 18;
+    uint16 internal constant MAX_BATCH_CONTROLLERS = 64;
+    uint16 internal constant MAX_PROCESSING_PAGE = 16;
 
     bytes4 internal constant ERC165_INTERFACE_ID = 0x01ffc9a7;
     bytes4 internal constant ERC7540_OPERATOR_INTERFACE_ID = 0xe3bc4e65;

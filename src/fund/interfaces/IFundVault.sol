@@ -12,6 +12,9 @@ interface IFundVault is IERC165, IERC20Permit, IERC7540Operator, IERC7540Redeem,
     error InactiveNavWindow();
     error InvalidModule(address caller);
     error IncompatibleModuleVersion(uint64 expected, uint64 actual);
+    error MinimumSharesNotMet(uint256 minimum, uint256 actual);
+    error UnsupportedAccountingAssetDecimals(uint8 decimals);
+    error UnaccountedBalance(address asset, uint256 amount);
 
     function accounting() external view returns (address);
     function flowManager() external view returns (address);
@@ -22,6 +25,12 @@ interface IFundVault is IERC165, IERC20Permit, IERC7540Operator, IERC7540Redeem,
     function committedNav() external view returns (uint256);
     function reservedClaimAssets() external view returns (uint256);
     function activeNavWindow() external view returns (FundTypes.NavCommit memory);
+    function depositWithMinShares(uint256 assets, address receiver, uint256 minSharesOut)
+        external
+        returns (uint256 shares);
+    function requestRedeemWithMinAssets(uint256 shares, address controller, address owner, uint256 minAssetsOut)
+        external
+        returns (uint256 requestId);
 
     function commitNav(FundTypes.NavCommit calldata nav, uint256 feeShares, address feeRecipient) external;
     function processAccountingAssetClaim(address controller, uint256 shares, uint256 assets) external;
