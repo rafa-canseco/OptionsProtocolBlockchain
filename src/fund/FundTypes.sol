@@ -93,6 +93,7 @@ library FundTypes {
         bool isSealed;
         bool processing;
         bool unwindCommitted;
+        bool isReleased;
     }
 
     struct StrategyConfig {

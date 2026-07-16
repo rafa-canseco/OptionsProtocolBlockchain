@@ -1560,32 +1560,44 @@ Exact conformance includes:
 ### 24.2 Cancellation
 
 A request may be cancelled only while fully pending and before the manager has
-committed an unwind for its batch. Cancellation returns escrowed shares and does
-not change supply. A partially processed, claimable, or claimed request cannot
-be cancelled. Emergency governance may extend claim deadlines but cannot seize
-or reprice a processed claim.
+committed an unwind for its batch. Sealing alone does not commit the unwind, so
+a sealed request remains cancelable until processing preflight succeeds.
+Cancellation returns escrowed shares and does not change supply. A partially
+processed, claimable, or claimed request cannot be cancelled. Emergency
+governance may extend claim deadlines but cannot seize or reprice a processed
+claim.
 
 ### 24.2.1 Bounded batch execution
 
 Operational batches never scan a historical controller list. Each batch holds
 at most 64 unique controllers and is processed through a cursor with at most 16
 controllers per transaction. Full cancellation from an open batch removes the
-member with bounded swap-and-pop. Sealing freezes membership, commits the
-unwind, disables cancellation, and opens a new batch; a controller with pending
-shares in a sealed batch cannot join another batch until that pending balance
-is processed.
+member with bounded swap-and-pop. Full cancellation from a sealed but unstarted
+batch uses the same bounded removal. Sealing closes additions and opens a new
+batch, but does not commit an unwind; a controller with pending shares in a
+sealed batch cannot join another batch until that pending balance is cancelled
+or processed.
 
 `startRedeemBatch` fixes one NAV, eligible supply, target share amount, and
-marginal exit cost for a processing round. Before any page executes it validates
-all persisted per-controller minimum outputs, closes primary entry, and moves
-the round's maximum accounting-asset budget into the claim reserve. Pages
-allocate shares using the difference between consecutive cumulative pro-rata
-values, which guarantees that all pages together allocate exactly the round
-target. Remaining pending shares require another round and a fresh NAV
-checkpoint. The final page releases only measured rounding dust and permits
-primary entry to reopen. If no pending shares remain, it also advances the
-monotonic processing-batch cursor. Later sealed batches cannot start before
-that cursor reaches them.
+marginal exit cost for a processing round. It first computes the net asset
+budget and validates all persisted per-controller minimum outputs without state
+changes. Only a successful preflight commits the unwind, closes primary entry,
+and moves the complete net asset budget into the claim reserve.
+
+`releaseRedeemBatch` provides O(1) recovery for a sealed batch that has not
+started. It advances the monotonic processing cursor without moving or burning
+shares. Requests in the released batch remain pending and cancelable. Therefore
+an impossible minimum cannot block later batches even when its controller does
+not cooperate.
+
+Pages allocate both shares and net assets using differences between consecutive
+cumulative pro-rata values. All pages together allocate exactly the round target
+and exactly its reserved net budget. Gross value and marginal cost are not
+rounded independently at controller level. Remaining pending shares require
+another round and a fresh NAV checkpoint. The final page verifies exact reserve
+reconciliation and permits primary entry to reopen. If no pending shares remain,
+it also advances the monotonic processing-batch cursor. Later sealed batches
+cannot start before that cursor reaches them.
 
 ### 24.3 Exit-cost allocation and swing pricing
 
@@ -1604,7 +1616,8 @@ Costs are allocated by cause:
 
 ```text
 gross redemption value = processedShares * processingNAV / eligibleSupply
-batch payout = gross value - allocated marginal exit cost - disclosed exit fee
+round net budget = floor(gross redemption value) - marginal exit cost - disclosed exit fee
+controller payout = cumulative net budget difference at controller boundary
 ```
 
 The manager records reference price, actual proceeds, cost classification, and

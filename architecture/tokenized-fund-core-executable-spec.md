@@ -111,8 +111,9 @@ Authorization is exact ERC-7540 behavior:
 - A controller operator may claim on the controller's behalf.
 
 Cancellation is an extension, not part of ERC-7540. It is allowed only while
-the controller has no claimable portion and no unwind is committed. It returns
-escrowed shares without changing supply.
+the controller has no claimable portion and no unwind is committed, including
+after sealing but before a successful processing preflight. It returns escrowed
+shares without changing supply.
 
 `requestRedeemWithMinAssets` is the slippage-protected extension used by the
 product. Its `minAssetsOut` is stored with the controller's pending shares. On
@@ -126,32 +127,41 @@ There is no global or historical controller scan. An open batch accepts at most
 64 unique controllers. A complete cancellation removes its member slot with a
 bounded swap-and-pop, so request/cancel recycling cannot consume capacity.
 
-Processing has three explicit phases:
+Processing has three explicit phases and one recovery transition:
 
-1. `sealRedeemBatch` freezes membership, commits the unwind, disables
-   cancellation, and opens the next batch.
-2. `startRedeemBatch` records one processing NAV, eligible supply, target
-   shares, marginal exit cost, and validates every persisted minimum. It closes
-   primary entry and reserves the round's maximum
-   accounting-asset budget before any page executes.
+1. `sealRedeemBatch` closes additions to the candidate set and opens the next
+   batch. Existing members may still cancel; sealing does not commit an unwind.
+2. `startRedeemBatch` computes one processing NAV, eligible supply, target
+   shares, marginal exit cost, net asset budget, and every persisted minimum
+   without changing state. Only after that preflight succeeds does it commit the
+   unwind, close primary entry, and reserve the complete net asset budget.
 3. `processRedeemBatch` advances a persistent cursor over at most 16 controllers
    per transaction.
+
+`releaseRedeemBatch` is an O(1) recovery for a sealed batch that has not started.
+It advances `nextProcessBatchId` without burning, repricing, or moving shares.
+The released requests remain pending and cancelable, so an impossible minimum
+cannot block later batches even if its controller never cancels.
 
 Allocation uses cumulative pro-rata differences:
 
 ```text
 allocatedThroughI = floor(cumulativePendingThroughI * target / roundPending)
-controllerAllocation = allocatedThroughI - allocatedThroughPrevious
+controllerShares = allocatedThroughI - allocatedThroughPrevious
+roundNetBudget = floor(target * processingNAV / eligibleSupply) - marginalExitCost
+netAssetsThroughI = floor(allocatedThroughI * roundNetBudget / target)
+controllerAssets = netAssetsThroughI - netAssetsThroughPrevious
 ```
 
-This assigns exactly the target shares across all pages without a last-user
-rounding subsidy. A partially processed batch may start another round only with
-a fresh NAV checkpoint. New requests cannot join a sealed batch, and one
-controller cannot hold pending shares in multiple operational batches. Sealed
-batches start only in monotonic `nextProcessBatchId` order. The
-primary market reopens only after the final page releases any rounding dust from
-the reserved round budget. When no pending shares remain, that final page also
-advances `nextProcessBatchId`.
+This assigns exactly the target shares and exactly the net asset budget across
+all pages. Gross value and marginal cost are never rounded independently per
+controller, so an aggregate-valid round cannot fail on a local subtraction. A
+partially processed batch may start another round only with a fresh NAV
+checkpoint. New requests cannot join a sealed batch, and one controller cannot
+hold pending shares in multiple operational batches. Sealed batches start only
+in monotonic `nextProcessBatchId` order. The primary market reopens after the
+final page proves that cumulative claims equal the reserved net budget. When no
+pending shares remain, that final page also advances `nextProcessBatchId`.
 
 ## 4. NAV Reports
 
@@ -241,14 +251,18 @@ remains fund NAV.
 ### Redemption and swing pricing
 
 ```text
-grossAssets = floor(processedShares * processingNav / eligibleSupply)
-afterCost = grossAssets - marginalExitCost
-exitFee = ceil(afterCost * exitFeeBps / 10_000)
-payout = afterCost - exitFee
+roundGrossAssets = floor(processedShares * processingNav / eligibleSupply)
+roundAfterCost = roundGrossAssets - marginalExitCost
+roundExitFee = ceil(roundAfterCost * exitFeeBps / 10_000)
+roundPayout = roundAfterCost - roundExitFee
+payoutThroughI = floor(allocatedSharesThroughI * roundPayout / processedShares)
+controllerPayout = payoutThroughI - payoutThroughPrevious
 ```
 
 Market P&L and expected close cost already represented in NAV are socialized.
 Only marginal unwind cost caused by the exiting batch is charged to that batch.
+Gross assets, marginal cost, and exit fee are calculated once per round; they
+are never independently rounded or subtracted at controller level.
 
 If supply is nonzero and NAV is zero, deposits, fee minting, and NAV-priced
 processing stop. Virtual assets/shares protect initial deposits. Raw token

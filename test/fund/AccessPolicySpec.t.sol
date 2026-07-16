@@ -144,11 +144,13 @@ contract AccessPolicySpecTest is Test {
     function test_processorRoleControlsEveryBoundedBatchPhase() public pure {
         FundAccessPolicy.Rule[] memory rules = FundAccessPolicy.flowRules();
         assertEq(rules[1].selector, IFundFlowManager.sealRedeemBatch.selector);
-        assertEq(rules[2].selector, IFundFlowManager.startRedeemBatch.selector);
-        assertEq(rules[3].selector, IFundFlowManager.processRedeemBatch.selector);
+        assertEq(rules[2].selector, IFundFlowManager.releaseRedeemBatch.selector);
+        assertEq(rules[3].selector, IFundFlowManager.startRedeemBatch.selector);
+        assertEq(rules[4].selector, IFundFlowManager.processRedeemBatch.selector);
         assertEq(rules[1].role, FundConstants.PROCESSOR_ROLE);
         assertEq(rules[2].role, FundConstants.PROCESSOR_ROLE);
         assertEq(rules[3].role, FundConstants.PROCESSOR_ROLE);
+        assertEq(rules[4].role, FundConstants.PROCESSOR_ROLE);
     }
 
     function _applyRules(FundAccessPolicy.Rule[] memory rules) private {

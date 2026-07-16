@@ -27,6 +27,8 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
     error UnauthorizedAccounting(address caller);
     error UnauthorizedOperator(address controller, address caller);
 
+    event RedeemBatchReleased(uint64 indexed batchId);
+
     struct BatchAccount {
         uint256 pendingShares;
         uint256 pendingMinAssetsOut;
@@ -49,6 +51,7 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         bool isSealed;
         bool processing;
         bool unwindCommitted;
+        bool isReleased;
     }
 
     mapping(address controller => mapping(address operator => bool approved)) private _operators;
@@ -56,7 +59,6 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
     mapping(address controller => uint256 shares) private _claimableShares;
     mapping(address controller => uint256 assets) private _claimableAssets;
     mapping(address controller => uint256 assets) private _pendingMinAssetsOut;
-    mapping(address controller => bool committed) private _unwindCommitted;
     mapping(address controller => uint64 batchId) private _pendingBatchId;
     mapping(uint64 batchId => Batch batch) private _batches;
     mapping(uint64 batchId => address[] controllers) private _batchControllers;
@@ -204,18 +206,13 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         return _claimableAssets[controller];
     }
 
-    function markUnwindCommitted(address controller) external {
-        _unwindCommitted[controller] = true;
-        _batches[_pendingBatchId[controller]].unwindCommitted = true;
-    }
-
     function cancelPending(uint256 shares) external {
         uint64 batchId = _pendingBatchId[msg.sender];
         Batch storage batch = _batches[batchId];
         BatchAccount storage account = _batchAccounts[batchId][msg.sender];
         if (
-            _claimableShares[msg.sender] != 0 || _unwindCommitted[msg.sender] || batch.processing
-                || batch.unwindCommitted || shares == 0 || shares > account.pendingShares
+            _claimableShares[msg.sender] != 0 || batch.processing || batch.unwindCommitted || shares == 0
+                || shares > account.pendingShares
         ) {
             revert RequestNotCancelable();
         }
@@ -228,8 +225,11 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         _pendingMinAssetsOut[msg.sender] -= minReduction;
         totalPendingShares -= shares;
         if (account.pendingShares == 0) {
-            _removeOpenBatchController(batchId, msg.sender);
+            _removeBatchController(batchId, msg.sender);
             _pendingBatchId[msg.sender] = 0;
+        }
+        if (batch.isSealed && batch.totalPendingShares == 0 && batchId == nextProcessBatchId) {
+            _releaseBatch(batchId);
         }
         _transfer(address(this), msg.sender, shares);
     }
@@ -243,29 +243,41 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         _sealRedeemBatch(batchId);
     }
 
+    function releaseRedeemBatch(uint64 batchId) external {
+        Batch storage batch = _batches[batchId];
+        if (
+            batchId != nextProcessBatchId || !batch.isSealed || batch.isReleased || batch.processing
+                || batch.unwindCommitted
+        ) revert IFundFlowManager.BatchNotReleasable(batchId);
+        _releaseBatch(batchId);
+    }
+
     function startRedeemBatch(uint64 batchId, uint256 shares, uint256 marginalExitCost) public {
         Batch storage batch = _batches[batchId];
         if (
-            batchId != nextProcessBatchId || !batch.isSealed || batch.processing || shares == 0
+            batchId != nextProcessBatchId || !batch.isSealed || batch.isReleased || batch.processing || shares == 0
                 || shares > batch.totalPendingShares || unaccountedBalance() != 0 || activeProcessingRounds != 0
         ) revert IFundFlowManager.BatchNotProcessable(batchId);
 
+        uint256 processingNav = totalAssets();
+        uint256 eligibleSupply = totalSupply();
+        uint256 grossAssetBudget = Math.mulDiv(shares, processingNav, eligibleSupply);
+        if (marginalExitCost > grossAssetBudget) revert IFundFlowManager.BatchNotProcessable(batchId);
+        uint256 roundAssetBudget = grossAssetBudget - marginalExitCost;
+        _validateBatchMinimums(batchId, shares, batch.totalPendingShares, roundAssetBudget);
+
         batch.processing = true;
-        batch.unwindCommitted = true;
-        batch.processingNav = totalAssets();
-        batch.eligibleSupply = totalSupply();
+        batch.processingNav = processingNav;
+        batch.eligibleSupply = eligibleSupply;
         batch.roundPendingShares = batch.totalPendingShares;
         batch.roundTargetShares = shares;
         batch.roundCumulativeShares = 0;
         batch.roundAllocatedShares = 0;
         batch.processingCursor = 0;
         batch.marginalExitCost = marginalExitCost;
-
-        _validateBatchMinimums(batchId);
-        uint256 grossAssetBudget = Math.mulDiv(shares, batch.processingNav, batch.eligibleSupply);
-        if (marginalExitCost > grossAssetBudget) revert IFundFlowManager.BatchNotProcessable(batchId);
-        batch.roundAssetBudget = grossAssetBudget - marginalExitCost;
+        batch.roundAssetBudget = roundAssetBudget;
         batch.roundAllocatedAssets = 0;
+        batch.unwindCommitted = true;
         totalReservedAssets += batch.roundAssetBudget;
         activeProcessingRounds = 1;
     }
@@ -294,8 +306,7 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
             if (allocatedShares != 0) {
                 uint256 minimumAssets =
                     Math.mulDiv(account.pendingMinAssetsOut, allocatedShares, accountShares, Math.Rounding.Ceil);
-                uint256 assets =
-                    _processedAssets(batch, allocatedShares, batch.roundAllocatedShares, newAllocatedShares);
+                uint256 assets = _processedAssets(batch, batch.roundAllocatedShares, newAllocatedShares);
                 account.pendingShares -= allocatedShares;
                 account.pendingMinAssetsOut -= minimumAssets;
                 _pendingMinAssetsOut[controller] -= minimumAssets;
@@ -311,9 +322,9 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         batch.processingCursor = uint16(end);
         if (end == controllers.length) {
             assert(batch.roundAllocatedShares == batch.roundTargetShares);
+            assert(batch.roundAllocatedAssets == batch.roundAssetBudget);
             batch.totalPendingShares -= batch.roundTargetShares;
             batch.processedShares += batch.roundTargetShares;
-            totalReservedAssets -= batch.roundAssetBudget - batch.roundAllocatedAssets;
             activeProcessingRounds = 0;
             batch.processing = false;
             if (batch.totalPendingShares == 0 && batchId == nextProcessBatchId) {
@@ -399,14 +410,19 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         return _batches[batchId].totalPendingShares;
     }
 
+    function batchReleased(uint64 batchId) external view returns (bool) {
+        return _batches[batchId].isReleased;
+    }
+
     function pendingMinimumAssets(address controller) external view returns (uint256) {
         return _pendingMinAssetsOut[controller];
     }
 
     function isCancellationAvailable(address controller) external view returns (bool) {
         Batch storage batch = _batches[_pendingBatchId[controller]];
-        return _pending[controller] != 0 && _claimableShares[controller] == 0 && !_unwindCommitted[controller]
-            && !batch.processing && !batch.unwindCommitted;
+        return
+            _pending[controller] != 0 && _claimableShares[controller] == 0 && !batch.processing
+                && !batch.unwindCommitted;
     }
 
     function _addToOpenBatch(address controller, uint256 shares, uint256 minAssetsOut) private {
@@ -431,10 +447,7 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         batch.totalPendingShares += shares;
     }
 
-    function _removeOpenBatchController(uint64 batchId, address controller) private {
-        Batch storage batch = _batches[batchId];
-        if (batch.isSealed) return;
-
+    function _removeBatchController(uint64 batchId, address controller) private {
         BatchAccount storage account = _batchAccounts[batchId][controller];
         uint256 index = account.indexPlusOne - 1;
         address[] storage controllers = _batchControllers[batchId];
@@ -454,12 +467,21 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
             revert IFundFlowManager.BatchNotProcessable(batchId);
         }
         batch.isSealed = true;
-        batch.unwindCommitted = true;
         openBatchId = batchId + 1;
     }
 
-    function _validateBatchMinimums(uint64 batchId) private view {
-        Batch storage batch = _batches[batchId];
+    function _releaseBatch(uint64 batchId) private {
+        _batches[batchId].isReleased = true;
+        nextProcessBatchId = batchId + 1;
+        emit RedeemBatchReleased(batchId);
+    }
+
+    function _validateBatchMinimums(
+        uint64 batchId,
+        uint256 roundTargetShares,
+        uint256 roundPendingShares,
+        uint256 roundAssetBudget
+    ) private view {
         address[] storage controllers = _batchControllers[batchId];
         uint256 cumulativeShares;
         uint256 allocatedShares;
@@ -467,14 +489,14 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
             address controller = controllers[i];
             BatchAccount storage account = _batchAccounts[batchId][controller];
             cumulativeShares += account.pendingShares;
-            uint256 newAllocatedShares =
-                Math.mulDiv(cumulativeShares, batch.roundTargetShares, batch.roundPendingShares);
+            uint256 newAllocatedShares = Math.mulDiv(cumulativeShares, roundTargetShares, roundPendingShares);
             uint256 controllerShares = newAllocatedShares - allocatedShares;
             if (controllerShares != 0) {
                 uint256 minimumAssets = Math.mulDiv(
                     account.pendingMinAssetsOut, controllerShares, account.pendingShares, Math.Rounding.Ceil
                 );
-                uint256 assets = _processedAssets(batch, controllerShares, allocatedShares, newAllocatedShares);
+                uint256 assets =
+                    _processedAssets(roundAssetBudget, roundTargetShares, allocatedShares, newAllocatedShares);
                 if (assets < minimumAssets) {
                     revert IFundFlowManager.MinimumAssetsNotMet(controller, minimumAssets, assets);
                 }
@@ -483,18 +505,25 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         }
     }
 
+    function _processedAssets(Batch storage batch, uint256 priorAllocatedShares, uint256 newAllocatedShares)
+        private
+        view
+        returns (uint256)
+    {
+        return _processedAssets(
+            batch.roundAssetBudget, batch.roundTargetShares, priorAllocatedShares, newAllocatedShares
+        );
+    }
+
     function _processedAssets(
-        Batch storage batch,
-        uint256 shares,
+        uint256 roundAssetBudget,
+        uint256 roundTargetShares,
         uint256 priorAllocatedShares,
         uint256 newAllocatedShares
-    ) private view returns (uint256) {
-        uint256 grossAssets = Math.mulDiv(shares, batch.processingNav, batch.eligibleSupply);
-        uint256 newAllocatedCost = Math.mulDiv(newAllocatedShares, batch.marginalExitCost, batch.roundTargetShares);
-        uint256 priorAllocatedCost = Math.mulDiv(priorAllocatedShares, batch.marginalExitCost, batch.roundTargetShares);
-        uint256 allocatedCost = newAllocatedCost - priorAllocatedCost;
-        if (allocatedCost > grossAssets) revert IFundFlowManager.BatchNotProcessable(0);
-        return grossAssets - allocatedCost;
+    ) private pure returns (uint256) {
+        uint256 newAllocatedAssets = Math.mulDiv(newAllocatedShares, roundAssetBudget, roundTargetShares);
+        uint256 priorAllocatedAssets = Math.mulDiv(priorAllocatedShares, roundAssetBudget, roundTargetShares);
+        return newAllocatedAssets - priorAllocatedAssets;
     }
 
     function _makeClaimable(address controller, uint256 shares, uint256 assets) private {
@@ -815,14 +844,70 @@ contract FundStandardsSpecTest is Test {
         assertEq(vault.balanceOf(alice), 1_000e18);
     }
 
-    function test_sealingCommitsUnwindAndDisablesCancellation() public {
+    function test_sealingKeepsCancellationAvailableUntilStart() public {
         vm.prank(alice);
         vault.requestRedeem(200e18, alice, alice);
-        vault.sealOpenBatch();
+        uint64 batchId = vault.sealOpenBatch();
+
+        assertTrue(vault.isCancellationAvailable(alice));
 
         vm.prank(alice);
-        vm.expectRevert(AsyncRedeemVaultHarness.RequestNotCancelable.selector);
         vault.cancelPending(200e18);
+
+        assertTrue(vault.batchReleased(batchId));
+        assertEq(vault.nextProcessBatchId(), batchId + 1);
+        assertEq(vault.balanceOf(alice), 1_000e18);
+    }
+
+    function test_startCommitsUnwindAndDisablesCancellation() public {
+        vm.prank(alice);
+        vault.requestRedeem(200e18, alice, alice);
+        uint64 batchId = vault.sealOpenBatch();
+        vault.startRedeemBatch(batchId, 100e18, 0);
+
+        assertFalse(vault.isCancellationAvailable(alice));
+        vm.prank(alice);
+        vm.expectRevert(AsyncRedeemVaultHarness.RequestNotCancelable.selector);
+        vault.cancelPending(100e18);
+        vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.BatchNotReleasable.selector, batchId));
+        vault.releaseRedeemBatch(batchId);
+    }
+
+    function test_unstartableMinimumCanBeReleasedWithoutBlockingLaterBatch() public {
+        vm.prank(alice);
+        assertTrue(vault.transfer(bob, 100e18));
+
+        vm.prank(alice);
+        vault.requestRedeemWithMinAssets(100e18, alice, alice, type(uint256).max);
+        uint64 firstBatchId = vault.sealOpenBatch();
+
+        vm.prank(bob);
+        vault.requestRedeem(100e18, bob, bob);
+        uint64 secondBatchId = vault.sealOpenBatch();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IFundFlowManager.MinimumAssetsNotMet.selector, alice, type(uint256).max, 100e6)
+        );
+        vault.startRedeemBatch(firstBatchId, 100e18, 0);
+
+        assertTrue(vault.isCancellationAvailable(alice));
+        vm.expectEmit(true, false, false, false, address(vault));
+        emit AsyncRedeemVaultHarness.RedeemBatchReleased(firstBatchId);
+        vault.releaseRedeemBatch(firstBatchId);
+        assertTrue(vault.batchReleased(firstBatchId));
+        assertEq(vault.nextProcessBatchId(), secondBatchId);
+        assertEq(vault.pendingRedeemRequest(0, alice), 100e18);
+        assertEq(vault.balanceOf(address(vault)), 200e18);
+        assertEq(vault.totalSupply(), 1_000e18);
+
+        vault.startRedeemBatch(secondBatchId, 100e18, 0);
+        vault.processRedeemBatch(secondBatchId, 1);
+        assertEq(vault.claimableRedeemRequest(0, bob), 100e18);
+        assertEq(vault.claimableAssets(bob), 100e6);
+
+        vm.prank(alice);
+        vault.cancelPending(100e18);
+        assertEq(vault.pendingRedeemRequest(0, alice), 0);
     }
 
     function test_sealedBatchesCannotProcessOutOfOrder() public {
@@ -902,6 +987,62 @@ contract FundStandardsSpecTest is Test {
             claimable += vault.claimableRedeemRequest(0, address(uint160(0x4000 + i)));
         }
         assertEq(claimable, 10e18);
+    }
+
+    function test_marginalCostUsesOneCumulativeNetBudgetAcrossPages() public {
+        uint256 aliceShares = 1_500_000_000_000;
+        uint256 bobShares = 500_000_000_000;
+        vm.prank(alice);
+        assertTrue(vault.transfer(bob, bobShares));
+        vm.prank(alice);
+        vault.requestRedeem(aliceShares, alice, alice);
+        vm.prank(bob);
+        vault.requestRedeem(bobShares, bob, bob);
+
+        uint64 batchId = vault.sealOpenBatch();
+        vault.startRedeemBatch(batchId, aliceShares + bobShares, 1);
+        assertEq(vault.totalReservedAssets(), 1);
+
+        (uint16 firstPage, bool firstComplete) = vault.processRedeemBatch(batchId, 1);
+        assertEq(firstPage, 1);
+        assertFalse(firstComplete);
+        assertEq(vault.claimableAssets(alice), 0);
+        assertEq(vault.totalReservedAssets(), 1);
+
+        (uint16 secondPage, bool secondComplete) = vault.processRedeemBatch(batchId, 1);
+        assertEq(secondPage, 1);
+        assertTrue(secondComplete);
+        assertEq(vault.claimableAssets(bob), 1);
+        assertEq(vault.claimableAssets(alice) + vault.claimableAssets(bob), vault.totalReservedAssets());
+        assertEq(vault.nextProcessBatchId(), batchId + 1);
+    }
+
+    function testFuzz_cumulativeNetBudgetReconcilesAcrossPages(
+        uint96 aliceSharesSeed,
+        uint96 bobSharesSeed,
+        uint96 marginalCostSeed
+    ) public {
+        uint256 aliceShares = bound(uint256(aliceSharesSeed), 1, 400e18);
+        uint256 bobShares = bound(uint256(bobSharesSeed), 1, 400e18);
+        vm.prank(alice);
+        assertTrue(vault.transfer(bob, bobShares));
+        vm.prank(alice);
+        vault.requestRedeem(aliceShares, alice, alice);
+        vm.prank(bob);
+        vault.requestRedeem(bobShares, bob, bob);
+
+        uint256 targetShares = aliceShares + bobShares;
+        uint256 grossAssetBudget = Math.mulDiv(targetShares, vault.totalAssets(), vault.totalSupply());
+        uint256 marginalExitCost = bound(uint256(marginalCostSeed), 0, grossAssetBudget);
+        uint256 expectedNetBudget = grossAssetBudget - marginalExitCost;
+
+        uint64 batchId = vault.sealOpenBatch();
+        vault.startRedeemBatch(batchId, targetShares, marginalExitCost);
+        vault.processRedeemBatch(batchId, 1);
+        vault.processRedeemBatch(batchId, 1);
+
+        assertEq(vault.totalReservedAssets(), expectedNetBudget);
+        assertEq(vault.claimableAssets(alice) + vault.claimableAssets(bob), expectedNetBudget);
     }
 
     function test_rejectsAccountingAssetWithMoreThanEighteenDecimals() public {
