@@ -1,9 +1,13 @@
 # B1N-348: Tokenized Fund Vault Architecture
 
-Status: Proposed for review  
+Status: Revision 2 proposed for final architecture review
 Date: 2026-07-16  
 Scope: Product and smart-contract architecture  
 Decision type: Foundational; fresh deployment required  
+
+Sections 18 and later contain the reviewer disposition and the normative
+revision that addresses it. Where the original proposal and the normative
+revision differ, the normative revision controls.
 
 ## 1. Executive summary
 
@@ -893,3 +897,947 @@ Keep one accounting asset per fund and use adapters for strategy diversity. This
 is the smallest architecture that solves the current CSP share problem at its
 root while remaining capable of supporting covered calls, concentrated-liquidity
 positions, more underlyings, and eventually multi-strategy funds.
+
+## 18. Reviewer conclusions
+
+Reviewer disposition: **approve the product direction, subject to specification
+changes before implementation approval**.
+
+### 18.1 Product decisions confirmed
+
+1. The architecture is a strategy-independent foundation for tokenized,
+   ETF-like funds. The fund core standardizes shares, NAV, deposits,
+   redemptions, distributions, governance, and adapter boundaries; each fund
+   defines its own strategy and risk policy.
+2. Products may include a complete Wheel fund, a CSP fund, a covered-call fund,
+   a concentrated-liquidity range fund, or future strategy funds without
+   changing the core share model.
+3. Premiums and other realized strategy income first accrue to fund NAV.
+   Periodic distributions are supported, with frequency and policy configured
+   per fund by its curator.
+4. Curator changes to distribution policy require a timelock, cannot affect an
+   already declared distribution, and cannot distribute assets reserved for
+   claims or required risk collateral.
+5. Redemption policy is configurable per fund. A fund may support instant
+   accounting-asset redemption, asynchronous redemption, in-kind redemption,
+   secondary-market exit, or an approved combination of these paths.
+6. Every fund must retain at least one viable exit path. Curator changes to
+   redemption policy require a timelock and cannot retroactively change pending
+   redemption requests.
+7. In-kind redemption is included. Instant in-kind redemption is limited to
+   free assets; assets locked by an active strategy become redeemable through
+   the asynchronous queue after settlement or a bounded unwind.
+8. The in-kind basket is fund-specific. Examples include USDC and WETH for a
+   Wheel fund, WETH and accrued USDC for a covered-call fund, and token0 and
+   token1 for a concentrated-liquidity fund.
+9. A Wheel fund keeps assigned WETH inside the same fund and transitions from
+   CSP execution to covered-call execution without changing its share class.
+10. The Wheel covered-call policy protects an adjusted economic cost basis, not
+    only the literal assignment strike:
+
+```text
+protected cost basis =
+    assignment strike
+  - attributable net CSP premium
+  - attributable net covered-call premiums
+  + attributable execution costs and strategy fees
+```
+
+The allocator must not open a covered call below the protected cost basis. Fund
+NAV nevertheless remains mark-to-market and must never use the protected cost
+basis as the current value of WETH.
+
+### 18.2 Required specification changes
+
+The following points remain blocking for implementation approval:
+
+1. **NAV execution model.** Specify component-level, block-bound reports,
+   reporter independence, position-hash invalidation, primary-market windows,
+   and protection against depositing or redeeming immediately before a NAV
+   update. A signed `netAssets` value alone is insufficient.
+2. **Redemption standard.** Choose and document one authoritative share-burning
+   lifecycle. Prefer exact ERC-7540 asynchronous redemption semantics, with an
+   immediately claimable request when liquidity is available, over maintaining
+   independent synchronous and queued accounting systems. If a separate queue
+   is retained, the product must not claim ERC-7540 compliance.
+3. **Exit-cost allocation.** Define when market losses are socialized across all
+   shares and when marginal unwind costs, exit fees, or swing pricing are
+   charged to the exiting flow.
+4. **In-kind accounting.** Define basket calculation, rounding, minimum output
+   protection, partial processing, claim reservations, and behavior when an
+   adapter returns multiple assets.
+5. **Distribution accounting.** Define declaration, record checkpoint,
+   entitlement calculation, claim mechanism, NAV reduction, fee interaction,
+   and treatment of transferred shares after the record checkpoint.
+6. **Smart-wallet compatibility.** Keep ERC-2612 for EOA and integration
+   compatibility, but do not rely on it as the primary UX for contract smart
+   wallets. Specify batched approval, ERC-1271-compatible authorization, or an
+   equivalent supported path.
+7. **Option close separation.** Keep buyback quote verification, payment, and
+   settlement ledgers in the option adapter or settler. The Controller should
+   expose only the atomic primitive required to burn or reduce the short and
+   release excess collateral. The externally initiated flow must remain atomic.
+8. **Lifecycle invariants.** Replace any per-vault equality between global
+   oToken supply and vault ledgers with stage-specific invariants covering open,
+   partially closed, settled, reserved, and redeemed positions.
+9. **Fee accounting.** Specify management and performance fee accrual,
+   crystallization, high-water marks, fee-share minting, and their interaction
+   with distributions and queued redemptions.
+10. **Failure and governance policy.** Define NAV-zero behavior, donation and
+    unaccounted-balance handling, adapter deficits, queue cancellation,
+    emergency in-kind exits, upgrades, timelocks, and migration.
+
+### 18.3 Approval boundary
+
+The accepted direction is a fresh, standards-oriented fund core using
+transferable ERC-20 shares, ERC-4626-compatible accounting where applicable,
+strategy adapters, conservative NAV, configurable distributions, and
+fund-specific redemption policies including eventual in-kind redemption.
+
+This review does not yet authorize contract implementation. Implementation can
+begin after the blocking specifications above are incorporated and the revised
+architecture receives final approval.
+
+## 19. Normative architecture after review
+
+This section resolves the review blockers and is the recommended architecture
+for implementation. It deliberately separates fund accounting from strategy
+execution while avoiding excessive contract fragmentation.
+
+### 19.1 Final design decisions
+
+1. Every fund share is the transferable ERC-20 surface of an
+   ERC-4626-compatible fund vault. For ERC-7540/ERC-7575 compatibility,
+   `share()` returns the vault itself and the required interfaces are exposed
+   through ERC-165.
+2. All direct redemptions use one authoritative ERC-7540 request lifecycle.
+   There is no second synchronous share-burning path.
+3. A liquid request may become claimable immediately, but requesting and
+   claiming remain two distinct calls as required by ERC-7540.
+4. The fund core never imports option, AMM, lending, or NFT-position logic.
+5. Strategies execute through separately upgradeable, capped adapters using
+   normal external calls. No strategy runs with `delegatecall` in fund storage.
+6. NAV is committed to the fund from component-level, block-bound reports. A
+   naked signed `netAssets` value is insufficient.
+7. Position-changing strategy operations invalidate primary-market NAV before
+   they execute and keep creation/redemption processing closed until a new NAV
+   is activated.
+8. Option RFQ verification and payment remain in the option adapter/settler.
+   The Controller exposes only atomic position primitives.
+9. Each stateful fund component uses an individual UUPS `ERC1967Proxy`. Beacon
+   proxies are not used because a single beacon upgrade would change every fund
+   simultaneously.
+10. New contracts use OpenZeppelin Contracts Upgradeable from one pinned major
+    release and ERC-7201 namespaced storage. Existing proxies from another
+    OpenZeppelin major version are not upgraded into this architecture.
+
+### 19.2 Contract map
+
+The production stack has four stateful core proxies per fund:
+
+```text
+                         OpenZeppelin AccessManager
+                         multisig + delayed roles
+                                   |
+          +------------------------+------------------------+
+          |                        |                        |
+          v                        v                        v
+ +----------------+      +------------------+      +------------------+
+ | FundVault      |<---->| FundAccounting   |      | StrategyManager  |
+ | UUPS proxy     |      | UUPS proxy       |      | UUPS proxy       |
+ | ERC20/4626/    |      | NAV + fees       |      | caps + adapters  |
+ | 7540 facade    |      +------------------+      +---------+--------+
+ +-------+--------+                                           |
+         |                                                    |
+         v                                                    v
+ +----------------+                              +-------------------------+
+ | FundFlowManager|                              | Strategy adapter proxies|
+ | UUPS proxy     |                              | option / wheel / LP     |
+ | requests/claims|                              +------------+------------+
+ +-------+--------+                                           |
+         |                                                    v
+         v                                        protocol-specific systems
+ ClaimEscrow / DistributionEscrow                 Controller / Settler / AMM
+```
+
+Shared or replaceable supporting contracts:
+
+- `AccessManager`: standard OpenZeppelin deployment, not custom proxy logic.
+- `IPositionValuator` implementations: stateless, non-proxy contracts selected
+  by the delayed registry in `FundAccounting`.
+- `OptionCloseSettler`: optional UUPS proxy shared by compatible option adapters
+  in a single option stack; it handles early buyback only and does not replace
+  the deployed `BatchSettler`.
+- `ClaimEscrow` and `DistributionEscrow`: one minimal immutable instance of each
+  per fund. They record and release declared liabilities, have no admin sweep,
+  and contain no strategy or governance logic.
+- `FundFactory`: versioned deployer that creates ERC-1967 proxies from approved
+  implementations. It has no authority over deployed fund assets.
+
+The four-contract fund core is an intentional boundary. Combining them creates
+a large implementation with mixed trust domains. Splitting further would spread
+share and NAV invariants across too many cross-contract calls.
+
+### 19.3 Lightweight contract budgets
+
+The following are design budgets, not reasons to omit required checks:
+
+| Contract | Responsibilities | Runtime target |
+| --- | --- | ---: |
+| `FundVault` | ERC-20/4626 surface, custody, committed NAV, authorized mint/burn, reserves | `< 18 KB` |
+| `FundAccounting` | NAV reports, component aggregation, fee crystallization | `< 16 KB` |
+| `FundFlowManager` | ERC-7540 requests, processing, accounting/in-kind claims | `< 18 KB` |
+| `StrategyManager` | Adapter registry, caps, allocation/deallocation | `< 14 KB` |
+| Strategy adapter | One strategy lifecycle only | `< 18 KB` |
+| Stateless valuator/policy | One valuation or policy domain | `< 10 KB` |
+
+Every contract remains below the EIP-170 runtime limit with operational margin.
+If a component exceeds its target, first extract a coherent external subsystem,
+not arbitrary internal functions. Reusable arithmetic can be a library, but an
+internal library does not reduce deployed bytecode when inlined.
+
+## 20. Core proxy responsibilities
+
+### 20.1 `FundVault`
+
+`FundVault` is the only share token and the only contract allowed to change
+share supply. It is an upgradeable ERC-4626/2612 implementation and exposes the
+ERC-7540/ERC-7575 user interface through thin calls into `FundFlowManager`.
+Because the vault itself is the share token, `share()` returns `address(this)`.
+It exposes the required ERC-165 interface IDs and emits all standard request and
+claim events from the vault address, even though the flow manager owns the
+request state machine.
+
+It stores only fund-critical source-of-truth state:
+
+- Accounting asset.
+- ERC-20 balances, allowances, permit nonces, and total supply through
+  OpenZeppelin upgradeable modules.
+- Active `FundAccounting`, `FundFlowManager`, and `StrategyManager` addresses.
+- Last committed NAV, NAV activation/expiry blocks, report nonce, and
+  `positionsHash`.
+- Accounted idle balance.
+- Assets reserved for processed redemption and distribution claims.
+- Primary-market pause flags and component compatibility versions.
+
+It does not store option batches, LP ticks, strategy premiums, MM quotes, or
+strategy-specific positions.
+
+Only these components may change core state:
+
+- `FundAccounting` commits NAV and requests fee-share minting.
+- `FundFlowManager` escrows/burns shares and reserves/releases claims.
+- `StrategyManager` asks the vault to transfer a capped asset amount to an
+  approved adapter.
+
+Core component proxy addresses and both escrow addresses are fixed at
+initialization and have no routine governance setter. Normal evolution upgrades
+the implementation behind the same proxy. Changing the topology or replacing a
+proxy address requires the explicit fund migration process in section 29.5.
+
+`totalAssets()` reads the committed local NAV and deterministic post-commit cash
+flows. It does not call an adapter, oracle, or reporter and therefore satisfies
+the ERC-4626 non-reverting view requirement.
+
+### 20.2 `FundAccounting`
+
+`FundAccounting` is the only component that can propose a NAV commit. It owns:
+
+- Component-to-valuator registry and valuator interface versions.
+- Reporter-set versions and thresholds.
+- Component report nonces and accepted component values.
+- Management-fee accrual time.
+- Performance-fee crystallization schedule.
+- Distribution-adjusted high-water mark.
+- Component and aggregate report validation.
+
+After validating a complete report and crystallizing fees, it calls the vault
+once with the resulting NAV, supply adjustment, report hash, and validity
+window. The vault verifies the caller and that the report references its current
+position nonce/hash.
+
+Combining NAV and fees in one accounting component prevents a deposit,
+redemption, or distribution from using NAV before required fees are reflected.
+
+### 20.3 `FundFlowManager`
+
+`FundFlowManager` is the only redemption lifecycle. It owns:
+
+- Pending and claimable ERC-7540 request state.
+- Request batch IDs and immutable processing mode.
+- Pro-rata partial processing.
+- Accounting-asset and in-kind basket claims.
+- Request cancellation state.
+- Exit-cost and swing-pricing records.
+
+The manager never mints arbitrary shares. On request, the vault escrows shares.
+On processing, the manager instructs the vault to burn the processed portion and
+move exact assets into a claim escrow. On claim, assets move from escrow to the
+receiver.
+
+### 20.4 `StrategyManager`
+
+`StrategyManager` owns strategy configuration, not assets:
+
+- Approved adapter addresses and interface versions.
+- Absolute and relative allocation caps.
+- Asset permissions.
+- Allocation, deallocation, and emergency permissions.
+- Adapter position nonce and aggregate `positionsHash`.
+- Cooldowns, slippage bounds, and loss limits.
+
+An allocator can operate only inside active limits. Adding an adapter, raising a
+cap, changing a valuator, or expanding allowed assets is delayed governance.
+Removing exposure, lowering caps, pausing allocation, and emergency deallocation
+can be immediate guardian actions.
+
+Before a position-changing call, `StrategyManager` closes the fund's primary
+market and increments the affected component position nonce. After execution it
+records the resulting state hash. Primary-market processing reopens only after a
+new report covers that hash.
+
+### 20.5 Cross-contract execution safety
+
+Modularity must not create a reentrancy path across proxies. Asset-, NAV-, or
+supply-changing operations acquire a fund-wide execution lock in `FundVault`.
+The flow and strategy managers may enter that lock only through their typed
+entry points and cannot invoke one another arbitrarily.
+
+Every asset-moving path also follows these rules:
+
+- Checks and accounting effects precede external protocol calls.
+- Adapters expose typed methods and cannot receive an arbitrary target plus
+  arbitrary calldata from an allocator.
+- Actual token balance deltas, not return values, determine received assets.
+- `SafeERC20` is used and protocol allowances are exact or bounded, then reset
+  when the integration permits it.
+- Unsupported fee-on-transfer, rebasing, callback, and ERC-777-like accounting
+  assets are rejected at fund creation.
+- A callback cannot reenter deposits, request processing, NAV activation,
+  allocation, fee crystallization, or distribution declaration.
+- Every module validates `msg.sender`, the configured fund, interface version,
+  and active compatibility version before changing state.
+
+## 21. Strategy separation
+
+### 21.1 Adapter boundary
+
+Every strategy adapter is a separate UUPS proxy and owns only its strategy state
+and strategy-held assets. It implements a versioned interface:
+
+```solidity
+interface IFundStrategyAdapter {
+    function fund() external view returns (address);
+    function accountingAsset() external view returns (address);
+    function interfaceVersion() external pure returns (uint32);
+    function positionStateHash() external view returns (bytes32);
+    function freeAssets(address asset) external view returns (uint256);
+
+    function allocate(address asset, uint256 amount, bytes calldata data)
+        external;
+
+    function deallocate(
+        uint256 targetValue,
+        uint256 minAccountingAssetsOut,
+        bytes calldata data
+    ) external returns (uint256 accountingAssetsOut);
+
+    function deallocateInKind(
+        uint256 fractionWad,
+        address escrow,
+        bytes calldata data
+    ) external returns (address[] memory assets, uint256[] memory amounts);
+
+    function emergencyExit(address escrow, bytes calldata data)
+        external
+        returns (address[] memory assets, uint256[] memory amounts);
+}
+```
+
+The adapter cannot call share mint/burn functions. The fund never trusts
+`adapter.totalValue()` as NAV. Valuation is independently produced by approved
+valuators from protocol state and balances.
+
+### 21.2 Options architecture
+
+Options use three layers:
+
+```text
+Fund / StrategyManager
+        |
+        v
+Option strategy adapter proxy
+position IDs, lifecycle, cost-basis attribution, strategy policy
+        |
+        v
+OptionCloseSettler proxy
+RFQ signatures, quote capacity, MM payments, settler ledgers
+        |
+        v
+Controller proxy
+open/deposit/mint and atomic reduce-short/release-collateral primitive
+```
+
+The Controller does not know fund NAV, withdrawal requests, or buyback prices.
+The option adapter does not manipulate Controller storage directly. The settler
+verifies the quote, receives/reconciles oTokens, pays the MM, and invokes one
+Controller primitive atomically.
+
+The existing V1 Controller and BatchSettler deployments are not upgraded or
+reconfigured for this architecture. Initial CSP adapters can use their existing
+expiry-settlement interfaces. If early close requires a new Controller
+primitive, that primitive is delivered in a fresh, separately audited option
+stack; Phase 3 never changes the deployed V1 stack in place.
+
+At expiry, `BatchSettler` remains responsible for the existing automatic
+settlement and physical-delivery accounting. The MM does not deliver WETH. The
+optional `OptionCloseSettler` exists only for a pre-expiry RFQ in which the fund
+buys back oTokens and releases the corresponding collateral atomically.
+
+Standalone products use a CSP or covered-call adapter. A Wheel product uses a
+small `WheelStrategyAdapter` coordinator that:
+
+- Tracks CSP, assigned inventory, and covered-call phases.
+- Keeps assigned WETH inside the fund strategy.
+- Attributes net premiums and execution costs.
+- Enforces protected economic cost basis before opening a covered call.
+- Calls common option settlement primitives rather than duplicating them.
+
+Protected cost basis is strategy policy only. The independent valuator always
+marks WETH and option liabilities to current conservative market value.
+
+### 21.3 Concentrated-liquidity architecture
+
+`ConcentratedLiquidityAdapter` owns the LP NFT and interacts with the approved
+position manager. It contains:
+
+- Pool, fee tier, token pair, ticks, and token ID.
+- Allocation/deallocation and fee collection.
+- Rebalance cooldown and execution bounds.
+- Emergency decrease-liquidity and raw-token return.
+
+It does not calculate authoritative NAV. A separate stateless LP valuator reads
+position liquidity, current amounts, collectible fees, independent token
+oracles, TWAP deviation, and configured exit haircuts.
+
+Adding an LP strategy therefore requires one adapter, one valuator, and one
+policy configuration. It does not modify the fund proxy implementation.
+
+## 22. Proxy and upgrade scheme
+
+### 22.1 Pattern selection
+
+Use individual OpenZeppelin UUPS implementations behind `ERC1967Proxy` for each
+stateful fund component and strategy adapter. UUPS keeps proxies light and
+matches the existing protocol's proxy direction. OpenZeppelin requires
+`_authorizeUpgrade` to enforce access control; see the [UUPS and ERC-1967 proxy
+documentation](https://docs.openzeppelin.com/contracts/5.x/api/proxy).
+
+An implementation may be shared initially by many fund proxies, but every proxy
+retains its own implementation slot and delayed upgrade decision. This preserves
+deployment efficiency without coupling production rollouts across funds.
+
+Do not use:
+
+- Beacon proxies for funds or adapters: one upgrade would change all products
+  and removes canary rollout isolation.
+- Diamond/facet storage: the system is modular across contracts already, and
+  diamonds add selector and storage complexity without solving a current need.
+- Minimal clones for stateful core components: they are not individually
+  upgradeable. Clones remain acceptable for simple claim escrows.
+- Untrusted `delegatecall`: strategy code must not execute in fund storage.
+
+### 22.2 Storage and dependencies
+
+All fresh implementations use:
+
+- A pinned, audited OpenZeppelin Contracts Upgradeable v5 release.
+- Upgradeable token/access/security modules and explicit parent initializers.
+- ERC-7201 storage namespaces with unique identifiers. ERC-7201 standardizes
+  namespaced structs at collision-resistant slots; see
+  [ERC-7201](https://eips.ethereum.org/EIPS/eip-7201).
+- Implementation constructors that call `_disableInitializers()`.
+- No constructor state, mutable immutables, `selfdestruct`, or arbitrary
+  `delegatecall`.
+
+Every upgrade runs OpenZeppelin Foundry upgrade validation with storage layout
+output enabled. The repository must add and pin
+`openzeppelin-contracts-upgradeable` and `openzeppelin-foundry-upgrades` before
+implementation. `UnsafeUpgrades` and blanket storage-check bypasses are not
+allowed in deployment scripts.
+
+### 22.3 Upgrade authority
+
+Each fund stack is controlled by an OpenZeppelin `AccessManager` whose admin is
+a production multisig. OpenZeppelin supports function-level permissions,
+execution delays, and guardians across multiple targets; see
+[AccessManager](https://docs.openzeppelin.com/contracts/5.x/access-control).
+
+Minimum policy:
+
+| Change | Delay |
+| --- | ---: |
+| Core implementation upgrade | 72 hours |
+| Adapter/settler implementation upgrade | 48 hours |
+| Add adapter or valuator | 48 hours |
+| Raise allocation/risk cap | 24 hours |
+| Distribution/redemption policy change | 24 hours |
+| Lower cap, pause allocation or primary market | Immediate guardian |
+| Resume after incident | Delayed |
+
+An upgrade cannot alter a pending request's mode, processing checkpoint, claim
+basket, or declared distribution. Storage migrations use versioned
+`reinitializer` calls in the same scheduled `upgradeToAndCall` operation.
+
+Production upgrades follow:
+
+1. Storage and selector validation against the exact deployed implementation.
+2. Full upgrade simulation on a stateful fork.
+3. Base Sepolia canary deployment and invariant suite.
+4. Scheduled production upgrade with bytecode hash published.
+5. Post-upgrade state, role, NAV, reserve, and position reconciliation.
+
+## 23. NAV execution model
+
+### 23.1 Component reports
+
+Each report is component-level rather than a single opaque NAV number:
+
+```solidity
+struct ComponentReport {
+    address fund;
+    bytes32 componentId;
+    uint256 chainId;
+    uint64 snapshotBlock;
+    bytes32 snapshotBlockHash;
+    uint64 validAfterBlock;
+    uint64 validUntilBlock;
+    uint64 reporterSetVersion;
+    uint256 componentNonce;
+    bytes32 positionStateHash;
+    uint256 grossAssets;
+    uint256 liabilities;
+    uint256 liquidAccountingAssets;
+    uint256 baseExitCost;
+    bytes32 dataHash;
+}
+```
+
+Components include idle custody, every adapter, fees, and reconciliation records
+for claim and distribution escrows. Escrowed claims and distributions have zero
+shareholder-NAV contribution because those assets already left fund custody;
+their component records prove that the excluded assets match immutable
+liabilities. The aggregate report lists every active component exactly once.
+Missing, duplicate, stale, or mismatched components invalidate the report.
+
+### 23.2 Reporter independence
+
+Reporter domains are separated:
+
+- Spot/oracle reporters cannot allocate assets or execute strategy trades.
+- Option liability requires independent market data and at least two approved
+  executable MM observations when available; the executing MM alone cannot set
+  the accepted close liability.
+- LP valuation uses deterministic position math plus independent token oracles;
+  the LP adapter cannot sign its own value.
+- Aggregate NAV approval requires a quorum from a reporter set controlled by
+  delayed governance.
+
+The accepted report stores reporter-set version and signatures hash for audit.
+
+### 23.3 Primary-market windows
+
+Supply-changing exchange is permitted only in explicit NAV windows:
+
+```text
+1. Close primary market.
+2. Snapshot all components at block B.
+3. Submit component reports bound to B and current position nonces.
+4. Aggregate and commit NAV after B.
+5. Activate at B + activationDelay for a bounded number of blocks.
+6. Expire the window automatically.
+```
+
+There is no valid period in which users can deposit or process redemptions
+immediately before a known NAV update. Reports submitted through the mempool do
+not activate in the same block. Users protect entry with `minSharesOut`; queued
+redemptions carry minimum accounting-asset or basket outputs.
+
+Any strategy operation that changes exposure closes the window first and
+increments a component nonce. Deterministic cash movements that do not change
+share price, such as a deposit at the committed rate, are recorded as NAV deltas
+inside the same window. A price-sensitive operation invalidates the window.
+
+`totalAssets()` may continue to show the last committed value after expiry, but
+all max creation/claim-processing functions return zero until a new active
+window. This separates informational NAV from executable NAV.
+
+## 24. Authoritative ERC-7540 redemption lifecycle
+
+### 24.1 One lifecycle
+
+All direct exits enter one authoritative request state machine. The
+accounting-asset path begins with standard `requestRedeem` and implements
+ERC-7540 exactly. In-kind exit begins with the extension
+`requestRedeemInKind`, but uses the same escrow, processing, burn, and claim
+states. There is no direct ERC-4626 withdrawal that bypasses request accounting.
+Synchronous `deposit` and `mint` remain standard ERC-4626 entry functions while
+an executable NAV window is active.
+
+```text
+Pending
+  requestRedeem(shares, controller, owner)
+  -> shares transferred to vault escrow
+  -> shares remain in totalSupply and exposed to NAV
+
+Claimable
+  processRedeem(requestId, fraction)
+  -> fresh NAV window required
+  -> processed shares burned
+  -> exact assets moved to ClaimEscrow
+  -> claim is no longer exposed to fund NAV
+
+Claimed
+  redeem/withdraw(..., controller)
+  -> consumes claimable request
+  -> escrow sends assets to receiver
+```
+
+If idle liquidity and risk capacity are sufficient, `requestRedeem` may make the
+request claimable immediately using the currently active NAV. The user must
+still call `redeem` or `withdraw` separately. This provides a two-call instant
+path without creating a competing share-burning system.
+
+Requests with the same `requestId` are fungible, priced at one processing NAV,
+and partially processed pro rata. Users call the standard functions on
+`FundVault`; it forwards state transitions to `FundFlowManager` and remains the
+contract that moves or burns shares and emits standard events.
+
+Exact conformance includes:
+
+- `pendingRedeemRequest` and `claimableRedeemRequest` report the two balances
+  independently.
+- `setOperator` and `isOperator` support controller delegation without relying
+  on ERC-2612.
+- `previewRedeem` and `previewWithdraw` revert for the asynchronous redemption
+  path, as required by ERC-7540.
+- `maxRedeem` and `maxWithdraw` expose only the caller/controller's currently
+  claimable request, never pending liquidity.
+- A request can transition to claimable in the `requestRedeem` transaction, but
+  it never skips the claimable state and assets move only in the later
+  `redeem`/`withdraw` call.
+- ERC-7540, ERC-7575, ERC-4626, ERC-2612, ERC-20, and ERC-165 conformance is
+  covered by interface-ID and behavior tests.
+
+### 24.2 Cancellation
+
+A request may be cancelled only while fully pending and before the manager has
+committed an unwind for its batch. Cancellation returns escrowed shares and does
+not change supply. A partially processed, claimable, or claimed request cannot
+be cancelled. Emergency governance may extend claim deadlines but cannot seize
+or reprice a processed claim.
+
+### 24.3 Exit-cost allocation and swing pricing
+
+Costs are allocated by cause:
+
+- Market movement and ordinary strategy P&L before the processing checkpoint
+  affect NAV and are shared by every outstanding share, including pending
+  requests.
+- Expected normal close cost already present in the accepted liability is part
+  of NAV and is shared.
+- Incremental spread, price impact, protocol fee, and gas reimbursement caused
+  by an unwind solely to service a redemption batch are charged to that batch
+  through swing pricing.
+- Rebalance costs incurred for portfolio policy, risk reduction, expiry roll, or
+  all-holder benefit are socialized through NAV.
+
+```text
+gross redemption value = processedShares * processingNAV / eligibleSupply
+batch payout = gross value - allocated marginal exit cost - disclosed exit fee
+```
+
+The manager records reference price, actual proceeds, cost classification, and
+allocation. `minAssetsOut` protects the requester. Any unspent exit fee remains
+fund NAV; it is not an undisclosed transfer to the manager.
+
+### 24.4 Liquidity buffer and unwind order
+
+The liquidity buffer is a fund risk parameter, not a guaranteed fixed-rate
+redemption promise. `StrategyManager` enforces a configured `minimumIdleBps`,
+while `FundFlowManager` also enforces per-window and rolling outflow caps.
+Immediate claimability uses only accounting assets remaining after processed
+claims, declared distributions, fees payable in assets, minimum idle, and
+strategy collateral requirements.
+
+When the buffer is insufficient, redemption batches source liquidity in this
+order:
+
+1. Free accounting assets above required reserves.
+2. Scheduled strategy maturities or ordinary deallocation.
+3. A bounded early option close or LP unwind only when an independently
+   verified executable quote satisfies loss, spread, and slippage limits.
+4. The selected in-kind basket, when enabled for the request.
+5. Emergency raw-asset in-kind recovery after the normal route is unavailable.
+
+The allocator cannot consume the minimum idle buffer or assets already reserved
+for claims. A curator can change the target only through delayed governance, and
+the new target cannot reprice or change the mode of an existing request.
+
+Transferable shares and an optional secondary market provide a separate exit:
+selling shares transfers fund exposure and does not burn supply or force a
+strategy unwind. The fund never guarantees secondary-market price parity; an
+authorized market maker may arbitrage discounts only through the same primary
+request lifecycle and risk limits as any other controller.
+
+## 25. In-kind redemption
+
+In-kind redemption is an extension of the same request and burn lifecycle, not
+a separate supply system. It enters through
+`requestRedeemInKind(shares, controller, owner, basketVersion, minAmountsOut)`;
+that extension creates the same request record and request ID domain used by
+ERC-7540 accounting-asset requests. The request stores an immutable mode.
+Standard ERC-7540 pending/claimable views include only accounting-asset requests;
+parallel extension views expose in-kind requests so an in-kind claim can never
+be consumed through standard `redeem` or `withdraw`.
+
+At request time, the user selects an immutable approved basket mode and supplies
+asset-specific minimum outputs. Each fund publishes versioned basket definitions.
+Examples:
+
+- Wheel: free USDC and WETH.
+- Covered call: free WETH and accrued free USDC.
+- LP range: token0 and token1 after proportional liquidity removal and fee
+  collection.
+
+At processing:
+
+1. Determine the processed share fraction at one active NAV.
+2. Deallocate the proportional strategy fraction or use free assets.
+3. Measure actual received token deltas; never trust adapter return values alone.
+4. Apply fund-specific basket rules, marginal exit costs, and round each token
+   down.
+5. Verify every `minAmountOut` pro rata for the processed fraction.
+6. Burn processed shares.
+7. Transfer exact token amounts to a claim escrow and increase per-asset claim
+   reserves.
+8. Record basket version and amounts immutably.
+
+Partial processing is pro rata across all requests in the same batch. Rounding
+dust remains fund NAV until a governed dust threshold allows collection.
+Processed basket claims are excluded from NAV and cannot be reallocated.
+
+If an adapter returns an unexpected asset, processing reverts unless that asset
+is included in the active basket definition. Emergency in-kind exit can create a
+new disclosed raw-asset basket through guardian activation, but it cannot alter
+already processed claims.
+
+## 26. Fee and distribution accounting
+
+### 26.1 Management fee
+
+Management fees accrue continuously as dilution and are materialized as shares:
+
+```text
+feeAssets = preFeeNAV * annualRate * elapsed / YEAR
+feeShares = feeAssets * supply / (preFeeNAV - feeAssets)
+```
+
+The implementation uses full-precision `mulDiv` with an annual rate scaled to
+`1e18`; the expression above is descriptive rather than integer operation order.
+
+Accrual is bounded by maximum elapsed time per call and a governance cap. It is
+run before NAV activation, request processing, deposits, and distributions.
+
+### 26.2 Performance fee
+
+Performance fee is calculated from a fresh NAV before every primary-market
+window that permits deposits or redemption processing. This prevents a new
+subscriber from paying for pre-entry gains and prevents an exiting holder from
+escaping an already earned fee. It is also crystallized on configured dates and
+before a distribution, but never merely because shares transfer:
+
+```text
+gainPerShare = max(preFeePps - adjustedHighWaterMark, 0)
+gainAssets = gainPerShare * eligibleSupply / shareScale
+feeAssets = gainAssets * performanceFeeBps / 10_000
+feeShares = feeAssets * supply / (preFeeNAV - feeAssets)
+```
+
+The high-water mark is updated after crystallization. Deposits and transfers do
+not change it. Queued pending shares remain eligible until processed. Burned
+claimable shares do not pay future fees.
+
+Cash distributions reduce the high-water mark by distribution per eligible
+share so returning to the pre-distribution NAV does not create a false new gain.
+
+### 26.3 Distribution lifecycle
+
+Realized income first increases NAV. A distribution is optional and fund-policy
+specific.
+
+1. Close the primary market and activate a fresh NAV.
+2. Accrue management fee and crystallize any due performance fee.
+3. Verify the amount is free accounting asset after claims, minimum idle, and
+   required risk collateral.
+4. Record `distributionId`, amount, record block, eligible supply, policy
+   version, and expiry.
+5. Transfer the full amount to a `DistributionEscrow` immediately. This reduces
+   fund NAV and makes the amount unavailable to strategy or redemptions.
+6. Build holder entitlements from ERC-20 transfer events and the flow manager's
+   pending-request beneficial-owner ledger at the record block. Shares escrowed
+   by a pending request are attributed to its controller; they are not assigned
+   to the vault address or counted twice.
+7. Submit a Merkle root under an independent reporter quorum and challenge
+   delay.
+8. Holders claim with a Merkle proof. Transfers after the record block do not
+   transfer the recorded entitlement.
+
+The root's total claimable amount cannot exceed escrowed assets. Root replacement
+is allowed only during the challenge period and through delayed/cancelable
+governance. Expired unclaimed assets follow a disclosed policy: roll into the
+next distribution or return to the fund through a NAV-increasing transaction.
+
+This Merkle design keeps ERC-20 transfers light. A future fund that requires
+fully onchain historical entitlement can deploy a checkpoint-enabled share
+implementation as a separately reviewed version.
+
+## 27. Smart-wallet compatibility
+
+ERC-2612 remains enabled for EOAs and standard integrations, but the product does
+not depend on ECDSA-only permit.
+
+Supported paths:
+
+- Direct calls from smart wallets.
+- Smart-wallet `executeBatch` for asset approval plus deposit, or share approval
+  plus `requestRedeem`.
+- A periphery `FundRouter` using OpenZeppelin `SignatureChecker` for EOA ECDSA
+  and ERC-1271 contract signatures, with fund-bound nonces and deadlines.
+- Permit2 or token-specific permit only in the periphery, never as a custody
+  requirement in the fund core.
+
+The router is replaceable and holds no balances after a transaction. Core
+deposit and request functions remain usable without it.
+
+## 28. Stage-specific option invariants
+
+Global oToken supply need not equal one fund vault ledger because many writers
+and holders may use the same series. Invariants are scoped by owner, protocol
+vault, MM, and lifecycle stage.
+
+| Stage | Required invariant |
+| --- | --- |
+| Open | Controller short amount = settler vault oToken ledger = physical-delivery reserved amount; collateral >= requirement |
+| Partially closed | Initial short = remaining short + cumulatively closed; remaining Controller short = remaining settler ledger = remaining reservation |
+| Settled OTM | Controller vault settled; collateral return reconciled; reserved and settler vault balances are zero after oToken redemption |
+| Settled ITM, reserved | Controller vault settled; remaining oTokens are custodied and reserved; no double redemption or MM escape |
+| Physical delivery complete | Reserved amount and vault oToken ledger are zero; measured delivered asset equals strategy accounting delta |
+| Cash fallback complete | OToken ledger/reservation zero; fallback payout and collateral residual reconcile to settled collateral |
+| Emergency | Claims and custody cannot be erased; every release has a matching burn, redemption, or explicit migrated claim |
+
+Every transition emits position owner, protocol vault ID, option series, amount,
+collateral delta, payment, and resulting lifecycle state.
+
+## 29. Failure, governance, and migration policy
+
+### 29.1 NAV zero or insolvency
+
+If committed NAV is zero or liabilities exceed gross assets:
+
+- Deposits, NAV-priced processing, fee minting, and distributions stop.
+- No division assumes a positive NAV or supply.
+- Pending requests remain pending or may cancel if no unwind was committed.
+- Transfers remain enabled unless legally or operationally required otherwise.
+- Guardian may enable emergency pro-rata in-kind recovery of realizable assets.
+- Losses cannot be hidden by resetting the high-water mark or share generation.
+
+### 29.2 Donations and unaccounted balances
+
+Raw `balanceOf` is not automatically NAV. Unexpected token transfers enter an
+unaccounted balance bucket. They become shareholder assets only through a
+`syncDonation` operation covered by a new NAV report. They cannot be allocated,
+distributed, or used to manipulate deposit share price before synchronization.
+OpenZeppelin virtual assets/shares remain required for first-deposit protection.
+
+### 29.3 Adapter deficit
+
+If measured protocol state or balances are below adapter accounting:
+
+- Close primary market and pause new allocations.
+- Invalidate the component report.
+- Record and report the deficit; do not silently net it against idle assets.
+- Accept the loss only through a fresh, elevated-quorum NAV report.
+- Enable bounded deallocation or emergency exit.
+
+### 29.4 Governance constraints
+
+- Every fund retains at least one viable exit mode.
+- Redemption/distribution policy changes are delayed and versioned.
+- Pending requests retain their original mode and policy version.
+- Processed claims and declared distributions are immutable liabilities.
+- Guardian can reduce risk immediately but cannot raise caps, redirect claims,
+  upgrade implementations, or distribute assets.
+
+### 29.5 Migration
+
+Migration is a user-visible operation, not an implementation upgrade across
+incompatible storage or semantics.
+
+1. Pause new allocation and primary-market entry.
+2. Settle or safely migrate every adapter position.
+3. Process/cancel pending requests and fully reserve claims/distributions.
+4. Commit a final NAV and positions hash.
+5. Deploy the new UUPS stack and verify implementations.
+6. Exchange old shares for new shares through a dedicated migration escrow at
+   the final checkpoint, or let users redeem old assets and deposit manually.
+7. Reconcile both supplies, assets, liabilities, and unclaimed escrows.
+
+V1 and the existing CSP smoke deployment remain untouched.
+
+## 30. Revised implementation phases and approval gate
+
+### Phase 0: executable specifications
+
+- ERC-7540 conformance tests and request state machine.
+- Component NAV report schema and reporter threat model.
+- Fee/high-water-mark numerical model.
+- Exit-cost and in-kind basket simulations.
+- Proxy storage namespaces and upgrade validation harness.
+
+### Phase 1: lightweight core
+
+- `FundVault`, `FundAccounting`, `FundFlowManager`, and `StrategyManager` UUPS
+  proxies with a mock adapter.
+- OpenZeppelin AccessManager role/delay configuration.
+- Accounting-asset requests only; in-kind interfaces disabled.
+- Donation, stale NAV, fee, queue, upgrade, and failure invariants.
+
+### Phase 2: CSP adapter
+
+- CSP adapter and independent option valuator.
+- Existing expiry settlement behind the adapter.
+- Assigned WETH retained as fund inventory.
+- Queue funded by idle buffer or expiry settlement.
+
+### Phase 3: atomic early close
+
+- `OptionCloseSettler` buyback RFQ.
+- Controller reduce-short/release-collateral primitive.
+- Partial-close lifecycle invariants and swing-pricing evidence.
+
+### Phase 4: Wheel, distributions, and secondary liquidity
+
+- Wheel coordinator and protected-cost-basis policy.
+- Merkle distribution escrow.
+- Share/accounting-asset secondary market and monitoring.
+
+### Phase 5: in-kind and LP-range strategy
+
+- Versioned basket claims.
+- Concentrated-liquidity adapter and independent valuator.
+- Raw-asset emergency exit and LP-specific risk controls.
+
+No Solidity implementation should begin until the reviewer confirms that
+sections 19-30 resolve the ten blockers in section 18.2. Each phase receives its
+own threat model, tests, storage-layout baseline, and audit scope.
