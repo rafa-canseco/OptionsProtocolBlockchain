@@ -1,6 +1,6 @@
 # B1N-348: Tokenized Fund Vault Architecture
 
-Status: Revision 2 proposed for final architecture review
+Status: Approved for executable specification and implementation
 Date: 2026-07-16  
 Scope: Product and smart-contract architecture  
 Decision type: Foundational; fresh deployment required  
@@ -898,7 +898,7 @@ is the smallest architecture that solves the current CSP share problem at its
 root while remaining capable of supporting covered calls, concentrated-liquidity
 positions, more underlyings, and eventually multi-strategy funds.
 
-## 18. Reviewer conclusions
+## 18. Initial reviewer conclusions
 
 Reviewer disposition: **approve the product direction, subject to specification
 changes before implementation approval**.
@@ -987,16 +987,16 @@ The following points remain blocking for implementation approval:
     unaccounted-balance handling, adapter deficits, queue cancellation,
     emergency in-kind exits, upgrades, timelocks, and migration.
 
-### 18.3 Approval boundary
+### 18.3 Initial approval boundary
 
 The accepted direction is a fresh, standards-oriented fund core using
 transferable ERC-20 shares, ERC-4626-compatible accounting where applicable,
 strategy adapters, conservative NAV, configurable distributions, and
 fund-specific redemption policies including eventual in-kind redemption.
 
-This review does not yet authorize contract implementation. Implementation can
-begin after the blocking specifications above are incorporated and the revised
-architecture receives final approval.
+At this initial review stage, contract implementation was not yet authorized.
+Sections 19-30 incorporate the blocking specifications, and the final
+disposition at the end of section 30 supersedes this initial gate.
 
 ## 19. Normative architecture after review
 
@@ -1283,11 +1283,26 @@ The option adapter does not manipulate Controller storage directly. The settler
 verifies the quote, receives/reconciles oTokens, pays the MM, and invokes one
 Controller primitive atomically.
 
-The existing V1 Controller and BatchSettler deployments are not upgraded or
-reconfigured for this architecture. Initial CSP adapters can use their existing
-expiry-settlement interfaces. If early close requires a new Controller
-primitive, that primitive is delivered in a fresh, separately audited option
-stack; Phase 3 never changes the deployed V1 stack in place.
+The existing V1 Controller and BatchSettler bytecode, proxy implementations,
+storage layout, accounting, and settlement behavior are not changed for this
+architecture. A fresh CSP adapter does require standard authorization through
+the existing owner-only public interface:
+
+```solidity
+BatchSettler.setPhysicalDeliveryVault(cspAdapter, true);
+```
+
+This onboarding is configuration, not an implementation upgrade. Deployment
+must execute it from the current `BatchSettler` owner, verify
+`authorizedPhysicalDeliveryVault(cspAdapter) == true`, record the transaction
+hash, and fail closed before allocating fund assets if authorization is absent.
+Authorization can later be revoked with the same interface after exposure and
+reserved-delivery obligations are reconciled.
+
+Initial CSP adapters use the existing expiry-settlement interfaces. If early
+close requires a new Controller primitive, that primitive is delivered in a
+fresh, separately audited option stack; Phase 3 never changes the deployed V1
+stack in place.
 
 At expiry, `BatchSettler` remains responsible for the existing automatic
 settlement and physical-delivery accounting. The MM does not deliver WETH. The
@@ -1793,7 +1808,9 @@ incompatible storage or semantics.
    the final checkpoint, or let users redeem old assets and deposit manually.
 7. Reconcile both supplies, assets, liabilities, and unclaimed escrows.
 
-V1 and the existing CSP smoke deployment remain untouched.
+The existing CSP smoke deployment remains untouched. The future fresh fund
+reuses the V1 implementation and settlement behavior only after the CSP adapter
+receives the standard authorization specified in section 21.2.
 
 ## 30. Revised implementation phases and approval gate
 
@@ -1817,6 +1834,9 @@ V1 and the existing CSP smoke deployment remain untouched.
 
 - CSP adapter and independent option valuator.
 - Existing expiry settlement behind the adapter.
+- Owner onboarding with
+  `BatchSettler.setPhysicalDeliveryVault(cspAdapter, true)`, followed by onchain
+  authorization verification and deployment-manifest evidence.
 - Assigned WETH retained as fund inventory.
 - Queue funded by idle buffer or expiry settlement.
 
@@ -1838,6 +1858,8 @@ V1 and the existing CSP smoke deployment remain untouched.
 - Concentrated-liquidity adapter and independent valuator.
 - Raw-asset emergency exit and LP-specific risk controls.
 
-No Solidity implementation should begin until the reviewer confirms that
-sections 19-30 resolve the ten blockers in section 18.2. Each phase receives its
-own threat model, tests, storage-layout baseline, and audit scope.
+The final reviewer confirmed that sections 19-30 resolve the ten blockers in
+section 18.2 after documenting the required V1 `BatchSettler` authorization
+onboarding. The architecture is approved and implementation begins with B1N-349.
+Each phase receives its own threat model, tests, storage-layout baseline, and
+audit scope.
