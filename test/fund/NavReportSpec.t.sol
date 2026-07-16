@@ -3,12 +3,13 @@ pragma solidity 0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
 import {IFundAccounting} from "../../src/fund/interfaces/IFundAccounting.sol";
 
-contract NavReportHarness {
-    using MessageHashUtils for bytes32;
+contract NavReportHarness is EIP712 {
+    bytes32 private constant NAV_REPORT_TYPEHASH =
+        keccak256("NavReport(address fund,uint64 reporterSetVersion,bytes32 reportsHash)");
 
     error DuplicateReporter(address reporter);
     error InvalidChain(uint256 chainId);
@@ -35,7 +36,9 @@ contract NavReportHarness {
     mapping(bytes32 componentId => ComponentConfig config) public componentConfig;
     mapping(address reporter => bool active) public isReporter;
 
-    constructor(address fund_, uint64 activationDelay_, uint64 maxSnapshotAge_, uint64 maxWindowLength_) {
+    constructor(address fund_, uint64 activationDelay_, uint64 maxSnapshotAge_, uint64 maxWindowLength_)
+        EIP712("b1nary Fund NAV", "1")
+    {
         expectedFund = fund_;
         activationDelay = activationDelay_;
         maxSnapshotAge = maxSnapshotAge_;
@@ -57,11 +60,12 @@ contract NavReportHarness {
     }
 
     function reportHash(FundTypes.ComponentReport[] calldata reports) public view returns (bytes32) {
-        return keccak256(abi.encode(address(this), block.chainid, reporterSetVersion, reports));
+        return
+            keccak256(abi.encode(NAV_REPORT_TYPEHASH, expectedFund, reporterSetVersion, keccak256(abi.encode(reports))));
     }
 
     function signatureDigest(FundTypes.ComponentReport[] calldata reports) external view returns (bytes32) {
-        return reportHash(reports).toEthSignedMessageHash();
+        return _hashTypedDataV4(reportHash(reports));
     }
 
     function submitNav(
@@ -77,7 +81,7 @@ contract NavReportHarness {
         }
 
         bytes32 acceptedReportHash = reportHash(reports);
-        bytes32 digest = acceptedReportHash.toEthSignedMessageHash();
+        bytes32 digest = _hashTypedDataV4(acceptedReportHash);
         _validateReporters(reporters, signatures, digest);
 
         uint64 snapshotBlock = reports[0].snapshotBlock;

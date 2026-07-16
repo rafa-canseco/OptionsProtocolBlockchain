@@ -15,22 +15,40 @@ https://book.getfoundry.sh/
 
 ## Usage
 
+### Dependencies
+
+The fund-core upgrade toolchain is pinned in `package-lock.json`. Install it
+before running Foundry from a clean checkout:
+
+```shell
+npm ci --ignore-scripts
+npm run deps:check
+```
+
 ### Build
 
 ```shell
-$ forge build
+forge build --offline
 ```
 
 ### Test
 
 ```shell
-$ forge test
+forge test --offline
 ```
 
 ### Format
 
 ```shell
-$ forge fmt
+forge fmt
+```
+
+### Fund Core Specifications
+
+```shell
+forge test --offline --match-path 'test/fund/*'
+forge test --offline --match-path test/fund/StorageLayoutSpec.t.sol --force
+npm run storage:check
 ```
 
 ### Gas Snapshots
