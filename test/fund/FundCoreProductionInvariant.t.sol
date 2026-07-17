@@ -61,9 +61,14 @@ contract FundCoreProductionHandler is Test {
         if (redeemBatch.isReleased) return;
 
         if (!redeemBatch.processing) {
+            uint256 minProcessShares = vault.virtualShares();
+            if (redeemBatch.totalPendingShares < minProcessShares) {
+                flow.releaseRedeemBatch(batchId);
+                return;
+            }
             _synchronizeNav();
             redeemBatch = flow.batch(batchId);
-            uint256 shares = bound(sharesSeed, 1, redeemBatch.totalPendingShares);
+            uint256 shares = bound(sharesSeed, minProcessShares, redeemBatch.totalPendingShares);
             flow.startRedeemBatch(batchId, shares, 0);
         }
         flow.processRedeemBatch(batchId, FundConstants.MAX_PROCESSING_PAGE);
