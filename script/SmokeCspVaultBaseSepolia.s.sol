@@ -61,6 +61,16 @@ contract SmokeCspVaultBaseSepolia is Script {
         }
     }
 
+    function _startBroadcast() private {
+        uint256 deployerKey = vm.envOr("PRIVATE_KEY", uint256(0));
+        if (deployerKey == 0) {
+            vm.startBroadcast(DEPLOYER);
+            return;
+        }
+        require(vm.addr(deployerKey) == DEPLOYER, "PRIVATE_KEY is not the B1N-336 deployer");
+        vm.startBroadcast(deployerKey);
+    }
+
     function _open(uint256 deployerKey) private {
         require(vault.batchCount() == 0 && vault.totalShares() == 0, "OPEN already executed");
 
@@ -130,7 +140,7 @@ contract SmokeCspVaultBaseSepolia is Script {
         require(block.timestamp >= expiry, "option has not expired");
         require(OToken(physical).expiry() == expiry && OToken(fallbackToken).expiry() == expiry, "expiry mismatch");
 
-        vm.startBroadcast(DEPLOYER);
+        _startBroadcast();
         feed.setPrice(int256(EXPIRY_PRICE));
         oracle.setExpiryPrice(MOCK_WETH, expiry, EXPIRY_PRICE);
 
@@ -150,7 +160,7 @@ contract SmokeCspVaultBaseSepolia is Script {
 
     function _setFullPause(bool paused) private {
         require(controller.systemFullyPaused() != paused, "pause state already set");
-        vm.startBroadcast(DEPLOYER);
+        _startBroadcast();
         controller.setSystemFullyPaused(paused);
         vm.stopBroadcast();
         require(controller.systemFullyPaused() == paused, "pause state mismatch");
@@ -165,7 +175,7 @@ contract SmokeCspVaultBaseSepolia is Script {
         uint256 wethBefore = weth.balanceOf(DEPLOYER);
         uint256 shares = vault.sharesOf(DEPLOYER);
 
-        vm.startBroadcast(DEPLOYER);
+        _startBroadcast();
         vault.settleDefaultedCspBatch(3);
         vault.closeEpoch();
         uint256 wethClaimed = vault.claimAssignedUnderlying(DEPLOYER);

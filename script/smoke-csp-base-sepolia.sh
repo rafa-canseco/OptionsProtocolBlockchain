@@ -11,18 +11,23 @@ DEPLOYER="0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382"
 
 run_phase() {
   local phase="$1"
-  local -a wallet_args=(--account "$FOUNDRY_ACCOUNT")
 
-  if [[ "$phase" == OPEN ]]; then
+  if [[ -n "${PRIVATE_KEY:-}" ]]; then
+    CSP_SMOKE_PHASE="$phase" forge script "$SCRIPT" \
+      --rpc-url "$BASE_SEPOLIA_RPC_URL" \
+      --broadcast \
+      --slow \
+      -vvv
+    return
+  elif [[ "$phase" == OPEN ]]; then
     : "${PRIVATE_KEY:?OPEN requires PRIVATE_KEY for the EIP-712 quote signatures}"
-    wallet_args=()
   fi
 
   CSP_SMOKE_PHASE="$phase" forge script "$SCRIPT" \
     --rpc-url "$BASE_SEPOLIA_RPC_URL" \
     --broadcast \
     --slow \
-    "${wallet_args[@]}" \
+    --account "$FOUNDRY_ACCOUNT" \
     -vvv
 }
 

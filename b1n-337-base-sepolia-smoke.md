@@ -1,6 +1,6 @@
 # B1N-337 Base Sepolia CSP smoke test
 
-Status: in progress; deposit and batch opening confirmed onchain
+Status: in progress; OTM and ITM physical settlement confirmed, timeout fallback pending
 
 Network: Base Sepolia (`84532`)
 
@@ -24,7 +24,8 @@ Each batch writes `0.01 WETH` of puts. The initial deposit is `1,000 mock USDC`,
 
 - Opened: `2026-07-15`
 - Expiry: `2026-07-16 08:00:00 UTC` (`1784188800`)
-- Timeout eligible: pending (`expiry settlement preparation + 1 hour`)
+- Settlement prepared: `2026-07-17 19:41:28 UTC`
+- Timeout eligible: `2026-07-17 20:41:28 UTC` (`1784320888`)
 - Completed: pending
 
 ## Transactions
@@ -49,6 +50,14 @@ Created oTokens:
 
 ### OTM and physical settlement
 
+- Feed price `2,100 USD`, block `44274516`: [`0x20424adf...de86`](https://base-sepolia.blockscout.com/tx/0x20424adfa268d664a1fe237ed7a67e59afe8847b7a6a3e87a3129176ab45de86)
+- Expiry price, block `44274517`: [`0xb952b2f6...80c9`](https://base-sepolia.blockscout.com/tx/0xb952b2f69c06c78f4415fd2b57637e0e93b26d4495e2c050f8606c77f41b80c9)
+- OTM settlement, block `44274518`: [`0x29d95bb6...d7e`](https://base-sepolia.blockscout.com/tx/0x29d95bb6bed6905e488d692403f6044ba3934999241d142225481527747abd7e)
+- ITM preparation, block `44274519`: [`0xcb93b337...0a39`](https://base-sepolia.blockscout.com/tx/0xcb93b3373f073dbe71943c0c0bd31b6852db41945ddc3119c78558ca92480a39)
+- ITM physical delivery, block `44274520`: [`0x279a9442...9ffd`](https://base-sepolia.blockscout.com/tx/0x279a94424398deed63a17ac8661a4e8b728a8751dd3fe2c76ce41bde8c0e9ffd)
+- ITM finalization, block `44274521`: [`0x7e0490ef...44ec`](https://base-sepolia.blockscout.com/tx/0x7e0490ef6dd1a6ad04de4ba864ef6f0e1f792a8280ebed8e83ed1cbdac5444ec)
+- Fallback preparation, block `44274522`: [`0x51843c6a...b022`](https://base-sepolia.blockscout.com/tx/0x51843c6aa9a9909927c73455a06ec9c1549e79acf570b7e43d7b9f9a4b23b022)
+
 Before open, the vault held `0 USDC`, `0 WETH`, and had no shares or batches.
 
 After open, independently read from Base Sepolia RPC:
@@ -62,21 +71,40 @@ After open, independently read from Base Sepolia RPC:
 | Active collateral | `65 USDC` |
 | Net premium per batch | `0.009600 USDC` |
 
-All nine opening receipts have status `0x1`. The vault's token balance and `accountedIdleAssets` are equal.
+All opening and settlement receipts have status `0x1`.
+
+Decoded settlement events:
+
+- `ExpiryPriceSet(WETH, 1784188800, 210000000000)`.
+- OTM `CspBatchSettled(1, 1, 1, 20000000, 0, 0)`.
+- ITM `PhysicalDelivery(oToken, vault, 10000000000000000, 21000000)`.
+- ITM `CspBatchSettled(2, 1, 2, 0, 10000000000000000, 22000000)`.
+- Batch 3 emitted `VaultSettled` and `PhysicalDeliveryReleased`; it remains prepared for fallback.
 
 ### Emergency guard
 
-Pending. The expected behavior is that `settleDefaultedCspBatch(3)` reverts with `SettlementDefaultNotReady` while the Controller is fully paused, preserving the prepared claim. Pause and unpause transactions will be recorded here.
+- Full pause, block `44274549`: [`0xf48f0baa...5f59`](https://base-sepolia.blockscout.com/tx/0xf48f0baa7ad7891984fe6acae69b5be446f0060a62a72e927d32a897d8995f59)
+- `settleDefaultedCspBatch(3)` reverted with exact `SettlementDefaultNotReady()` data
+  `0x4bcc2fc6` while fully paused.
+- Unpause, block `44274552`: [`0xbe796296...b2d`](https://base-sepolia.blockscout.com/tx/0xbe796296096bef0f604bf813d9eb64c5925661e730457aa00e6b13cdf77a3b2d)
+- Post-check: `systemFullyPaused == false`, `preparedSettlementBatchId == 3`.
 
 ### Timeout fallback and withdrawal
 
-- Deposit, share mint, quote execution, collateral reservation, and batch identifiers match expected accounting onchain.
-- No contract bug found in the opening phase.
-- Settlement remains time-gated by the protocol's valid 08:00 UTC expiry and cannot be completed before `2026-07-16 08:00 UTC`.
+- Batch 3 fallback remains time-gated until `2026-07-17 20:41:28 UTC`.
 
 ## Balance evidence
 
-Pending.
+| State after OTM + ITM settlement | Token balance | Accounted ledger |
+| --- | ---: | ---: |
+| Vault USDC | `955.025920` | `955.025920` |
+| Vault WETH | `0.010000000000000000` | `0.010000000000000000` |
+
+- `activeBatches = 1`.
+- `activeCollateral = 23 USDC`.
+- `preparedSettlementBatchId = 3`.
+- `batchUnderlyingReceived(2) = 0.01 WETH`.
+- Token balances and both accounted ledgers match exactly.
 
 ## Events for backend/indexer
 
@@ -98,8 +126,8 @@ Indexer addresses are the `integrationEnv` values in `deployments-csp-base-sepol
 
 ## Commands
 
-Export `BASE_SEPOLIA_RPC_URL`. The pending settlement phases use the Foundry
-`operator` keystore and prompt for its password interactively:
+Load the Fish-format project `.env`, which provides the Base Sepolia RPC and testnet deployer key,
+then run each pending phase:
 
 ```bash
 script/smoke-csp-base-sepolia.sh open
@@ -108,12 +136,16 @@ script/smoke-csp-base-sepolia.sh emergency
 script/smoke-csp-base-sepolia.sh finalize
 ```
 
-Set `FOUNDRY_ACCOUNT` to override the default `operator` account. The already-completed `open`
-phase is the only legacy phase that still requires `PRIVATE_KEY`, because it creates EIP-712 quote
+If `PRIVATE_KEY` is unavailable, the pending settlement phases fall back to the Foundry `operator`
+keystore and prompt for its password interactively. Set `FOUNDRY_ACCOUNT` to override that account.
+The already-completed `open` phase always requires `PRIVATE_KEY` because it creates EIP-712 quote
 signatures inside the Solidity script.
 
 `settle` must run after expiry. `finalize` must run at least one hour after `settle` because the deployed vault enforces the minimum default delay.
 
 ## Findings
 
-Pending.
+- No contract accounting mismatch was observed in OTM or ITM physical settlement.
+- The runner initially decoded the batch `amount` as `protocolVaultId`; fixed in commit `938cd58`
+  before broadcast. The failed attempt was simulation-only and changed no onchain state.
+- Timeout fallback and final post-withdrawal reconciliation remain pending.
