@@ -161,6 +161,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         nav.grossAssets = $.committedNav;
         nav.netAssets = $.committedNav;
         nav.liquidAccountingAssets = $.accountedIdleAssets;
+        nav.baseExitCost = $.baseExitCost;
         nav.snapshotBlock = $.snapshotBlock;
         nav.validAfterBlock = $.navValidAfterBlock;
         nav.validUntilBlock = $.navValidUntilBlock;
@@ -300,6 +301,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         uint256 rawIdle = IERC20($.accountingAsset).balanceOf(address(this));
         $.committedNav = nav.netAssets;
         $.accountedIdleAssets = rawIdle;
+        $.baseExitCost = nav.baseExitCost;
         $.unaccountedBalances[$.accountingAsset] = 0;
         $.positionsHash = nav.positionsHash;
         $.reportHash = nav.reportHash;
@@ -492,7 +494,9 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         if ($.redemptionsPaused || shares == 0 || controller == address(0) || owner == address(0)) {
             revert UnauthorizedOperator(controller, msg.sender);
         }
-        if (msg.sender != owner && !isOperator(owner, msg.sender)) _spendAllowance(owner, msg.sender, shares);
+        if (msg.sender != owner && !(controller == owner && isOperator(controller, msg.sender))) {
+            _spendAllowance(owner, msg.sender, shares);
+        }
 
         requestId = IFundFlowManagerVault($.flowManager)
             .recordRedeemRequest(msg.sender, shares, controller, owner, minAssetsOut);

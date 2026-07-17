@@ -150,7 +150,10 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
             }
             controllers.push(controller);
             account.indexPlusOne = uint16(controllers.length);
+            account.refundOwner = owner;
             $.redemptions[controller].latestBatchId = $.openBatchId;
+        } else if (account.refundOwner != owner) {
+            revert RequestOwnerMismatch(controller, account.refundOwner, owner);
         }
 
         account.pendingShares += shares;
@@ -182,6 +185,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
                 || redeemBatch.unwindCommitted
         ) revert RequestNotCancelable();
 
+        address refundOwner = account.refundOwner;
         uint256 minReduction = Math.mulDiv(account.pendingMinAssetsOut, shares, account.pendingShares);
         account.pendingShares -= shares;
         account.pendingMinAssetsOut -= minReduction;
@@ -198,7 +202,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         }
 
         uint256 lockId = IFundVaultFlow($.fund).beginModuleExecution($.compatibilityVersion);
-        IFundVaultFlow($.fund).returnEscrowedShares(controller, shares);
+        IFundVaultFlow($.fund).returnEscrowedShares(refundOwner, shares);
         IFundVaultFlow($.fund).endModuleExecution(lockId);
         emit PendingCancelled(controller, shares);
     }
@@ -250,6 +254,10 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
                 || (redeemBatch.processedShares != 0 && nav.reportNonce <= redeemBatch.processingReportNonce)
         ) revert BatchNotProcessable(batchId);
 
+        uint256 authorizedExitCost = Math.mulDiv(nav.baseExitCost, shares, eligibleSupply, Math.Rounding.Ceil);
+        if (marginalExitCost != authorizedExitCost) {
+            revert InvalidMarginalExitCost(authorizedExitCost, marginalExitCost);
+        }
         (, uint256 roundAssetBudget,) =
             FundMath.redemptionPayout(shares, processingNav, eligibleSupply, marginalExitCost, $.maxExitFeeBps);
         _validateBatchMinimums($, batchId, shares, redeemBatch.totalPendingShares, roundAssetBudget);
@@ -277,10 +285,6 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         redeemBatch.reservedAssets += roundAssetBudget;
         $.totalReservedAssets += roundAssetBudget;
 
-        address[] storage controllers = $.batchControllers[batchId];
-        for (uint256 i; i < controllers.length; ++i) {
-            $.redemptions[controllers[i]].unwindCommitted = true;
-        }
         vault.endModuleExecution(lockId);
         emit RedeemBatchStarted(batchId, shares, processingNav, roundAssetBudget, marginalExitCost);
     }
@@ -341,6 +345,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
             redeemBatch.totalPendingShares -= redeemBatch.roundTargetShares;
             redeemBatch.processedShares += redeemBatch.roundTargetShares;
             redeemBatch.processing = false;
+            redeemBatch.unwindCommitted = false;
             if (redeemBatch.totalPendingShares == 0) $.nextProcessBatchId = batchId + 1;
             vault.restoreNavWindow(
                 redeemBatch.processingReportNonce,

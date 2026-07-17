@@ -114,6 +114,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
 
         address internal alice = makeAddr("alice");
         address internal bob = makeAddr("bob");
+        address internal operator = makeAddr("operator");
         address internal feeRecipient = makeAddr("feeRecipient");
 
         function setUp() public {
@@ -284,6 +285,55 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(vault.maxRedeem(alice), 0);
         }
 
+        function test_operatorCannotRedirectOrCancelOwnerSharesToItself() public {
+            _depositForAlice(100e6);
+            vm.prank(alice);
+            vault.setOperator(operator, true);
+
+            vm.prank(operator);
+            vm.expectRevert();
+            vault.requestRedeem(40e18, operator, alice);
+
+            vm.prank(operator);
+            vault.requestRedeem(40e18, alice, alice);
+            vm.prank(operator);
+            vault.cancelRedeemRequest(alice, 40e18);
+
+            assertEq(vault.balanceOf(alice), 100e18);
+            assertEq(vault.balanceOf(operator), 0);
+            assertEq(vault.balanceOf(address(vault)), 0);
+        }
+
+        function test_allowanceRequesterCannotReceiveOwnersCancelledShares() public {
+            _depositForAlice(100e6);
+            vm.prank(alice);
+            vault.approve(operator, 40e18);
+
+            vm.prank(operator);
+            vault.requestRedeem(40e18, operator, alice);
+            vm.prank(operator);
+            vault.cancelPending(40e18);
+
+            assertEq(vault.balanceOf(alice), 100e18);
+            assertEq(vault.balanceOf(operator), 0);
+        }
+
+        function test_processorCannotChooseMarginalExitCost() public {
+            _depositForAlice(100e6);
+            _submitNavWithExitCost(100e6, 100e6, 10e6);
+            vm.prank(alice);
+            vault.requestRedeem(40e18, alice, alice);
+            flow.sealRedeemBatch(1);
+
+            vm.expectRevert(
+                abi.encodeWithSelector(IFundFlowManager.InvalidMarginalExitCost.selector, uint256(4e6), uint256(40e6))
+            );
+            flow.startRedeemBatch(1, 40e18, 40e6);
+
+            flow.startRedeemBatch(1, 40e18, 4e6);
+            assertEq(asset.balanceOf(vault.claimEscrow()), 36e6);
+        }
+
         function test_partialBatchRequiresFreshNavBeforeItsNextRound() public {
             _depositForAlice(100e6);
             vm.prank(alice);
@@ -301,6 +351,34 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             flow.processRedeemBatch(1, 16);
             assertEq(vault.claimableRedeemRequest(0, alice), 40e18);
             assertEq(vault.pendingRedeemRequest(0, alice), 0);
+        }
+
+        function test_partialBatchRemainderCanBeReleasedAndCancelled() public {
+            _depositForAlice(100e6);
+            vm.prank(alice);
+            vault.requestRedeemWithMinAssets(40e18, alice, alice, 40e6);
+            flow.sealRedeemBatch(1);
+            flow.startRedeemBatch(1, 20e18, 0);
+            flow.processRedeemBatch(1, 16);
+
+            vm.prank(alice);
+            vault.redeem(20e18, alice, alice);
+            _submitNav(20e6, 80e6);
+
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    IFundFlowManager.MinimumAssetsNotMet.selector, alice, uint256(20e6), uint256(5e6)
+                )
+            );
+            flow.startRedeemBatch(1, 20e18, 0);
+
+            flow.releaseRedeemBatch(1);
+            vm.prank(alice);
+            vault.cancelPending(20e18);
+
+            assertEq(flow.nextProcessBatchId(), 2);
+            assertEq(vault.pendingRedeemRequest(0, alice), 0);
+            assertEq(vault.balanceOf(alice), 80e18);
         }
 
         function test_minimumAssetsIsValidatedBeforeFundsAreCommitted() public {
@@ -494,6 +572,10 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         }
 
         function _submitNav(uint256 grossAssets, uint256 liquidAssets) private {
+            _submitNavWithExitCost(grossAssets, liquidAssets, 0);
+        }
+
+        function _submitNavWithExitCost(uint256 grossAssets, uint256 liquidAssets, uint256 baseExitCost) private {
             vm.roll(block.number + 2);
             uint64 snapshotBlock = uint64(block.number - 1);
             bytes32 snapshotHash = keccak256(abi.encode("snapshot", snapshotBlock));
@@ -517,7 +599,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
                 grossAssets: grossAssets,
                 liabilities: 0,
                 liquidAccountingAssets: liquidAssets,
-                baseExitCost: 0,
+                baseExitCost: baseExitCost,
                 dataHash: keccak256(abi.encode(grossAssets, liquidAssets))
             });
 

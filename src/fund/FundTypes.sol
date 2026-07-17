@@ -71,6 +71,7 @@ library FundTypes {
     struct RedemptionAccount {
         uint256 pendingShares;
         uint256 pendingMinAssetsOut;
+        address refundOwner;
         uint16 indexPlusOne;
     }
 

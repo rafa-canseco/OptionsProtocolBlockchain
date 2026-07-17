@@ -7,8 +7,10 @@ interface IFundFlowManager {
     error BatchNotReleasable(uint64 batchId);
     error ClaimExceedsAvailable();
     error InvalidProcessingPage(uint16 requested, uint16 maximum);
+    error InvalidMarginalExitCost(uint256 expected, uint256 actual);
     error MinimumAssetsNotMet(address controller, uint256 minimum, uint256 actual);
     error PendingRequestInSealedBatch(address controller, uint64 batchId);
+    error RequestOwnerMismatch(address controller, address expectedOwner, address actualOwner);
     error RequestNotCancelable();
     error UnauthorizedOperator(address controller, address caller);
 
