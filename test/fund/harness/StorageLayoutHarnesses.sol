@@ -9,6 +9,7 @@ import {FundAccountingStorage} from "../../../src/fund/storage/FundAccountingSto
 import {FundFlowManagerStorage} from "../../../src/fund/storage/FundFlowManagerStorage.sol";
 import {StrategyManagerStorage} from "../../../src/fund/storage/StrategyManagerStorage.sol";
 import {CspFundAdapterStorage} from "../../../src/fund/storage/CspFundAdapterStorage.sol";
+import {FundTypes} from "../../../src/fund/FundTypes.sol";
 
 abstract contract StorageHarnessBase is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     function __StorageHarnessBase_init(address owner) internal onlyInitializing {
@@ -60,7 +61,43 @@ contract FundAccountingStorageHarnessV1 is StorageHarnessBase, FundAccountingSto
     }
 }
 
-contract FundFlowManagerStorageHarnessV1 is StorageHarnessBase, FundFlowManagerStorage {
+abstract contract FundFlowManagerStorageV1Definition {
+    struct OutflowWindow {
+        uint256 eligibleSupply;
+        uint256 processedShares;
+    }
+
+    /// @custom:storage-location erc7201:b1nary.storage.FundFlowManager
+    struct FundFlowManagerStorageLayout {
+        address fund;
+        address claimEscrow;
+        uint64 compatibilityVersion;
+        uint64 nextProcessBatchId;
+        uint64 openBatchId;
+        uint256 totalPendingShares;
+        uint256 totalClaimableShares;
+        uint256 totalReservedAssets;
+        mapping(address controller => mapping(address operator => bool approved)) operators;
+        mapping(address controller => FundTypes.RedemptionState state) redemptions;
+        mapping(uint64 batchId => FundTypes.RedemptionBatch batch) batches;
+        mapping(uint64 batchId => address[] controllers) batchControllers;
+        mapping(uint64 batchId => mapping(address controller => FundTypes.RedemptionAccount account)) batchAccounts;
+        uint16 maxExitFeeBps;
+        uint16 maxWindowOutflowBps;
+        mapping(uint64 reportNonce => OutflowWindow window) outflowWindows;
+    }
+
+    bytes32 internal constant FUND_FLOW_MANAGER_STORAGE_LOCATION =
+        0xa2150758e26bb44e0a441458c3c47420e0cafabeb20258a8fa06803a087dec00;
+
+    function _getFundFlowManagerStorage() internal pure returns (FundFlowManagerStorageLayout storage $) {
+        assembly {
+            $.slot := FUND_FLOW_MANAGER_STORAGE_LOCATION
+        }
+    }
+}
+
+contract FundFlowManagerStorageHarnessV1 is StorageHarnessBase, FundFlowManagerStorageV1Definition {
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -76,6 +113,32 @@ contract FundFlowManagerStorageHarnessV1 is StorageHarnessBase, FundFlowManagerS
 
     function setFund(address value) external onlyOwner {
         _getFundFlowManagerStorage().fund = value;
+    }
+}
+
+/// @custom:oz-upgrades-from FundFlowManagerStorageHarnessV1
+contract FundFlowManagerStorageHarnessV2 is StorageHarnessBase, FundFlowManagerStorage {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address owner) external initializer {
+        __StorageHarnessBase_init(owner);
+    }
+
+    function storageLocation() external pure returns (bytes32) {
+        return FUND_FLOW_MANAGER_STORAGE_LOCATION;
+    }
+
+    function setFund(address value) external onlyOwner {
+        _getFundFlowManagerStorage().fund = value;
+    }
+
+    function setStrategyExitEscrows(address inKindEscrow, address emergencyEscrow) external onlyOwner {
+        FundFlowManagerStorageLayout storage $ = _getFundFlowManagerStorage();
+        $.strategyInKindEscrow = inKindEscrow;
+        $.strategyEmergencyEscrow = emergencyEscrow;
     }
 }
 

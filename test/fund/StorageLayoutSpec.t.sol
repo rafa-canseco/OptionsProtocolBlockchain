@@ -9,6 +9,7 @@ import {
     FundVaultStorageHarnessV2,
     FundAccountingStorageHarnessV1,
     FundFlowManagerStorageHarnessV1,
+    FundFlowManagerStorageHarnessV2,
     StrategyManagerStorageHarnessV1,
     CspFundAdapterStorageHarnessV1
 } from "./harness/StorageLayoutHarnesses.sol";
@@ -32,6 +33,7 @@ contract StorageLayoutSpecTest is Test {
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundVaultStorageHarnessV1"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundAccountingStorageHarnessV1"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV1"), options);
+        Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV2"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV1"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "CspFundAdapterStorageHarnessV1"), options);
     }
@@ -40,6 +42,8 @@ contract StorageLayoutSpecTest is Test {
         Options memory options;
         options.referenceContract = string.concat(HARNESS_PATH, "FundVaultStorageHarnessV1");
         Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "FundVaultStorageHarnessV2"), options);
+        options.referenceContract = string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV1");
+        Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV2"), options);
     }
 
     function test_compatibleUupsUpgradePreservesNamespacedState() public {

@@ -315,6 +315,29 @@ contract CspFundAdapterTest is Test {
         assertEq(settler.vaultOTokenBalance(address(adapter), 1), 0);
     }
 
+    function test_physicalDeliveryIsolatesUnexpectedWethDonation() public {
+        _authorizeAndOpen();
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1_800e8);
+
+        strategyManager.deallocate(adapter, 1, 0, _settleData());
+        weth.mint(address(adapter), 1);
+        settler.operatorPhysicalRedeemVault(address(adapter), 1, COLLATERAL);
+        strategyManager.deallocate(adapter, 1, 0, _settleData());
+
+        ICspFundAdapter.Position memory assigned = adapter.position(1);
+        assertEq(uint256(assigned.lifecycle), uint256(ICspFundAdapter.Lifecycle.Assigned));
+        assertEq(assigned.assignedWeth, 1e18);
+        assertEq(adapter.adapterState().accountedWeth, 1e18);
+        assertEq(weth.balanceOf(address(adapter)), 1e18 + 1);
+
+        ICspFundValuator.ValuationData memory emptyData =
+            ICspFundValuator.ValuationData({optionObservations: new ICspFundValuator.OptionObservation[](0)});
+        FundTypes.PositionValue memory value =
+            valuator.value(address(adapter), uint64(block.number), abi.encode(emptyData));
+        assertEq(value.grossAssets, adapter.adapterState().accountedUsdc + 1_800e6);
+    }
+
     function test_valuatorUsesExactQuorumConservativeMaximumAndSnapshotBinding() public {
         _authorizeAndOpen();
         uint64 snapshot = uint64(block.number);
@@ -380,6 +403,8 @@ contract CspFundAdapterTest is Test {
 
         vm.expectRevert(ICspFundAdapter.InvalidRiskConfig.selector);
         strategyManager.deallocateInKind(adapter, 0.5e18, escrow);
+        vm.expectRevert(ICspFundAdapter.InvalidRiskConfig.selector);
+        strategyManager.emergencyExit(adapter, escrow);
 
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1_800e8);

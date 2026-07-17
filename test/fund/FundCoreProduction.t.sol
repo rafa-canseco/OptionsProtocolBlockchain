@@ -88,6 +88,8 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
     }
 }
 
+    contract ProductionAssetEscrow {}
+
     contract ProductionPositionValuator is IPositionValuator {
         function interfaceVersion() external pure returns (uint64) {
             return 1;
@@ -846,9 +848,28 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(afterAllocation.positionStateHash, adapter.positionStateHash());
             bytes32 positionsBefore = strategy.positionsHash();
 
-            address rawEscrow = makeAddr("raw-escrow");
+            address rawEscrow = address(new ProductionAssetEscrow());
+            address emergencyEscrow = address(new ProductionAssetEscrow());
+            _scheduleAndCall(address(flow), abi.encodeCall(flow.setStrategyExitEscrows, (rawEscrow, emergencyEscrow)));
+            bytes32 batchId = keccak256("production-in-kind-batch");
+
+            vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.StrategyExitBatchInvalid.selector, batchId));
+            strategy.deallocateInKind(batchId, address(adapter), 0.5e18, "");
+
+            _scheduleAndCall(
+                address(flow),
+                abi.encodeCall(
+                    flow.authorizeStrategyInKindBatch,
+                    (batchId, address(adapter), 0.5e18, uint64(block.timestamp + 7 days))
+                )
+            );
+            vm.expectRevert(FundFlowManager.InvalidAddress.selector);
+            flow.consumeStrategyInKindBatch(batchId, address(adapter), 0.5e18);
+            vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.StrategyExitBatchInvalid.selector, batchId));
+            strategy.deallocateInKind(batchId, address(adapter), 0.4e18, "");
+
             (address[] memory assets, uint256[] memory amounts) =
-                strategy.deallocateInKind(address(adapter), 0.5e18, rawEscrow, "");
+                strategy.deallocateInKind(batchId, address(adapter), 0.5e18, "");
 
             assertEq(assets.length, 1);
             assertEq(assets[0], address(asset));
@@ -861,6 +882,21 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(afterExit.nonce, 2);
             assertEq(afterExit.positionStateHash, adapter.positionStateHash());
             assertEq(vault.maxDeposit(alice), 0);
+
+            vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.StrategyExitBatchInvalid.selector, batchId));
+            strategy.deallocateInKind(batchId, address(adapter), 0.5e18, "");
+
+            bytes32 expiredBatchId = keccak256("expired-production-in-kind-batch");
+            _scheduleAndCall(
+                address(flow),
+                abi.encodeCall(
+                    flow.authorizeStrategyInKindBatch,
+                    (expiredBatchId, address(adapter), 0.5e18, uint64(block.timestamp + 3 days))
+                )
+            );
+            vm.warp(block.timestamp + 2 days);
+            vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.StrategyExitBatchInvalid.selector, expiredBatchId));
+            strategy.deallocateInKind(expiredBatchId, address(adapter), 0.5e18, "");
         }
 
         function test_strategyEmergencyExitSynchronizesHashAndDisablesAllocation() public {
@@ -868,15 +904,19 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             (ProductionStrategyAdapter adapter,) = _configureProductionStrategy(50e6, 10_000);
             strategy.allocate(address(adapter), address(asset), 40e6, "");
             bytes32 componentId = accounting.strategyComponentId(address(adapter));
-            address rawEscrow = makeAddr("emergency-escrow");
+            address inKindEscrow = address(new ProductionAssetEscrow());
+            address emergencyEscrow = address(new ProductionAssetEscrow());
+            _scheduleAndCall(
+                address(flow), abi.encodeCall(flow.setStrategyExitEscrows, (inKindEscrow, emergencyEscrow))
+            );
 
-            (address[] memory assets, uint256[] memory amounts) =
-                strategy.emergencyExit(address(adapter), rawEscrow, "");
+            (address[] memory assets, uint256[] memory amounts) = strategy.emergencyExit(address(adapter), "");
 
             assertEq(assets.length, 1);
             assertEq(assets[0], address(asset));
             assertEq(amounts[0], 40e6);
-            assertEq(asset.balanceOf(rawEscrow), 40e6);
+            assertEq(asset.balanceOf(emergencyEscrow), 40e6);
+            assertEq(asset.balanceOf(inKindEscrow), 0);
             assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 0);
             assertFalse(strategy.strategyConfig(address(adapter)).active);
             assertEq(strategy.positionNonce(address(adapter)), 2);
