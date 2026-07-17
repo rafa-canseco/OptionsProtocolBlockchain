@@ -2,6 +2,7 @@
 pragma solidity 0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -100,6 +101,8 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         bytes32 internal constant IDLE_COMPONENT = keccak256("IDLE_ACCOUNTING_ASSET");
         bytes32 internal constant ERC1967_IMPLEMENTATION_SLOT =
             0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+        bytes32 internal constant PERMIT_TYPEHASH =
+            keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
         uint256 internal constant REPORTER_ONE_KEY = 0xA11CE;
         uint256 internal constant REPORTER_TWO_KEY = 0xB0B;
 
@@ -238,6 +241,76 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(manager.getRoleGrantDelay(FundConstants.CURATOR_ROLE), FundConstants.CURATOR_DELAY);
             assertEq(manager.getTargetAdminDelay(address(share)), FundConstants.CORE_UPGRADE_DELAY);
             assertEq(manager.getTargetAdminDelay(address(vault)), FundConstants.CORE_UPGRADE_DELAY);
+        }
+
+        function test_factoryEmitsErc7575VaultUpdateWithNonIndexedVault() public {
+            FundFactory.CreateFundParams memory params = _defaultCreateParams(keccak256("erc7575-vault-update"));
+
+            vm.recordLogs();
+            FundFactory.FundDeployment memory deployed = factory.createFund(params);
+            Vm.Log[] memory logs = vm.getRecordedLogs();
+
+            bytes32 eventSignature = keccak256("VaultUpdate(address,address)");
+            bool found;
+            for (uint256 i; i < logs.length; ++i) {
+                if (
+                    logs[i].emitter != deployed.share || logs[i].topics.length == 0
+                        || logs[i].topics[0] != eventSignature
+                ) continue;
+
+                assertEq(logs[i].topics.length, 2);
+                assertEq(logs[i].topics[1], bytes32(uint256(uint160(address(asset)))));
+                assertEq(abi.decode(logs[i].data, (address)), deployed.vault);
+                found = true;
+                break;
+            }
+
+            assertTrue(found);
+            assertEq(FundShare(deployed.share).vault(address(asset)), deployed.vault);
+        }
+
+        function test_productionFundShareSupportsErc7575ShareInterface() public view {
+            assertTrue(share.supportsInterface(FundConstants.ERC7575_SHARE_INTERFACE_ID));
+            assertTrue(share.supportsInterface(FundConstants.ERC165_INTERFACE_ID));
+            assertFalse(share.supportsInterface(0xffffffff));
+        }
+
+        function test_productionFundSharePermitSetsAllowance() public {
+            uint256 ownerKey = 0xC0FFEE;
+            address owner = vm.addr(ownerKey);
+            uint256 value = 25e18;
+            uint256 deadline = block.timestamp + 1 days;
+
+            asset.mint(owner, 100e6);
+            vm.startPrank(owner);
+            asset.approve(address(vault), 100e6);
+            vault.deposit(100e6, owner);
+            vm.stopPrank();
+
+            bytes32 structHash = keccak256(abi.encode(PERMIT_TYPEHASH, owner, operator, value, 0, deadline));
+            bytes32 digest = keccak256(abi.encodePacked("\x19\x01", share.DOMAIN_SEPARATOR(), structHash));
+            (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, digest);
+
+            share.permit(owner, operator, value, deadline, v, r, s);
+
+            assertEq(share.allowance(owner, operator), value);
+            assertEq(share.nonces(owner), 1);
+        }
+
+        function test_productionFundShareRejectsUnauthorizedVaultOperations() public {
+            bytes memory unauthorized = abi.encodeWithSelector(FundShare.UnauthorizedVault.selector, address(this));
+
+            vm.expectRevert(unauthorized);
+            share.mint(alice, 1);
+
+            vm.expectRevert(unauthorized);
+            share.burn(alice, 1);
+
+            vm.expectRevert(unauthorized);
+            share.escrowShares(alice, alice, 1);
+
+            vm.expectRevert(unauthorized);
+            share.returnEscrowedShares(alice, 1);
         }
 
         function test_adminCannotImmediatelyCreateUpgraderOrRewriteTargetPolicy() public {

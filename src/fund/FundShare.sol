@@ -15,7 +15,7 @@ contract FundShare is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
     error InvalidVaultAsset(address asset);
     error UnauthorizedVault(address caller);
 
-    event VaultUpdate(address indexed asset, address indexed vault);
+    event VaultUpdate(address indexed asset, address vault);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
