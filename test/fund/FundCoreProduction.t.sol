@@ -211,12 +211,58 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             );
 
             (bool factoryIsAdmin,) = manager.hasRole(manager.ADMIN_ROLE(), address(factory));
-            (bool fundAdmin,) = manager.hasRole(manager.ADMIN_ROLE(), address(this));
+            (bool fundAdmin, uint32 adminDelay) = manager.hasRole(manager.ADMIN_ROLE(), address(this));
             (bool upgrader, uint32 upgraderDelay) = manager.hasRole(FundConstants.UPGRADER_ROLE, address(this));
             assertFalse(factoryIsAdmin);
             assertTrue(fundAdmin);
+            assertEq(adminDelay, FundConstants.CORE_UPGRADE_DELAY);
             assertTrue(upgrader);
             assertEq(upgraderDelay, FundConstants.CORE_UPGRADE_DELAY);
+            assertEq(manager.getRoleGrantDelay(manager.ADMIN_ROLE()), FundConstants.CORE_UPGRADE_DELAY);
+            assertEq(manager.getRoleGrantDelay(FundConstants.UPGRADER_ROLE), FundConstants.CORE_UPGRADE_DELAY);
+            assertEq(manager.getRoleGrantDelay(FundConstants.CURATOR_ROLE), FundConstants.CURATOR_DELAY);
+            assertEq(manager.getTargetAdminDelay(address(vault)), FundConstants.CORE_UPGRADE_DELAY);
+        }
+
+        function test_adminCannotImmediatelyCreateUpgraderOrRewriteTargetPolicy() public {
+            address newUpgrader = makeAddr("new-upgrader");
+            bytes memory grantData =
+                abi.encodeCall(manager.grantRole, (FundConstants.UPGRADER_ROLE, newUpgrader, uint32(0)));
+            vm.expectRevert();
+            manager.grantRole(FundConstants.UPGRADER_ROLE, newUpgrader, 0);
+
+            bytes4[] memory selectors = new bytes4[](1);
+            selectors[0] = bytes4(keccak256("upgradeToAndCall(address,bytes)"));
+            uint64 publicRole = manager.PUBLIC_ROLE();
+            vm.expectRevert();
+            manager.setTargetFunctionRole(address(vault), selectors, publicRole);
+
+            manager.schedule(address(manager), grantData, 0);
+            vm.warp(block.timestamp + FundConstants.CORE_UPGRADE_DELAY);
+            manager.grantRole(FundConstants.UPGRADER_ROLE, newUpgrader, 0);
+            (bool activeBeforeGrantDelay,) = manager.hasRole(FundConstants.UPGRADER_ROLE, newUpgrader);
+            assertFalse(activeBeforeGrantDelay);
+
+            vm.warp(block.timestamp + FundConstants.CORE_UPGRADE_DELAY);
+            (bool activeAfterGrantDelay, uint32 executionDelay) =
+                manager.hasRole(FundConstants.UPGRADER_ROLE, newUpgrader);
+            assertTrue(activeAfterGrantDelay);
+            assertEq(executionDelay, 0);
+        }
+
+        function test_create2DeploymentIdBindsCreatorAdminAndConfiguration() public view {
+            FundFactory.CreateFundParams memory params = _defaultCreateParams(keccak256("front-run-resistant"));
+            bytes32 aliceId = factory.computeDeploymentId(params, alice);
+            bytes32 bobId = factory.computeDeploymentId(params, bob);
+            assertNotEq(aliceId, bobId);
+
+            params.roles.admin = bob;
+            bytes32 differentAdminId = factory.computeDeploymentId(params, alice);
+            assertNotEq(aliceId, differentAdminId);
+
+            params.minimumIdleBps = 2_000;
+            bytes32 differentConfigId = factory.computeDeploymentId(params, alice);
+            assertNotEq(differentAdminId, differentConfigId);
         }
 
         function test_activeNavEnablesDepositsAndStaleNavDoesNotFreezeTransfers() public {
@@ -334,6 +380,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             FundAccounting bootstrapAccounting = FundAccounting(deployed.accounting);
             AccessManager bootstrapManager = AccessManager(deployed.accessManager);
 
+            vm.warp(block.timestamp + FundConstants.CURATOR_DELAY);
             bytes memory componentData =
                 abi.encodeCall(bootstrapAccounting.setComponent, (IDLE_COMPONENT, address(0), uint64(1), true));
             bootstrapManager.schedule(address(bootstrapAccounting), componentData, 0);
@@ -741,6 +788,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         }
 
         function _scheduleAndConfigureNavSources() private {
+            vm.warp(block.timestamp + FundConstants.CORE_UPGRADE_DELAY);
             address[] memory reporters = new address[](2);
             reporters[0] = vm.addr(REPORTER_ONE_KEY);
             reporters[1] = vm.addr(REPORTER_TWO_KEY);
@@ -752,6 +800,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             vm.warp(block.timestamp + FundConstants.CURATOR_DELAY);
             accounting.setReporterSet(reporters, 2, 1);
             accounting.setComponent(IDLE_COMPONENT, address(0), 1, true);
+            vm.warp(block.timestamp + 1 days);
         }
 
         function _scheduleAndCall(address target, bytes memory data) private {
@@ -838,5 +887,35 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         function _signature(uint256 key, bytes32 digest) private pure returns (bytes memory) {
             (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
             return abi.encodePacked(r, s, v);
+        }
+
+        function _defaultCreateParams(bytes32 salt) private view returns (FundFactory.CreateFundParams memory params) {
+            params.implementationVersion = 1;
+            params.salt = salt;
+            params.name = "Predictable Fund";
+            params.symbol = "PRED";
+            params.asset = asset;
+            params.minimumIdleBps = 1_000;
+            params.navActivationDelay = 1;
+            params.maxSnapshotAge = 20;
+            params.maxNavWindowLength = 20;
+            params.feeConfig = FundTypes.FeeConfig({
+                managementFeeWad: 0,
+                performanceFeeBps: 0,
+                maxManagementFeeBps: 0,
+                maxPerformanceFeeBps: 0,
+                maxAccrualInterval: 0,
+                crystallizationPeriod: 0,
+                feeRecipient: address(0)
+            });
+            params.roles = FundFactory.RoleAccounts({
+                admin: address(this),
+                upgrader: address(this),
+                accounting: address(this),
+                allocator: address(this),
+                processor: address(this),
+                curator: address(this),
+                guardian: address(this)
+            });
         }
     }

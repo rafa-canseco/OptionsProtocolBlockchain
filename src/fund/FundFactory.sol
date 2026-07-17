@@ -108,13 +108,17 @@ contract FundFactory is Ownable {
         return _deployments[deploymentId];
     }
 
+    function computeDeploymentId(CreateFundParams calldata params, address creator) external view returns (bytes32) {
+        return _computeDeploymentId(params, creator);
+    }
+
     function createFund(CreateFundParams calldata params) external returns (FundDeployment memory deployed) {
         ImplementationSet memory implementationSet = implementationSets[params.implementationVersion];
         if (!implementationSet.active || address(params.asset) == address(0)) {
             revert InvalidImplementationSet(params.implementationVersion);
         }
         _validateRoles(params.roles);
-        bytes32 deploymentId = keccak256(abi.encode(address(this), block.chainid, params.salt));
+        bytes32 deploymentId = _computeDeploymentId(params, msg.sender);
         if (_deployments[deploymentId].vault != address(0)) {
             revert InvalidImplementationSet(params.implementationVersion);
         }
@@ -170,6 +174,13 @@ contract FundFactory is Ownable {
         _configureRules(manager, strategyProxy, FundAccessPolicy.strategyRules());
         _setSingleRule(manager, accountingProxy, FundAccounting.setComponentState.selector, FundConstants.CURATOR_ROLE);
         manager.setRoleGuardian(FundConstants.CURATOR_ROLE, FundConstants.GUARDIAN_ROLE);
+        manager.setGrantDelay(manager.ADMIN_ROLE(), FundConstants.CORE_UPGRADE_DELAY);
+        manager.setGrantDelay(FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
+        manager.setGrantDelay(FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
+        manager.setTargetAdminDelay(vaultProxy, FundConstants.CORE_UPGRADE_DELAY);
+        manager.setTargetAdminDelay(accountingProxy, FundConstants.CORE_UPGRADE_DELAY);
+        manager.setTargetAdminDelay(flowProxy, FundConstants.CORE_UPGRADE_DELAY);
+        manager.setTargetAdminDelay(strategyProxy, FundConstants.CORE_UPGRADE_DELAY);
 
         manager.grantRole(FundConstants.UPGRADER_ROLE, params.roles.upgrader, FundConstants.CORE_UPGRADE_DELAY);
         manager.grantRole(FundConstants.ACCOUNTING_ROLE, params.roles.accounting, 0);
@@ -177,7 +188,7 @@ contract FundFactory is Ownable {
         manager.grantRole(FundConstants.PROCESSOR_ROLE, params.roles.processor, 0);
         manager.grantRole(FundConstants.CURATOR_ROLE, params.roles.curator, FundConstants.CURATOR_DELAY);
         manager.grantRole(FundConstants.GUARDIAN_ROLE, params.roles.guardian, 0);
-        manager.grantRole(manager.ADMIN_ROLE(), params.roles.admin, 0);
+        manager.grantRole(manager.ADMIN_ROLE(), params.roles.admin, FundConstants.CORE_UPGRADE_DELAY);
         manager.renounceRole(manager.ADMIN_ROLE(), address(this));
 
         deployed = FundDeployment({
@@ -221,5 +232,9 @@ contract FundFactory is Ownable {
                 || roles.allocator == address(0) || roles.processor == address(0) || roles.curator == address(0)
                 || roles.guardian == address(0)
         ) revert InvalidRoleAccount();
+    }
+
+    function _computeDeploymentId(CreateFundParams calldata params, address creator) private view returns (bytes32) {
+        return keccak256(abi.encode(address(this), block.chainid, creator, params.roles.admin, params.salt, params));
     }
 }

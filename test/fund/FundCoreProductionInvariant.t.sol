@@ -241,6 +241,13 @@ contract FundCoreProductionInvariantTest is StdInvariant, Test {
         _seedHolder(bob);
 
         handler = new FundCoreProductionHandler(asset, vault, accounting, flow, alice, bob);
+        bytes memory accountingGrant =
+            abi.encodeCall(manager.grantRole, (FundConstants.ACCOUNTING_ROLE, address(handler), uint32(0)));
+        bytes memory processorGrant =
+            abi.encodeCall(manager.grantRole, (FundConstants.PROCESSOR_ROLE, address(handler), uint32(0)));
+        manager.schedule(address(manager), accountingGrant, 0);
+        manager.schedule(address(manager), processorGrant, 0);
+        vm.warp(block.timestamp + FundConstants.CORE_UPGRADE_DELAY);
         manager.grantRole(FundConstants.ACCOUNTING_ROLE, address(handler), 0);
         manager.grantRole(FundConstants.PROCESSOR_ROLE, address(handler), 0);
 
@@ -289,6 +296,7 @@ contract FundCoreProductionInvariantTest is StdInvariant, Test {
     }
 
     function _configureNavSources() private {
+        vm.warp(block.timestamp + FundConstants.CORE_UPGRADE_DELAY);
         address[] memory reporters = new address[](2);
         reporters[0] = vm.addr(REPORTER_ONE_KEY);
         reporters[1] = vm.addr(REPORTER_TWO_KEY);
@@ -300,6 +308,7 @@ contract FundCoreProductionInvariantTest is StdInvariant, Test {
         vm.warp(block.timestamp + FundConstants.CURATOR_DELAY);
         accounting.setReporterSet(reporters, 2, 1);
         accounting.setComponent(IDLE_COMPONENT, address(0), 1, true);
+        vm.warp(block.timestamp + 1 days);
     }
 
     function _submitInitialNav() private {
