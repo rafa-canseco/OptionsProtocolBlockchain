@@ -10,7 +10,11 @@ import {FundFlowManager} from "../../src/fund/FundFlowManager.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
 import {ClaimEscrow} from "../../src/fund/ClaimEscrow.sol";
+import {CspFundAdapter} from "../../src/fund/CspFundAdapter.sol";
+import {CspFundValuator} from "../../src/fund/CspFundValuator.sol";
+import {CspFundAdapterOperations} from "../../src/fund/libraries/CspFundAdapterOperations.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
+import {MockChainlinkFeed} from "../../src/mocks/MockChainlinkFeed.sol";
 
 contract RuntimeBudgetTest is Test {
     uint256 internal constant EIP170_RUNTIME_LIMIT = 24_576;
@@ -25,6 +29,16 @@ contract RuntimeBudgetTest is Test {
         assertLt(address(new FundFactory(address(this))).code.length, EIP170_RUNTIME_LIMIT);
         MockERC20 asset = new MockERC20("Budget Asset", "BUD", 6);
         assertLt(address(new ClaimEscrow(asset, address(this))).code.length, EIP170_RUNTIME_LIMIT);
+        assertLt(address(new CspFundAdapter()).code.length, EIP170_RUNTIME_LIMIT);
+        assertLt(address(CspFundAdapterOperations).code.length, EIP170_RUNTIME_LIMIT);
+        MockChainlinkFeed spotFeed = new MockChainlinkFeed(2_000e8);
+        address[] memory observers = new address[](2);
+        observers[0] = address(0xA11CE);
+        observers[1] = address(0xB0B);
+        assertLt(
+            address(new CspFundValuator(address(spotFeed), 8, 1 hours, 10, 2, 1_000, observers)).code.length,
+            EIP170_RUNTIME_LIMIT
+        );
     }
 
     function test_fundVaultMeetsArchitecturalDesignTarget() public {

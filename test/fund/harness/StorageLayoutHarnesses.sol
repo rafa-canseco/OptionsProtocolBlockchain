@@ -8,6 +8,7 @@ import {FundVaultStorage} from "../../../src/fund/storage/FundVaultStorage.sol";
 import {FundAccountingStorage} from "../../../src/fund/storage/FundAccountingStorage.sol";
 import {FundFlowManagerStorage} from "../../../src/fund/storage/FundFlowManagerStorage.sol";
 import {StrategyManagerStorage} from "../../../src/fund/storage/StrategyManagerStorage.sol";
+import {CspFundAdapterStorage} from "../../../src/fund/storage/CspFundAdapterStorage.sol";
 
 abstract contract StorageHarnessBase is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     function __StorageHarnessBase_init(address owner) internal onlyInitializing {
@@ -94,6 +95,25 @@ contract StrategyManagerStorageHarnessV1 is StorageHarnessBase, StrategyManagerS
 
     function setFund(address value) external onlyOwner {
         _getStrategyManagerStorage().fund = value;
+    }
+}
+
+contract CspFundAdapterStorageHarnessV1 is StorageHarnessBase, CspFundAdapterStorage {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address owner) external initializer {
+        __StorageHarnessBase_init(owner);
+    }
+
+    function storageLocation() external pure returns (bytes32) {
+        return CSP_FUND_ADAPTER_STORAGE_LOCATION;
+    }
+
+    function setFund(address value) external onlyOwner {
+        _getCspFundAdapterStorage().fund = value;
     }
 }
 
