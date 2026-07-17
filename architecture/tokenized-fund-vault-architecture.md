@@ -1072,7 +1072,10 @@ Shared or replaceable supporting contracts:
   per fund. They record and release declared liabilities, have no admin sweep,
   and contain no strategy or governance logic.
 - `FundFactory`: versioned deployer that creates ERC-1967 proxies from approved
-  implementations. It has no authority over deployed fund assets.
+  implementations. It has no authority over deployed fund assets. Its CREATE2
+  deployment ID commits to the factory, chain, creator, intended admin, user
+  salt, and full fund configuration, so another caller or configuration cannot
+  front-run the same global salt.
 
 The four-contract fund core is an intentional boundary. Combining them creates
 a large implementation with mixed trust domains. Splitting further would spread
@@ -1395,6 +1398,12 @@ a production multisig. OpenZeppelin supports function-level permissions,
 execution delays, and guardians across multiple targets; see
 [AccessManager](https://docs.openzeppelin.com/contracts/5.x/access-control).
 
+Admin and upgrader roles both require a 72-hour grant delay and a 72-hour
+execution delay. Core targets also require 72 hours for target-admin policy
+changes. Consequently an admin cannot create an immediate upgrader or remap an
+upgrade selector to an immediate role. Later delay reductions remain subject to
+OpenZeppelin's setback mechanism.
+
 Minimum policy:
 
 | Change | Delay |
@@ -1494,6 +1503,11 @@ increments a component nonce. Deterministic cash movements that do not change
 share price, such as a deposit at the committed rate, are recorded as NAV deltas
 inside the same window. A price-sensitive operation invalidates the window.
 
+The idle component report binds its nonce and state hash to the vault's current
+fund-flow nonce, accounted idle assets, and raw accounting-token balance. Any
+deposit, claim, fee mint, strategy cash flow, or direct donation after the
+snapshot makes that report stale and causes submission to revert.
+
 `totalAssets()` may continue to show the last committed value after expiry, but
 all max creation/claim-processing functions return zero until a new active
 window. This separates informational NAV from executable NAV.
@@ -1562,10 +1576,11 @@ Exact conformance includes:
 A request may be cancelled only while fully pending and before the manager has
 committed an unwind for its batch. Sealing alone does not commit the unwind, so
 a sealed request remains cancelable until processing preflight succeeds.
-Cancellation returns escrowed shares and does not change supply. A partially
-processed, claimable, or claimed request cannot be cancelled. Emergency
-governance may extend claim deadlines but cannot seize or reprice a processed
-claim.
+Cancellation returns escrowed shares to their original owner and does not change
+supply. Aggregation by controller cannot mix shares from different owners, so a
+controller operator cannot redirect the refund. A partially processed,
+claimable, or claimed request cannot be cancelled. Emergency governance may
+extend claim deadlines but cannot seize or reprice a processed claim.
 
 ### 24.2.1 Bounded batch execution
 
@@ -1584,8 +1599,9 @@ budget and validates all persisted per-controller minimum outputs without state
 changes. Only a successful preflight commits the unwind, closes primary entry,
 and moves the complete net asset budget into the claim reserve.
 
-`releaseRedeemBatch` provides O(1) recovery for a sealed batch that has not
-started. It advances the monotonic processing cursor without moving or burning
+`releaseRedeemBatch` provides O(1) recovery for a sealed batch with no active
+round or committed unwind, including a remainder after partial processing. It
+advances the monotonic processing cursor without moving or burning remaining
 shares. Requests in the released batch remain pending and cancelable. Therefore
 an impossible minimum cannot block later batches even when its controller does
 not cooperate.
@@ -1615,13 +1631,17 @@ Costs are allocated by cause:
   all-holder benefit are socialized through NAV.
 
 ```text
-gross redemption value = processedShares * processingNAV / eligibleSupply
-round net budget = floor(gross redemption value) - marginal exit cost - disclosed exit fee
+gross redemption value = processedShares * (processingNAV + virtualAssets)
+                         / (eligibleSupply + virtualShares)
+authorized exit cost = ceil(signedBaseExitCost * processedShares / eligibleSupply)
+round net budget = floor(gross redemption value) - authorized exit cost - disclosed exit fee
 controller payout = cumulative net budget difference at controller boundary
 ```
 
 The manager records reference price, actual proceeds, cost classification, and
-allocation. The protected `requestRedeemWithMinAssets` extension persists
+allocation. The processor must supply exactly the pro-rata base exit cost from
+the accepted signed NAV and cannot set an arbitrary payout reduction. The
+protected `requestRedeemWithMinAssets` extension persists
 `minAssetsOut`; partial processing applies it pro rata with ceiling rounding.
 The standard request records zero minimum. Any unspent exit fee remains fund
 NAV; it is not an undisclosed transfer to the manager.
@@ -1829,11 +1849,12 @@ Raw `balanceOf` is not automatically NAV. Unexpected token transfers enter an
 unaccounted balance bucket. They become shareholder assets only through a
 `syncDonation` operation covered by a new NAV report. They cannot be allocated,
 distributed, or used to manipulate deposit share price before synchronization.
-While an accounting-asset surplus remains unaccounted, entry and NAV-priced
-redemption processing are closed (`maxDeposit` and `maxMint` return zero), so a
-new depositor cannot buy at the pre-donation NAV. Fixed claims remain available.
-Recognition occurs only through `FundAccounting` atomically with a fresh NAV
-commit.
+An accounting-asset surplus is excluded from accounted capacity but does not
+block entry, allocation, distribution, or redemption processing that uses only
+accounted assets; this prevents a one-unit direct-transfer denial of service. A
+raw deficit still closes those operations. Recognition occurs only through
+`FundAccounting` atomically with a fresh fund-flow nonce and idle-state
+checkpoint.
 OpenZeppelin virtual assets/shares remain required for first-deposit protection.
 
 ### 29.3 Adapter deficit
