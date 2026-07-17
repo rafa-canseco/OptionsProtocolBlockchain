@@ -5,6 +5,7 @@ import {IFundVault} from "../interfaces/IFundVault.sol";
 import {IFundAccounting} from "../interfaces/IFundAccounting.sol";
 import {IFundFlowManager} from "../interfaces/IFundFlowManager.sol";
 import {IStrategyManager} from "../interfaces/IStrategyManager.sol";
+import {ICspFundAdapter} from "../interfaces/ICspFundAdapter.sol";
 import {FundConstants} from "../FundConstants.sol";
 
 library FundAccessPolicy {
@@ -52,7 +53,7 @@ library FundAccessPolicy {
     }
 
     function strategyRules() internal pure returns (Rule[] memory rules) {
-        rules = new Rule[](8);
+        rules = new Rule[](10);
         rules[0] = Rule(UPGRADE_TO_AND_CALL_SELECTOR, FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
         rules[1] = Rule(IStrategyManager.allocate.selector, FundConstants.ALLOCATOR_ROLE, 0);
         rules[2] = Rule(IStrategyManager.deallocate.selector, FundConstants.ALLOCATOR_ROLE, 0);
@@ -64,5 +65,14 @@ library FundAccessPolicy {
         rules[6] = Rule(IStrategyManager.pauseAllocation.selector, FundConstants.GUARDIAN_ROLE, 0);
         rules[7] =
             Rule(IStrategyManager.resumeAllocation.selector, FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
+        rules[8] = Rule(IStrategyManager.deallocateInKind.selector, FundConstants.PROCESSOR_ROLE, 0);
+        rules[9] = Rule(IStrategyManager.emergencyExit.selector, FundConstants.GUARDIAN_ROLE, 0);
+    }
+
+    function cspAdapterRules() internal pure returns (Rule[] memory rules) {
+        rules = new Rule[](2);
+        rules[0] = Rule(UPGRADE_TO_AND_CALL_SELECTOR, FundConstants.UPGRADER_ROLE, FundConstants.ADAPTER_UPGRADE_DELAY);
+        rules[1] =
+            Rule(ICspFundAdapter.setAdapterConfig.selector, FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
     }
 }

@@ -19,6 +19,12 @@ interface IStrategyManager {
     function deallocate(address adapter, uint256 targetValue, uint256 minAssetsOut, bytes calldata data)
         external
         returns (uint256 assetsOut);
+    function deallocateInKind(address adapter, uint256 fractionWad, address escrow, bytes calldata data)
+        external
+        returns (address[] memory assets, uint256[] memory amounts);
+    function emergencyExit(address adapter, address escrow, bytes calldata data)
+        external
+        returns (address[] memory assets, uint256[] memory amounts);
     function setStrategyConfig(address adapter, FundTypes.StrategyConfig calldata config) external;
     function reduceStrategyCap(address adapter, uint256 absoluteCap, uint16 maxAllocationBps) external;
     function setMinimumIdleBps(uint16 newMinimumIdleBps) external;
