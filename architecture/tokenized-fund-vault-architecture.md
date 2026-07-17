@@ -1977,11 +1977,15 @@ surface is deliberately narrow:
 - Normal allocation accepts only the fund accounting asset and opens only
   fully collateralized WETH/USDC puts through the deployed Controller and
   BatchSettler interfaces.
-- Raw recovery returns only accounted USDC and WETH to an explicit escrow. It
-  has no arbitrary-token or arbitrary-call escape hatch.
+- Raw recovery returns only accounted USDC and WETH. StrategyManager never
+  accepts a caller-selected destination: FundFlowManager supplies escrows that
+  were registered through the delayed curator policy.
 - In-kind recovery is blocked while a CSP position is active, so reducing the
   StrategyManager allocation cannot hide collateral that remains locked in V1.
-  Emergency recovery may proceed, but it disables subsequent allocations.
+  It also consumes a one-use FundFlowManager batch authorization bound to the
+  adapter, fraction, registered escrow, and expiry. Emergency recovery is
+  likewise blocked while exposure is active and routes only to the registered
+  emergency escrow; a successful emergency recovery disables allocations.
 - Assigned WETH remains adapter-held collective fund inventory. There is no
   holder claim index, share generation, epoch, or covered-call transition.
 
@@ -1992,8 +1996,10 @@ same nonce/hash into `FundAccounting`. In-kind and emergency paths follow the
 same sequence. Physical delivery occurs only after a StrategyManager settlement
 step has invalidated the active NAV. The valuator fails closed throughout
 `AwaitingPhysicalDelivery`, including after an external delivery but before
-adapter finalization. Finalization measures the exact WETH delta and publishes
-the terminal adapter hash before a new NAV can activate.
+adapter finalization. Finalization requires at least the exact assigned WETH,
+accounts only that expected amount, and quarantines any donated surplus as
+unaccounted inventory. It then publishes the terminal adapter hash before a new
+NAV can activate.
 
 `CspFundValuator` is an immutable-policy, read-only component valuator. It uses
 the accounting ledgers and raw balances, validates the matching V1 vault and

@@ -442,6 +442,13 @@ The storage harness recomputes this slot, and OpenZeppelin validates the
 production implementation with the explicitly reviewed
 `external-library-linking` allowance.
 
+FundFlowManager owns the strategy-exit destination registry. Both in-kind and
+emergency destinations require delayed curator configuration. Each in-kind
+operation additionally consumes a one-use authorization bound to its batch ID,
+adapter, fraction, registered escrow, and expiry; the immediate processor role
+cannot select or replace any destination. The appended FundFlowManager fields
+are validated as an upgrade from the pre-B1N-351 namespace layout.
+
 The executable tests prove:
 
 - allocation is impossible before all physical-delivery capabilities and the
@@ -450,6 +457,11 @@ The executable tests prove:
   emergency exit;
 - OTM expiry, ITM physical assignment, cash fallback, WETH liquidation, and raw
   recovery reconcile measured balances and per-vault V1 ledgers;
+- in-kind execution rejects missing, mismatched, expired, or replayed batches,
+  while emergency execution routes only to its pre-registered escrow;
+- active CSP exposure blocks both in-kind and emergency allocation reduction;
+- WETH donated during physical delivery is isolated from accounted inventory
+  without preventing assignment finalization;
 - premium and a conservative short-put liability appear in the same component
   value, while assigned WETH appears as collective fund NAV;
 - no NAV can activate while physical delivery is pending or has occurred but
@@ -473,4 +485,7 @@ forge test --match-contract CspFundAdapterForkTest \
 An adapter deployment is not active merely because its proxy exists. B1N-352
 must configure the delayed adapter selectors, verify the linked library, grant
 `setPhysicalDeliveryVault(adapter, true)`, and record successful `isOnboarded()`
-evidence before enabling its StrategyManager configuration.
+evidence before enabling its StrategyManager configuration. It must also
+register the FundFlowManager in-kind/emergency escrows before enabling either
+exit path; individual in-kind operations still require a delayed batch
+authorization.
