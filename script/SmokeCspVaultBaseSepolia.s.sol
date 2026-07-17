@@ -171,7 +171,6 @@ contract SmokeCspVaultBaseSepolia is Script {
         require(!controller.systemFullyPaused(), "unpause before FINALIZE");
         require(vault.activeBatches() == 1 && vault.preparedSettlementBatchId() == 3, "FINALIZE wrong state");
 
-        uint256 usdcBefore = usdc.balanceOf(DEPLOYER);
         uint256 wethBefore = weth.balanceOf(DEPLOYER);
         uint256 shares = vault.sharesOf(DEPLOYER);
 
@@ -179,13 +178,14 @@ contract SmokeCspVaultBaseSepolia is Script {
         vault.settleDefaultedCspBatch(3);
         vault.closeEpoch();
         uint256 wethClaimed = vault.claimAssignedUnderlying(DEPLOYER);
+        uint256 usdcBeforeWithdraw = usdc.balanceOf(DEPLOYER);
         uint256 usdcWithdrawn = vault.withdrawIdle(shares, DEPLOYER);
         vm.stopBroadcast();
 
         require(vault.activeBatches() == 0 && vault.totalShares() == 0, "vault not drained");
         require(wethClaimed == OPTION_AMOUNT * 1e10, "unexpected WETH claim");
         require(weth.balanceOf(DEPLOYER) == wethBefore + wethClaimed, "WETH balance mismatch");
-        require(usdc.balanceOf(DEPLOYER) == usdcBefore + usdcWithdrawn, "USDC balance mismatch");
+        require(usdc.balanceOf(DEPLOYER) == usdcBeforeWithdraw + usdcWithdrawn, "USDC balance mismatch");
 
         console.log("B1N337:WETH_CLAIMED:%s", wethClaimed);
         console.log("B1N337:USDC_WITHDRAWN:%s", usdcWithdrawn);

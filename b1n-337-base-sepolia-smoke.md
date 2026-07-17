@@ -1,6 +1,6 @@
 # B1N-337 Base Sepolia CSP smoke test
 
-Status: in progress; OTM and ITM physical settlement confirmed, timeout fallback pending
+Status: complete; OTM, ITM physical delivery, timeout fallback, and final reconciliation confirmed
 
 Network: Base Sepolia (`84532`)
 
@@ -26,7 +26,7 @@ Each batch writes `0.01 WETH` of puts. The initial deposit is `1,000 mock USDC`,
 - Expiry: `2026-07-16 08:00:00 UTC` (`1784188800`)
 - Settlement prepared: `2026-07-17 19:41:28 UTC`
 - Timeout eligible: `2026-07-17 20:41:28 UTC` (`1784320888`)
-- Completed: pending
+- Completed: `2026-07-17 20:55:12 UTC`
 
 ## Transactions
 
@@ -91,7 +91,17 @@ Decoded settlement events:
 
 ### Timeout fallback and withdrawal
 
-- Batch 3 fallback remains time-gated until `2026-07-17 20:41:28 UTC`.
+- Timeout fallback, block `44276709`: [`0xfaa64e58...6755`](https://base-sepolia.blockscout.com/tx/0xfaa64e587426e66a8848ad146d0ad4afb8ef70d55e1c742fb4cdd4c89b446755)
+- Epoch close, block `44276710`: [`0xe95dd7dd...9cba`](https://base-sepolia.blockscout.com/tx/0xe95dd7dd5495babffc6568a63096651f0bb9ac07d42a75321143945e6c3e9cba)
+- WETH claim, block `44276711`: [`0x67477ee3...b226`](https://base-sepolia.blockscout.com/tx/0x67477ee3d280b649ede5e49a46157b2c4adb8607f422ba0eae4e58846f2bb226)
+- USDC withdrawal, block `44276712`: [`0x29fbc952...ee37`](https://base-sepolia.blockscout.com/tx/0x29fbc95266e8b4fb17a0c6537ab20def5ed01e1704e520f66a933b920ebdee37)
+
+Decoded final events:
+
+- `CspBatchSettled(3, 1, 3, 21000000, 0, 2000000)`.
+- `EpochClosed(1, 28800, 24000000, 2880, 0)`.
+- `AssignedUnderlyingClaimed(user, user, 10000000000000000)`.
+- `IdleWithdrawn(user, user, 976025920, 1000000000)`.
 
 ## Balance evidence
 
@@ -105,6 +115,21 @@ Decoded settlement events:
 - `preparedSettlementBatchId = 3`.
 - `batchUnderlyingReceived(2) = 0.01 WETH`.
 - Token balances and both accounted ledgers match exactly.
+
+Final state after fallback, epoch close, claim, and withdrawal:
+
+| State | Value |
+| --- | ---: |
+| Vault USDC balance | `0` |
+| Accounted idle assets | `0` |
+| Vault WETH balance | `0` |
+| Accounted underlying assets | `0` |
+| Active batches | `0` |
+| Active collateral | `0` |
+| Total shares | `0` |
+| Prepared settlement batch | `0` |
+
+The user received `976.025920 USDC` from the idle withdrawal and `0.01 WETH` from assignment.
 
 ## Events for backend/indexer
 
@@ -145,7 +170,7 @@ signatures inside the Solidity script.
 
 ## Findings
 
-- No contract accounting mismatch was observed in OTM or ITM physical settlement.
+- No contract accounting mismatch was observed in OTM, ITM physical, or timeout fallback settlement.
 - The runner initially decoded the batch `amount` as `protocolVaultId`; fixed in commit `938cd58`
   before broadcast. The failed attempt was simulation-only and changed no onchain state.
-- Timeout fallback and final post-withdrawal reconciliation remain pending.
+- The final vault token balances, accounted ledgers, shares, collateral, and active batch count are zero.
