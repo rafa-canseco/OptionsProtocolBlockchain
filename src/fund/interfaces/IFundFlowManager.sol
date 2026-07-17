@@ -25,6 +25,7 @@ interface IFundFlowManager {
 
     function recordRedeemRequest(
         address caller,
+        address shareSpender,
         uint256 shares,
         address controller,
         address owner,

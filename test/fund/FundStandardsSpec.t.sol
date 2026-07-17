@@ -88,7 +88,7 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         return address(this);
     }
 
-    function decimals() public view override(ERC20, ERC4626, IERC20Metadata) returns (uint8) {
+    function decimals() public view override(ERC20, ERC4626) returns (uint8) {
         return ERC4626.decimals();
     }
 
@@ -96,7 +96,7 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         return _shareDecimalsOffsetValue;
     }
 
-    function totalAssets() public view override(ERC4626, IERC4626) returns (uint256) {
+    function totalAssets() public view override(ERC4626) returns (uint256) {
         return accountedGrossAssets - totalReservedAssets;
     }
 
@@ -114,11 +114,11 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         accountedGrossAssets += unaccountedBalance();
     }
 
-    function maxDeposit(address) public view override(ERC4626, IERC4626) returns (uint256) {
+    function maxDeposit(address) public view override(ERC4626) returns (uint256) {
         return activeProcessingRounds == 0 ? type(uint256).max : 0;
     }
 
-    function maxMint(address) public view override(ERC4626, IERC4626) returns (uint256) {
+    function maxMint(address) public view override(ERC4626) returns (uint256) {
         return activeProcessingRounds == 0 ? type(uint256).max : 0;
     }
 
@@ -344,25 +344,25 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         return requestedProcessedShares;
     }
 
-    function maxRedeem(address controller) public view override(ERC4626, IERC4626) returns (uint256) {
+    function maxRedeem(address controller) public view override(ERC4626) returns (uint256) {
         return _claimableShares[controller];
     }
 
-    function maxWithdraw(address controller) public view override(ERC4626, IERC4626) returns (uint256) {
+    function maxWithdraw(address controller) public view override(ERC4626) returns (uint256) {
         return _claimableAssets[controller];
     }
 
-    function previewRedeem(uint256) public pure override(ERC4626, IERC4626) returns (uint256) {
+    function previewRedeem(uint256) public pure override(ERC4626) returns (uint256) {
         revert AsyncPreviewUnsupported();
     }
 
-    function previewWithdraw(uint256) public pure override(ERC4626, IERC4626) returns (uint256) {
+    function previewWithdraw(uint256) public pure override(ERC4626) returns (uint256) {
         revert AsyncPreviewUnsupported();
     }
 
     function redeem(uint256 shares, address receiver, address controller)
         public
-        override(ERC4626, IERC4626)
+        override(ERC4626)
         returns (uint256 assets)
     {
         _requireController(controller);
@@ -377,7 +377,7 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
 
     function withdraw(uint256 assets, address receiver, address controller)
         public
-        override(ERC4626, IERC4626)
+        override(ERC4626)
         returns (uint256 shares)
     {
         _requireController(controller);

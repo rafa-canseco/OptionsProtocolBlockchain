@@ -14,8 +14,8 @@ import {IFundVaultModuleCallbacks} from "./interfaces/IFundModuleCallbacks.sol";
 import {IFundAccounting} from "./interfaces/IFundAccounting.sol";
 
 interface IFundVaultFlow is IFundVault, IFundVaultModuleCallbacks {
-    function totalSupply() external view returns (uint256);
     function totalAssets() external view returns (uint256);
+    function shareSupply() external view returns (uint256);
     function redemptionsPaused() external view returns (bool);
     function asset() external view returns (address);
 }
@@ -131,6 +131,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
 
     function recordRedeemRequest(
         address caller,
+        address shareSpender,
         uint256 shares,
         address controller,
         address owner,
@@ -138,8 +139,8 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
     ) external returns (uint256 requestId) {
         FundFlowManagerStorageLayout storage $ = _getFundFlowManagerStorage();
         if (
-            msg.sender != $.fund || caller == address(0) || shares == 0 || controller == address(0)
-                || owner == address(0)
+            msg.sender != $.fund || caller == address(0) || shareSpender == address(0) || shares == 0
+                || controller == address(0) || owner == address(0)
         ) revert UnauthorizedOperator(controller, caller);
 
         uint64 existingBatchId = $.redemptions[controller].latestBatchId;
@@ -172,7 +173,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         $.totalPendingShares += shares;
 
         uint256 lockId = IFundVaultFlow($.fund).beginModuleExecution($.compatibilityVersion);
-        IFundVaultFlow($.fund).escrowShares(owner, shares);
+        IFundVaultFlow($.fund).escrowShares(owner, shareSpender, shares);
         IFundVaultFlow($.fund).endModuleExecution(lockId);
         return FundConstants.ERC7540_REQUEST_ID;
     }
@@ -254,7 +255,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
             revert BatchNotProcessable(batchId);
         }
         uint256 processingNav = vault.totalAssets();
-        uint256 eligibleSupply = vault.totalSupply();
+        uint256 eligibleSupply = vault.shareSupply();
         OutflowWindow storage outflowWindow = $.outflowWindows[nav.reportNonce];
         uint256 windowEligibleSupply = outflowWindow.eligibleSupply;
         if (windowEligibleSupply == 0) windowEligibleSupply = eligibleSupply;

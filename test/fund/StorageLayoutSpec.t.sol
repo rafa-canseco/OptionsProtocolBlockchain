@@ -15,15 +15,16 @@ import {
 contract StorageLayoutSpecTest is Test {
     string internal constant HARNESS_PATH = "test/fund/harness/StorageLayoutHarnesses.sol:";
 
-    function test_fourProductionFundImplementationsPassUpgradeSafetyValidation() public {
+    function test_productionFundUupsImplementationsPassUpgradeSafetyValidation() public {
         Options memory options;
         Upgrades.validateImplementation("src/fund/FundVault.sol:FundVault", options);
+        Upgrades.validateImplementation("src/fund/FundShare.sol:FundShare", options);
         Upgrades.validateImplementation("src/fund/FundAccounting.sol:FundAccounting", options);
         Upgrades.validateImplementation("src/fund/FundFlowManager.sol:FundFlowManager", options);
         Upgrades.validateImplementation("src/fund/StrategyManager.sol:StrategyManager", options);
     }
 
-    function test_fourFundImplementationsPassUpgradeSafetyValidation() public {
+    function test_storageHarnessImplementationsPassUpgradeSafetyValidation() public {
         Options memory options;
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundVaultStorageHarnessV1"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundAccountingStorageHarnessV1"), options);

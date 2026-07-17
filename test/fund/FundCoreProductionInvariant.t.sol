@@ -7,7 +7,9 @@ import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManage
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
 import {FundVault} from "../../src/fund/FundVault.sol";
+import {FundShare} from "../../src/fund/FundShare.sol";
 import {FundAccounting} from "../../src/fund/FundAccounting.sol";
+import {NavReportVerifier} from "../../src/fund/NavReportVerifier.sol";
 import {FundFlowManager} from "../../src/fund/FundFlowManager.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
 import {FundConstants} from "../../src/fund/FundConstants.sol";
@@ -20,6 +22,7 @@ contract FundCoreProductionHandler is Test {
 
     MockERC20 public immutable asset;
     FundVault public immutable vault;
+    FundShare public immutable share;
     FundAccounting public immutable accounting;
     FundFlowManager public immutable flow;
     address public immutable alice;
@@ -28,6 +31,7 @@ contract FundCoreProductionHandler is Test {
     constructor(
         MockERC20 asset_,
         FundVault vault_,
+        FundShare share_,
         FundAccounting accounting_,
         FundFlowManager flow_,
         address alice_,
@@ -35,6 +39,7 @@ contract FundCoreProductionHandler is Test {
     ) {
         asset = asset_;
         vault = vault_;
+        share = share_;
         accounting = accounting_;
         flow = flow_;
         alice = alice_;
@@ -43,7 +48,7 @@ contract FundCoreProductionHandler is Test {
 
     function request(uint256 actorSeed, uint256 sharesSeed) external {
         address actor = _actor(actorSeed);
-        uint256 balance = vault.balanceOf(actor);
+        uint256 balance = share.balanceOf(actor);
         if (balance == 0 || vault.pendingRedeemRequest(0, actor) != 0) return;
 
         vm.prank(actor);
@@ -95,11 +100,11 @@ contract FundCoreProductionHandler is Test {
     function transferShares(uint256 actorSeed, uint256 sharesSeed) external {
         address from = _actor(actorSeed);
         address to = from == alice ? bob : alice;
-        uint256 balance = vault.balanceOf(from);
+        uint256 balance = share.balanceOf(from);
         if (balance == 0) return;
 
         vm.prank(from);
-        vault.transfer(to, bound(sharesSeed, 1, balance));
+        share.transfer(to, bound(sharesSeed, 1, balance));
     }
 
     function deposit(uint256 actorSeed, uint96 assetsSeed) external {
@@ -181,6 +186,7 @@ contract FundCoreProductionInvariantTest is StdInvariant, Test {
 
     MockERC20 internal asset;
     FundVault internal vault;
+    FundShare internal share;
     FundAccounting internal accounting;
     FundFlowManager internal flow;
     AccessManager internal manager;
@@ -195,7 +201,9 @@ contract FundCoreProductionInvariantTest is StdInvariant, Test {
             1,
             FundFactory.ImplementationSet({
                 vault: address(new FundVault()),
+                share: address(new FundShare()),
                 accounting: address(new FundAccounting()),
+                navVerifier: address(new NavReportVerifier()),
                 flowManager: address(new FundFlowManager()),
                 strategyManager: address(new StrategyManager()),
                 compatibilityVersion: 1,
@@ -236,6 +244,7 @@ contract FundCoreProductionInvariantTest is StdInvariant, Test {
             })
         );
         vault = FundVault(deployed.vault);
+        share = FundShare(deployed.share);
         accounting = FundAccounting(deployed.accounting);
         flow = FundFlowManager(deployed.flowManager);
         manager = AccessManager(deployed.accessManager);
@@ -245,7 +254,7 @@ contract FundCoreProductionInvariantTest is StdInvariant, Test {
         _seedHolder(alice);
         _seedHolder(bob);
 
-        handler = new FundCoreProductionHandler(asset, vault, accounting, flow, alice, bob);
+        handler = new FundCoreProductionHandler(asset, vault, share, accounting, flow, alice, bob);
         bytes memory accountingGrant =
             abi.encodeCall(manager.grantRole, (FundConstants.ACCOUNTING_ROLE, address(handler), uint32(0)));
         bytes memory processorGrant =
@@ -271,8 +280,8 @@ contract FundCoreProductionInvariantTest is StdInvariant, Test {
     }
 
     function invariant_shareSupplyAndPendingEscrowReconcile() public view {
-        assertEq(vault.totalSupply(), vault.balanceOf(alice) + vault.balanceOf(bob) + vault.balanceOf(address(vault)));
-        assertEq(vault.balanceOf(address(vault)), flow.totalPendingShares());
+        assertEq(share.totalSupply(), share.balanceOf(alice) + share.balanceOf(bob) + share.balanceOf(address(vault)));
+        assertEq(share.balanceOf(address(vault)), flow.totalPendingShares());
         assertEq(flow.totalPendingShares(), vault.pendingRedeemRequest(0, alice) + vault.pendingRedeemRequest(0, bob));
     }
 

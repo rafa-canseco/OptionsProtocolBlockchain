@@ -6,6 +6,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {FundVault} from "./FundVault.sol";
+import {FundShare} from "./FundShare.sol";
 import {FundAccounting} from "./FundAccounting.sol";
 import {FundFlowManager} from "./FundFlowManager.sol";
 import {StrategyManager} from "./StrategyManager.sol";
@@ -14,7 +15,7 @@ import {FundConstants} from "./FundConstants.sol";
 import {FundTypes} from "./FundTypes.sol";
 import {FundAccessPolicy} from "./libraries/FundAccessPolicy.sol";
 
-/// @notice Versioned deployer for isolated four-proxy fund stacks.
+/// @notice Versioned deployer for isolated modular fund stacks.
 /// @dev The factory never receives authority over deployed fund assets.
 contract FundFactory is Ownable {
     error InvalidImplementationSet(uint64 version);
@@ -23,7 +24,9 @@ contract FundFactory is Ownable {
 
     struct ImplementationSet {
         address vault;
+        address share;
         address accounting;
+        address navVerifier;
         address flowManager;
         address strategyManager;
         uint64 compatibilityVersion;
@@ -56,7 +59,9 @@ contract FundFactory is Ownable {
 
     struct FundDeployment {
         address vault;
+        address share;
         address accounting;
+        address navVerifier;
         address flowManager;
         address strategyManager;
         address claimEscrow;
@@ -73,7 +78,9 @@ contract FundFactory is Ownable {
         bytes32 indexed deploymentId,
         address indexed vault,
         address indexed asset,
+        address share,
         address accounting,
+        address navVerifier,
         address flowManager,
         address strategyManager,
         address claimEscrow,
@@ -90,7 +97,8 @@ contract FundFactory is Ownable {
         if (implementationSets[version].compatibilityVersion != 0) revert VersionAlreadyRegistered(version);
         if (
             version == 0 || implementationSet.compatibilityVersion == 0 || implementationSet.vault.code.length == 0
-                || implementationSet.accounting.code.length == 0 || implementationSet.flowManager.code.length == 0
+                || implementationSet.share.code.length == 0 || implementationSet.accounting.code.length == 0
+                || implementationSet.navVerifier.code.length == 0 || implementationSet.flowManager.code.length == 0
                 || implementationSet.strategyManager.code.length == 0
         ) revert InvalidImplementationSet(version);
         implementationSets[version] = implementationSet;
@@ -126,6 +134,8 @@ contract FundFactory is Ownable {
         AccessManager manager = new AccessManager(address(this));
         address vaultProxy =
             address(new ERC1967Proxy{salt: keccak256(abi.encode(deploymentId, "VAULT"))}(implementationSet.vault, ""));
+        address shareProxy =
+            address(new ERC1967Proxy{salt: keccak256(abi.encode(deploymentId, "SHARE"))}(implementationSet.share, ""));
         address accountingProxy = address(
             new ERC1967Proxy{salt: keccak256(abi.encode(deploymentId, "ACCOUNTING"))}(implementationSet.accounting, "")
         );
@@ -140,11 +150,21 @@ contract FundFactory is Ownable {
         ClaimEscrow escrow =
             new ClaimEscrow{salt: keccak256(abi.encode(deploymentId, "CLAIM_ESCROW"))}(params.asset, vaultProxy);
 
+        FundShare(shareProxy)
+            .initialize(
+                params.name,
+                params.symbol,
+                address(params.asset),
+                vaultProxy,
+                address(manager),
+                implementationSet.compatibilityVersion
+            );
         FundVault(vaultProxy)
             .initialize(
                 params.name,
                 params.symbol,
                 params.asset,
+                shareProxy,
                 accountingProxy,
                 flowProxy,
                 strategyProxy,
@@ -156,6 +176,7 @@ contract FundFactory is Ownable {
         FundAccounting(accountingProxy)
             .initialize(
                 vaultProxy,
+                implementationSet.navVerifier,
                 address(manager),
                 implementationSet.compatibilityVersion,
                 params.navActivationDelay,
@@ -168,6 +189,7 @@ contract FundFactory is Ownable {
         StrategyManager(strategyProxy)
             .initialize(vaultProxy, address(manager), implementationSet.compatibilityVersion, params.minimumIdleBps);
 
+        _configureRules(manager, shareProxy, FundAccessPolicy.shareRules());
         _configureRules(manager, vaultProxy, FundAccessPolicy.vaultRules());
         _configureRules(manager, accountingProxy, FundAccessPolicy.accountingRules());
         _configureRules(manager, flowProxy, FundAccessPolicy.flowRules());
@@ -177,6 +199,7 @@ contract FundFactory is Ownable {
         manager.setGrantDelay(manager.ADMIN_ROLE(), FundConstants.CORE_UPGRADE_DELAY);
         manager.setGrantDelay(FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
         manager.setGrantDelay(FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
+        manager.setTargetAdminDelay(shareProxy, FundConstants.CORE_UPGRADE_DELAY);
         manager.setTargetAdminDelay(vaultProxy, FundConstants.CORE_UPGRADE_DELAY);
         manager.setTargetAdminDelay(accountingProxy, FundConstants.CORE_UPGRADE_DELAY);
         manager.setTargetAdminDelay(flowProxy, FundConstants.CORE_UPGRADE_DELAY);
@@ -193,7 +216,9 @@ contract FundFactory is Ownable {
 
         deployed = FundDeployment({
             vault: vaultProxy,
+            share: shareProxy,
             accounting: accountingProxy,
+            navVerifier: implementationSet.navVerifier,
             flowManager: flowProxy,
             strategyManager: strategyProxy,
             claimEscrow: address(escrow),
@@ -205,7 +230,9 @@ contract FundFactory is Ownable {
             deploymentId,
             vaultProxy,
             address(params.asset),
+            shareProxy,
             accountingProxy,
+            implementationSet.navVerifier,
             flowProxy,
             strategyProxy,
             address(escrow),

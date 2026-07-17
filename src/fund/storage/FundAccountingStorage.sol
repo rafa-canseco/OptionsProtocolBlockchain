@@ -15,7 +15,9 @@ abstract contract FundAccountingStorage {
     /// @custom:storage-location erc7201:b1nary.storage.FundAccounting
     struct FundAccountingStorageLayout {
         address fund;
+        address navVerifier;
         uint64 compatibilityVersion;
+        uint64 navVerifierVersion;
         uint64 reporterSetVersion;
         uint64 lastReportNonce;
         uint16 reporterThreshold;

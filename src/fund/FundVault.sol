@@ -5,11 +5,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
-import {
-    ERC20PermitUpgradeable
-} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
-import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {FundUpgradeable} from "./FundUpgradeable.sol";
 import {ClaimEscrow} from "./ClaimEscrow.sol";
 import {FundConstants} from "./FundConstants.sol";
@@ -17,6 +12,7 @@ import {FundTypes} from "./FundTypes.sol";
 import {FundVaultStorage} from "./storage/FundVaultStorage.sol";
 import {IFundFlowManager} from "./interfaces/IFundFlowManager.sol";
 import {IFundAccounting} from "./interfaces/IFundAccounting.sol";
+import {IFundShare} from "./interfaces/IFundShare.sol";
 
 interface IFundFlowManagerVault is IFundFlowManager {
     function setOperator(address controller, address operator, bool approved) external;
@@ -25,10 +21,14 @@ interface IFundFlowManagerVault is IFundFlowManager {
 }
 
 /// @notice Transferable ERC-4626 shares and the custody/supply authority for one fund.
-contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable, ERC4626Upgradeable, FundVaultStorage {
+contract FundVault is FundUpgradeable, FundVaultStorage {
     using SafeERC20 for IERC20;
 
     error AsyncPreviewUnsupported();
+    error ERC4626ExceededMaxDeposit(address receiver, uint256 assets, uint256 max);
+    error ERC4626ExceededMaxMint(address receiver, uint256 shares, uint256 max);
+    error ERC4626ExceededMaxRedeem(address controller, uint256 shares, uint256 max);
+    error ERC4626ExceededMaxWithdraw(address controller, uint256 assets, uint256 max);
     error FundExecutionLocked(address lockOwner);
     error InactiveNavWindow();
     error InvalidModule(address caller);
@@ -47,6 +47,10 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
     event NavCommitted(uint64 indexed reportNonce, uint256 netAssets, uint64 validAfterBlock, uint64 validUntilBlock);
     event NavInvalidated(bytes32 indexed positionsHash);
     event NavWindowRestored(uint64 indexed reportNonce, uint64 validUntilBlock);
+    event Deposit(address indexed sender, address indexed owner, uint256 assets, uint256 shares);
+    event Withdraw(
+        address indexed sender, address indexed receiver, address indexed owner, uint256 assets, uint256 shares
+    );
     event ClaimReserved(address indexed controller, uint256 shares, uint256 assets);
     event OperatorSet(address indexed controller, address indexed operator, bool approved);
     event RedeemRequest(
@@ -59,9 +63,10 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
     }
 
     function initialize(
-        string calldata name_,
-        string calldata symbol_,
+        string calldata,
+        string calldata,
         IERC20 asset_,
+        address share_,
         address accounting_,
         address flowManager_,
         address strategyManager_,
@@ -71,9 +76,11 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         uint64 compatibilityVersion_
     ) external initializer {
         if (
-            address(asset_) == address(0) || accounting_ == address(0) || flowManager_ == address(0)
-                || strategyManager_ == address(0) || claimEscrow_ == address(0) || compatibilityVersion_ == 0
+            address(asset_) == address(0) || share_ == address(0) || accounting_ == address(0)
+                || flowManager_ == address(0) || strategyManager_ == address(0) || claimEscrow_ == address(0)
+                || compatibilityVersion_ == 0
         ) revert InvalidAddress();
+        if (IFundShare(share_).vault(address(asset_)) != address(this)) revert InvalidAddress();
 
         uint8 assetDecimals = IERC20Metadata(address(asset_)).decimals();
         if (assetDecimals > FundConstants.SHARE_DECIMALS) {
@@ -81,12 +88,10 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         }
 
         __FundUpgradeable_init(authority_);
-        __ERC20_init(name_, symbol_);
-        __ERC20Permit_init(name_);
-        __ERC4626_init(asset_);
 
         FundVaultStorageLayout storage $ = _getFundVaultStorage();
         $.accountingAsset = address(asset_);
+        $.shareToken = share_;
         $.accounting = accounting_;
         $.flowManager = flowManager_;
         $.strategyManager = strategyManager_;
@@ -160,15 +165,31 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
     }
 
     function share() external view returns (address) {
-        return address(this);
+        return _getFundVaultStorage().shareToken;
     }
 
-    function totalAssets() public view override(ERC4626Upgradeable) returns (uint256) {
+    function asset() public view returns (address) {
+        return _getFundVaultStorage().accountingAsset;
+    }
+
+    function totalAssets() public view returns (uint256) {
         return _getFundVaultStorage().committedNav;
     }
 
-    function decimals() public view override(ERC20Upgradeable, ERC4626Upgradeable) returns (uint8) {
-        return ERC4626Upgradeable.decimals();
+    function decimals() public pure returns (uint8) {
+        return FundConstants.SHARE_DECIMALS;
+    }
+
+    function shareSupply() public view returns (uint256) {
+        return IFundShare(_getFundVaultStorage().shareToken).totalSupply();
+    }
+
+    function convertToShares(uint256 assets) public view returns (uint256) {
+        return _convertToShares(assets, Math.Rounding.Floor);
+    }
+
+    function convertToAssets(uint256 shares) public view returns (uint256) {
+        return _convertToAssets(shares, Math.Rounding.Floor);
     }
 
     function activeNavWindow() external view returns (FundTypes.NavCommit memory nav) {
@@ -196,12 +217,20 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
             || interfaceId == FundConstants.ERC165_INTERFACE_ID;
     }
 
-    function maxDeposit(address) public view override(ERC4626Upgradeable) returns (uint256) {
+    function maxDeposit(address) public view returns (uint256) {
         return _creationOpen() ? type(uint256).max : 0;
     }
 
-    function maxMint(address) public view override(ERC4626Upgradeable) returns (uint256) {
+    function maxMint(address) public view returns (uint256) {
         return _creationOpen() ? type(uint256).max : 0;
+    }
+
+    function previewDeposit(uint256 assets) public view returns (uint256) {
+        return _convertToShares(assets, Math.Rounding.Floor);
+    }
+
+    function previewMint(uint256 shares) public view returns (uint256) {
+        return _convertToAssets(shares, Math.Rounding.Ceil);
     }
 
     function depositWithMinShares(uint256 assets, address receiver, uint256 minSharesOut)
@@ -212,14 +241,20 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         if (shares < minSharesOut) revert MinimumSharesNotMet(minSharesOut, shares);
     }
 
-    function deposit(uint256 assets, address receiver) public override(ERC4626Upgradeable) returns (uint256 shares) {
+    function deposit(uint256 assets, address receiver) public returns (uint256 shares) {
         _accrueManagementFee();
-        return super.deposit(assets, receiver);
+        uint256 maxAssets = maxDeposit(receiver);
+        if (assets > maxAssets) revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
+        shares = previewDeposit(assets);
+        _deposit(msg.sender, receiver, assets, shares);
     }
 
-    function mint(uint256 shares, address receiver) public override(ERC4626Upgradeable) returns (uint256 assets) {
+    function mint(uint256 shares, address receiver) public returns (uint256 assets) {
         _accrueManagementFee();
-        return super.mint(shares, receiver);
+        uint256 maxShares = maxMint(receiver);
+        if (shares > maxShares) revert ERC4626ExceededMaxMint(receiver, shares, maxShares);
+        assets = previewMint(shares);
+        _deposit(msg.sender, receiver, assets, shares);
     }
 
     function isOperator(address controller, address operator) public view returns (bool) {
@@ -262,28 +297,24 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         IFundFlowManagerVault(_getFundVaultStorage().flowManager).cancelPending(msg.sender, controller, shares);
     }
 
-    function maxRedeem(address controller) public view override(ERC4626Upgradeable) returns (uint256) {
+    function maxRedeem(address controller) public view returns (uint256) {
         return IFundFlowManagerVault(_getFundVaultStorage().flowManager)
             .claimableRedeemRequest(FundConstants.ERC7540_REQUEST_ID, controller);
     }
 
-    function maxWithdraw(address controller) public view override(ERC4626Upgradeable) returns (uint256) {
+    function maxWithdraw(address controller) public view returns (uint256) {
         return IFundFlowManagerVault(_getFundVaultStorage().flowManager).claimableAssets(controller);
     }
 
-    function previewRedeem(uint256) public pure override(ERC4626Upgradeable) returns (uint256) {
+    function previewRedeem(uint256) public pure returns (uint256) {
         revert AsyncPreviewUnsupported();
     }
 
-    function previewWithdraw(uint256) public pure override(ERC4626Upgradeable) returns (uint256) {
+    function previewWithdraw(uint256) public pure returns (uint256) {
         revert AsyncPreviewUnsupported();
     }
 
-    function redeem(uint256 shares, address receiver, address controller)
-        public
-        override(ERC4626Upgradeable)
-        returns (uint256 assets)
-    {
+    function redeem(uint256 shares, address receiver, address controller) public returns (uint256 assets) {
         _requireController(controller);
         uint256 available = maxRedeem(controller);
         if (shares == 0 || shares > available) revert ERC4626ExceededMaxRedeem(controller, shares, available);
@@ -293,11 +324,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
     }
 
-    function withdraw(uint256 assets, address receiver, address controller)
-        public
-        override(ERC4626Upgradeable)
-        returns (uint256 shares)
-    {
+    function withdraw(uint256 assets, address receiver, address controller) public returns (uint256 shares) {
         _requireController(controller);
         uint256 availableAssets = maxWithdraw(controller);
         if (assets == 0 || assets > availableAssets) {
@@ -321,7 +348,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
             if (nav.reportNonce != expectedNonce) revert InvalidReportNonce(expectedNonce, nav.reportNonce);
             revert InvalidNavCommit();
         }
-        if (feeShares != 0 && (feeRecipient == address(0) || (totalSupply() != 0 && nav.netAssets == 0))) {
+        if (feeShares != 0 && (feeRecipient == address(0) || (shareSupply() != 0 && nav.netAssets == 0))) {
             revert InvalidNavCommit();
         }
 
@@ -344,21 +371,21 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         $.acceptedFlowNonce = nav.fundFlowNonce;
         $.acceptedIdleStateHash = nav.idleStateHash;
         ++$.fundFlowNonce;
-        if (feeShares != 0) _mint(feeRecipient, feeShares);
+        if (feeShares != 0) IFundShare($.shareToken).mint(feeRecipient, feeShares);
 
         emit NavCommitted(nav.reportNonce, nav.netAssets, nav.validAfterBlock, nav.validUntilBlock);
     }
 
-    function escrowShares(address owner, uint256 shares) external {
-        _requireLockedModule(_getFundVaultStorage().flowManager);
-        if (owner == address(0) || shares == 0) revert InvalidAddress();
-        _transfer(owner, address(this), shares);
+    function escrowShares(address owner, address spender, uint256 shares) external {
+        FundVaultStorageLayout storage $ = _requireLockedModule(_getFundVaultStorage().flowManager);
+        if (owner == address(0) || spender == address(0) || shares == 0) revert InvalidAddress();
+        IFundShare($.shareToken).escrowShares(owner, spender, shares);
     }
 
     function returnEscrowedShares(address receiver, uint256 shares) external {
-        _requireLockedModule(_getFundVaultStorage().flowManager);
+        FundVaultStorageLayout storage $ = _requireLockedModule(_getFundVaultStorage().flowManager);
         if (receiver == address(0) || shares == 0) revert InvalidAddress();
-        _transfer(address(this), receiver, shares);
+        IFundShare($.shareToken).returnEscrowedShares(receiver, shares);
     }
 
     function reserveAccountingAssets(uint256 assets) external {
@@ -381,7 +408,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
     function processAccountingAssetClaim(address controller, uint256 shares, uint256 assets) external {
         FundVaultStorageLayout storage $ = _requireLockedModule(_getFundVaultStorage().flowManager);
         if (controller == address(0) || shares == 0 || assets > $.reservedClaimAssets) revert InvalidNavCommit();
-        _burn(address(this), shares);
+        IFundShare($.shareToken).burn(address(this), shares);
         ++$.fundFlowNonce;
         emit ClaimReserved(controller, shares, assets);
     }
@@ -395,10 +422,10 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
 
     function mintFeeShares(uint256 shares, address recipient) external {
         FundVaultStorageLayout storage $ = _requireLockedModule(_getFundVaultStorage().accounting);
-        if (shares == 0 || recipient == address(0) || (totalSupply() != 0 && $.committedNav == 0)) {
+        if (shares == 0 || recipient == address(0) || (shareSupply() != 0 && $.committedNav == 0)) {
             revert InvalidNavCommit();
         }
-        _mint(recipient, shares);
+        IFundShare($.shareToken).mint(recipient, shares);
         ++$.fundFlowNonce;
     }
 
@@ -497,21 +524,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         return rawBalance > $.accountedIdleAssets ? rawBalance - $.accountedIdleAssets : 0;
     }
 
-    function transfer(address to, uint256 value) public override(ERC20Upgradeable, IERC20) returns (bool) {
-        _requireUnlocked();
-        return super.transfer(to, value);
-    }
-
-    function transferFrom(address from, address to, uint256 value)
-        public
-        override(ERC20Upgradeable, IERC20)
-        returns (bool)
-    {
-        _requireUnlocked();
-        return super.transferFrom(from, to, value);
-    }
-
-    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) private {
         if (!_creationOpen()) revert InactiveNavWindow();
         if (assets != 0 && shares == 0) revert ZeroSharesDeposit(assets);
         FundVaultStorageLayout storage $ = _getFundVaultStorage();
@@ -522,16 +535,12 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         if (token.balanceOf(address(this)) - beforeBalance != assets) {
             revert UnsupportedAssetBehavior($.accountingAsset);
         }
-        _mint(receiver, shares);
+        IFundShare($.shareToken).mint(receiver, shares);
         $.accountedIdleAssets += assets;
         $.committedNav += assets;
         ++$.fundFlowNonce;
         emit Deposit(caller, receiver, assets, shares);
         _exitUserExecution();
-    }
-
-    function _decimalsOffset() internal view override returns (uint8) {
-        return _getFundVaultStorage().shareDecimalsOffset;
     }
 
     function _requestRedeem(uint256 shares, address controller, address owner, uint256 minAssetsOut)
@@ -543,12 +552,10 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         if ($.redemptionsPaused || shares == 0 || controller == address(0) || owner == address(0)) {
             revert UnauthorizedOperator(controller, msg.sender);
         }
-        if (msg.sender != owner && !(controller == owner && isOperator(controller, msg.sender))) {
-            _spendAllowance(owner, msg.sender, shares);
-        }
+        address shareSpender = _shareSpender(controller, owner);
 
         requestId = IFundFlowManagerVault($.flowManager)
-            .recordRedeemRequest(msg.sender, shares, controller, owner, minAssetsOut);
+            .recordRedeemRequest(msg.sender, shareSpender, shares, controller, owner, minAssetsOut);
         emit RedeemRequest(controller, owner, requestId, msg.sender, shares);
     }
 
@@ -569,7 +576,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         FundVaultStorageLayout storage $ = _getFundVaultStorage();
         if ($.depositsPaused || $.executionLockOwner != address(0)) return false;
         if (block.number < $.navValidAfterBlock || block.number > $.navValidUntilBlock) return false;
-        if (totalSupply() != 0 && $.committedNav == 0) return false;
+        if (shareSupply() != 0 && $.committedNav == 0) return false;
         return IERC20($.accountingAsset).balanceOf(address(this)) >= $.accountedIdleAssets;
     }
 
@@ -596,6 +603,23 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
 
     function _accrueManagementFee() private {
         IFundAccounting(_getFundVaultStorage().accounting).accrueManagementFee();
+    }
+
+    function _convertToShares(uint256 assets, Math.Rounding rounding) private view returns (uint256) {
+        FundVaultStorageLayout storage $ = _getFundVaultStorage();
+        return Math.mulDiv(assets, shareSupply() + 10 ** $.shareDecimalsOffset, totalAssets() + 1, rounding);
+    }
+
+    function _convertToAssets(uint256 shares, Math.Rounding rounding) private view returns (uint256) {
+        FundVaultStorageLayout storage $ = _getFundVaultStorage();
+        return Math.mulDiv(shares, totalAssets() + 1, shareSupply() + 10 ** $.shareDecimalsOffset, rounding);
+    }
+
+    function _shareSpender(address controller, address owner) private view returns (address) {
+        if (msg.sender == owner || (controller == owner && isOperator(controller, msg.sender))) {
+            return owner;
+        }
+        return msg.sender;
     }
 
     function _idleStateHash(FundVaultStorageLayout storage $) private view returns (bytes32) {

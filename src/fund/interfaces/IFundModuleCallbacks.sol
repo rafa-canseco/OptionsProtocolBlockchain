@@ -2,7 +2,7 @@
 pragma solidity 0.8.24;
 
 interface IFundVaultModuleCallbacks {
-    function escrowShares(address owner, uint256 shares) external;
+    function escrowShares(address owner, address spender, uint256 shares) external;
     function returnEscrowedShares(address receiver, uint256 shares) external;
     function reserveAccountingAssets(uint256 assets) external;
     function releaseClaimReserve(uint256 assets) external;

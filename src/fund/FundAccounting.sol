@@ -2,9 +2,7 @@
 pragma solidity 0.8.24;
 
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {FundUpgradeable} from "./FundUpgradeable.sol";
 import {FundConstants} from "./FundConstants.sol";
 import {FundTypes} from "./FundTypes.sol";
@@ -14,16 +12,13 @@ import {IFundAccounting} from "./interfaces/IFundAccounting.sol";
 import {IFundVault} from "./interfaces/IFundVault.sol";
 import {IFundVaultModuleCallbacks} from "./interfaces/IFundModuleCallbacks.sol";
 import {IPositionValuator} from "./interfaces/IPositionValuator.sol";
+import {INavReportVerifier} from "./interfaces/INavReportVerifier.sol";
 
 interface IFundVaultAccounting is IFundVault {
-    function totalSupply() external view returns (uint256);
+    function shareSupply() external view returns (uint256);
     function asset() external view returns (address);
     function strategyManager() external view returns (address);
     function accountedIdleAssets() external view returns (uint256);
-}
-
-interface IStrategyPositions {
-    function positionsHash() external view returns (bytes32);
 }
 
 interface IFlowProcessingState {
@@ -31,7 +26,11 @@ interface IFlowProcessingState {
 }
 
 /// @notice Component NAV verification, reporter quorum, and fee crystallization.
-contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingStorage, IFundAccounting {
+contract FundAccounting is FundUpgradeable, FundAccountingStorage, IFundAccounting {
+    bytes32 private constant EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant NAV_NAME_HASH = keccak256("b1nary Fund NAV");
+    bytes32 private constant NAV_VERSION_HASH = keccak256("1");
     bytes32 public constant NAV_REPORT_TYPEHASH =
         keccak256("NavReport(address fund,uint64 reporterSetVersion,uint64 reportNonce,bytes32 reportsHash)");
 
@@ -59,6 +58,7 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
 
     function initialize(
         address fund_,
+        address navVerifier_,
         address authority_,
         uint64 compatibilityVersion_,
         uint64 activationDelay_,
@@ -67,15 +67,18 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
         FundTypes.FeeConfig calldata feeConfig_
     ) external initializer {
         if (
-            fund_ == address(0) || compatibilityVersion_ == 0 || activationDelay_ == 0 || maxSnapshotAge_ == 0
-                || maxWindowLength_ == 0 || maxSnapshotAge_ > 255
+            fund_ == address(0) || navVerifier_ == address(0) || compatibilityVersion_ == 0 || activationDelay_ == 0
+                || maxSnapshotAge_ == 0 || maxWindowLength_ == 0 || maxSnapshotAge_ > 255
         ) revert InvalidAddress();
+        uint64 verifierVersion = INavReportVerifier(navVerifier_).interfaceVersion();
+        if (navVerifier_.code.length == 0 || verifierVersion == 0) revert InvalidAddress();
         __FundUpgradeable_init(authority_);
-        __EIP712_init("b1nary Fund NAV", "1");
 
         FundAccountingStorageLayout storage $ = _getFundAccountingStorage();
         $.fund = fund_;
+        $.navVerifier = navVerifier_;
         $.compatibilityVersion = compatibilityVersion_;
+        $.navVerifierVersion = verifierVersion;
         $.activationDelay = activationDelay_;
         $.maxSnapshotAge = maxSnapshotAge_;
         $.maxWindowLength = maxWindowLength_;
@@ -94,8 +97,24 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
         return _getFundAccountingStorage().compatibilityVersion;
     }
 
+    function navVerifier() external view returns (address) {
+        return _getFundAccountingStorage().navVerifier;
+    }
+
+    function navVerifierVersion() external view returns (uint64) {
+        return _getFundAccountingStorage().navVerifierVersion;
+    }
+
     function reporterSetVersion() external view returns (uint64) {
         return _getFundAccountingStorage().reporterSetVersion;
+    }
+
+    function reporterThreshold() external view returns (uint16) {
+        return _getFundAccountingStorage().reporterThreshold;
+    }
+
+    function isReporter(address reporter) external view returns (bool) {
+        return _getFundAccountingStorage().reporters[reporter];
     }
 
     function lastReportNonce() external view returns (uint64) {
@@ -156,59 +175,26 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
         if (IFlowProcessingState(vault.flowManager()).hasActiveProcessing()) revert InvalidReportWindow();
         uint64 expectedNonce = $.lastReportNonce + 1;
         if (reportNonce != expectedNonce) revert InvalidReportNonce(expectedNonce, reportNonce);
-        if ($.reporterSetVersion == 0 || $.reporterThreshold == 0) {
-            revert InvalidReporterSet($.reporterSetVersion);
-        }
-        if (!$.components[FundConstants.IDLE_COMPONENT_ID].active) revert IncompleteComponentSet();
-        if (reports.length == 0 || reports.length != $.activeComponentIds.length) {
-            revert IncompleteComponentSet();
-        }
-        if (reporters.length != signatures.length || reporters.length < $.reporterThreshold) {
-            revert InvalidSignatureCount();
-        }
 
         bytes32 acceptedReportHash = reportHash(reportNonce, reports);
         bytes32 digest = _hashTypedDataV4(acceptedReportHash);
-        _validateReporters($, reporters, signatures, digest);
-
-        uint64 snapshotBlock = reports[0].snapshotBlock;
-        uint64 validAfterBlock = reports[0].validAfterBlock;
-        uint64 validUntilBlock = reports[0].validUntilBlock;
-        bytes32 snapshotBlockHash = reports[0].snapshotBlockHash;
-        if (
-            snapshotBlock >= block.number || block.number - snapshotBlock > $.maxSnapshotAge
-                || blockhash(snapshotBlock) != snapshotBlockHash
-        ) revert InvalidSnapshotBlock(snapshotBlock);
-        if (
-            validAfterBlock < block.number + 1 || validAfterBlock < snapshotBlock + $.activationDelay
-                || validUntilBlock <= validAfterBlock || validUntilBlock - validAfterBlock > $.maxWindowLength
-        ) revert InvalidReportWindow();
-
-        for (uint256 i; i < reports.length; ++i) {
-            FundTypes.ComponentReport calldata report = reports[i];
-            _validateComponent(
-                $, report, reports, i, snapshotBlock, snapshotBlockHash, validAfterBlock, validUntilBlock
+        nav = INavReportVerifier($.navVerifier)
+            .verifyNavReport(
+                INavReportVerifier.VerifyNavReportParams({
+                    fund: $.fund,
+                    reportNonce: reportNonce,
+                    reporterSetVersion: $.reporterSetVersion,
+                    reporterThreshold: $.reporterThreshold,
+                    activationDelay: $.activationDelay,
+                    maxSnapshotAge: $.maxSnapshotAge,
+                    maxWindowLength: $.maxWindowLength,
+                    reportHash: acceptedReportHash,
+                    digest: digest
+                }),
+                reports,
+                reporters,
+                signatures
             );
-            if (report.liabilities > report.grossAssets) revert LiabilityExceedsAssets(report.componentId);
-            nav.grossAssets += report.grossAssets;
-            nav.liabilities += report.liabilities;
-            nav.liquidAccountingAssets += report.liquidAccountingAssets;
-            nav.baseExitCost += report.baseExitCost;
-            if (report.componentId == FundConstants.IDLE_COMPONENT_ID) {
-                nav.fundFlowNonce = report.componentNonce;
-                nav.idleStateHash = report.positionStateHash;
-            }
-        }
-
-        nav.netAssets = nav.grossAssets - nav.liabilities;
-        nav.snapshotBlock = snapshotBlock;
-        nav.validAfterBlock = validAfterBlock;
-        nav.validUntilBlock = validUntilBlock;
-        nav.reporterSetVersion = $.reporterSetVersion;
-        nav.reportNonce = reportNonce;
-        nav.positionsHash = IStrategyPositions(IFundVaultAccounting($.fund).strategyManager()).positionsHash();
-        nav.reportHash = acceptedReportHash;
-        nav.signaturesHash = keccak256(abi.encode(reporters, signatures));
 
         uint256 feeShares = _crystallizeFees($, nav.netAssets);
         $.lastReportNonce = reportNonce;
@@ -302,7 +288,7 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
         FundAccountingStorageLayout storage $ = _getFundAccountingStorage();
         IFundVaultAccounting vault = IFundVaultAccounting($.fund);
         if (msg.sender != $.fund && msg.sender != vault.flowManager()) revert UnauthorizedFeeAccrual(msg.sender);
-        feeShares = _accrueManagementFee($, vault.totalAssets(), vault.totalSupply(), true);
+        feeShares = _accrueManagementFee($, vault.totalAssets(), vault.shareSupply(), true);
         _mintCheckpointShares($, feeShares);
     }
 
@@ -324,7 +310,7 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
         returns (uint256 feeShares)
     {
         IFundVaultAccounting vault = IFundVaultAccounting($.fund);
-        uint256 supply = vault.totalSupply();
+        uint256 supply = vault.shareSupply();
         FundTypes.FeeConfig storage config = $.feeConfig;
         FundTypes.FeeState storage state = $.feeState;
 
@@ -345,7 +331,7 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
     function _checkpointManagementFee(FundAccountingStorageLayout storage $) private {
         IFundVaultAccounting vault = IFundVaultAccounting($.fund);
         if (IFlowProcessingState(vault.flowManager()).hasActiveProcessing()) revert InvalidReportWindow();
-        uint256 feeShares = _accrueManagementFee($, vault.totalAssets(), vault.totalSupply(), false);
+        uint256 feeShares = _accrueManagementFee($, vault.totalAssets(), vault.shareSupply(), false);
         _mintCheckpointShares($, feeShares);
     }
 
@@ -377,55 +363,6 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
         state.lastManagementAccrual += uint48(elapsed);
     }
 
-    function _validateReporters(
-        FundAccountingStorageLayout storage $,
-        address[] calldata reporters,
-        bytes[] calldata signatures,
-        bytes32 digest
-    ) private view {
-        for (uint256 i; i < reporters.length; ++i) {
-            address recovered = ECDSA.recover(digest, signatures[i]);
-            if (recovered != reporters[i] || !$.reporters[recovered]) revert InvalidReporter(recovered);
-            for (uint256 j; j < i; ++j) {
-                if (reporters[j] == recovered) revert DuplicateReporter(recovered);
-            }
-        }
-    }
-
-    function _validateComponent(
-        FundAccountingStorageLayout storage $,
-        FundTypes.ComponentReport calldata report,
-        FundTypes.ComponentReport[] calldata reports,
-        uint256 index,
-        uint64 snapshotBlock,
-        bytes32 snapshotBlockHash,
-        uint64 validAfterBlock,
-        uint64 validUntilBlock
-    ) private view {
-        if (report.fund != $.fund) revert InvalidFund(report.fund);
-        if (report.chainId != block.chainid) revert InvalidChain(report.chainId);
-        if (report.reporterSetVersion != $.reporterSetVersion) revert InvalidReporterSet(report.reporterSetVersion);
-        if (
-            report.snapshotBlock != snapshotBlock || report.snapshotBlockHash != snapshotBlockHash
-                || report.validAfterBlock != validAfterBlock || report.validUntilBlock != validUntilBlock
-        ) revert StaleComponent(report.componentId);
-
-        ComponentState storage state = $.components[report.componentId];
-        if (!state.active) revert IncompleteComponentSet();
-        if (report.componentId == FundConstants.IDLE_COMPONENT_ID) {
-            IFundVaultAccounting vault = IFundVaultAccounting($.fund);
-            if (
-                report.componentNonce != vault.fundFlowNonce() || report.positionStateHash != vault.idleStateHash()
-                    || report.liquidAccountingAssets != IERC20Metadata(vault.asset()).balanceOf(address(vault))
-            ) revert InvalidPositionState(report.componentId);
-        } else if (report.componentNonce != state.nonce || report.positionStateHash != state.positionStateHash) {
-            revert InvalidPositionState(report.componentId);
-        }
-        for (uint256 j; j < index; ++j) {
-            if (reports[j].componentId == report.componentId) revert DuplicateComponent(report.componentId);
-        }
-    }
-
     function _removeComponent(FundAccountingStorageLayout storage $, bytes32 componentId) private {
         uint256 length = $.activeComponentIds.length;
         for (uint256 i; i < length; ++i) {
@@ -435,5 +372,14 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
                 return;
             }
         }
+    }
+
+    function _hashTypedDataV4(bytes32 structHash) private view returns (bytes32) {
+        return keccak256(abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash));
+    }
+
+    function _domainSeparatorV4() private view returns (bytes32) {
+        return
+            keccak256(abi.encode(EIP712_DOMAIN_TYPEHASH, NAV_NAME_HASH, NAV_VERSION_HASH, block.chainid, address(this)));
     }
 }

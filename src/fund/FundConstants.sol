@@ -18,6 +18,7 @@ library FundConstants {
     bytes4 internal constant ERC7540_OPERATOR_INTERFACE_ID = 0xe3bc4e65;
     bytes4 internal constant ERC7540_REDEEM_INTERFACE_ID = 0x620ee8e4;
     bytes4 internal constant ERC7575_VAULT_INTERFACE_ID = 0x2f0a18c5;
+    bytes4 internal constant ERC7575_SHARE_INTERFACE_ID = 0xf815c03d;
 
     uint64 internal constant UPGRADER_ROLE = 1;
     uint64 internal constant ACCOUNTING_ROLE = 2;

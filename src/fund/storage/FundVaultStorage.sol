@@ -5,6 +5,7 @@ abstract contract FundVaultStorage {
     /// @custom:storage-location erc7201:b1nary.storage.FundVault
     struct FundVaultStorageLayout {
         address accountingAsset;
+        address shareToken;
         address accounting;
         address flowManager;
         address strategyManager;

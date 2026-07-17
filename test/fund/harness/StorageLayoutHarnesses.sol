@@ -101,6 +101,7 @@ abstract contract FundVaultStorageV2Definition {
     /// @custom:storage-location erc7201:b1nary.storage.FundVault
     struct FundVaultStorageLayout {
         address accountingAsset;
+        address shareToken;
         address accounting;
         address flowManager;
         address strategyManager;
@@ -171,6 +172,7 @@ abstract contract FundVaultStorageBadTypeDefinition {
     /// @custom:storage-location erc7201:b1nary.storage.FundVault
     struct FundVaultStorageLayout {
         address accountingAsset;
+        address shareToken;
         address accounting;
         address flowManager;
         address strategyManager;

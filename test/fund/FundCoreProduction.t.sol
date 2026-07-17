@@ -8,7 +8,9 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
 import {FundVault} from "../../src/fund/FundVault.sol";
+import {FundShare} from "../../src/fund/FundShare.sol";
 import {FundAccounting} from "../../src/fund/FundAccounting.sol";
+import {NavReportVerifier} from "../../src/fund/NavReportVerifier.sol";
 import {FundFlowManager} from "../../src/fund/FundFlowManager.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
 import {FundConstants} from "../../src/fund/FundConstants.sol";
@@ -104,13 +106,16 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         MockERC20 internal asset;
         FundFactory internal factory;
         FundVault internal vault;
+        FundShare internal share;
         FundAccounting internal accounting;
         FundFlowManager internal flow;
         StrategyManager internal strategy;
         AccessManager internal manager;
 
         FundVault internal vaultImplementation;
+        FundShare internal shareImplementation;
         FundAccounting internal accountingImplementation;
+        NavReportVerifier internal navVerifier;
         FundFlowManager internal flowImplementation;
         StrategyManager internal strategyImplementation;
 
@@ -122,7 +127,9 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         function setUp() public {
             asset = new MockERC20("Mock USDC", "USDC", 6);
             vaultImplementation = new FundVault();
+            shareImplementation = new FundShare();
             accountingImplementation = new FundAccounting();
+            navVerifier = new NavReportVerifier();
             flowImplementation = new FundFlowManager();
             strategyImplementation = new StrategyManager();
 
@@ -131,7 +138,9 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
                 1,
                 FundFactory.ImplementationSet({
                     vault: address(vaultImplementation),
+                    share: address(shareImplementation),
                     accounting: address(accountingImplementation),
+                    navVerifier: address(navVerifier),
                     flowManager: address(flowImplementation),
                     strategyManager: address(strategyImplementation),
                     compatibilityVersion: 1,
@@ -174,6 +183,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             );
 
             vault = FundVault(deployed.vault);
+            share = FundShare(deployed.share);
             accounting = FundAccounting(deployed.accounting);
             flow = FundFlowManager(deployed.flowManager);
             strategy = StrategyManager(deployed.strategyManager);
@@ -183,11 +193,16 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             _submitNav(0, 0);
         }
 
-        function test_factoryDeploysIsolatedFourProxyTopologyAndPolicy() public view {
+        function test_factoryDeploysIsolatedModularTopologyAndPolicy() public view {
             assertEq(vault.accounting(), address(accounting));
+            assertEq(vault.share(), address(share));
+            assertEq(share.vault(address(asset)), address(vault));
+            assertEq(share.asset(), address(asset));
             assertEq(vault.flowManager(), address(flow));
             assertEq(vault.strategyManager(), address(strategy));
             assertEq(accounting.fund(), address(vault));
+            assertEq(accounting.navVerifier(), address(navVerifier));
+            assertEq(accounting.navVerifierVersion(), 1);
             assertEq(flow.fund(), address(vault));
             assertEq(strategy.fund(), address(vault));
             assertEq(vault.compatibilityVersion(), 1);
@@ -221,6 +236,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(manager.getRoleGrantDelay(manager.ADMIN_ROLE()), FundConstants.CORE_UPGRADE_DELAY);
             assertEq(manager.getRoleGrantDelay(FundConstants.UPGRADER_ROLE), FundConstants.CORE_UPGRADE_DELAY);
             assertEq(manager.getRoleGrantDelay(FundConstants.CURATOR_ROLE), FundConstants.CURATOR_DELAY);
+            assertEq(manager.getTargetAdminDelay(address(share)), FundConstants.CORE_UPGRADE_DELAY);
             assertEq(manager.getTargetAdminDelay(address(vault)), FundConstants.CORE_UPGRADE_DELAY);
         }
 
@@ -267,7 +283,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
 
         function test_activeNavEnablesDepositsAndStaleNavDoesNotFreezeTransfers() public {
             _depositForAlice(100e6);
-            assertEq(vault.balanceOf(alice), 100e18);
+            assertEq(share.balanceOf(alice), 100e18);
             assertEq(vault.totalAssets(), 100e6);
             assertEq(vault.accountedIdleAssets(), 100e6);
 
@@ -275,9 +291,9 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(vault.maxDeposit(alice), 0);
 
             vm.prank(alice);
-            vault.transfer(bob, 25e18);
-            assertEq(vault.balanceOf(bob), 25e18);
-            assertEq(vault.balanceOf(alice), 75e18);
+            share.transfer(bob, 25e18);
+            assertEq(share.balanceOf(bob), 25e18);
+            assertEq(share.balanceOf(alice), 75e18);
         }
 
         function test_donationIsQuarantinedWithoutClosingEntry() public {
@@ -294,7 +310,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             vault.deposit(100e6, bob);
             vm.stopPrank();
 
-            assertEq(vault.balanceOf(bob), 100e18);
+            assertEq(share.balanceOf(bob), 100e18);
             assertEq(vault.unaccountedBalance(address(asset)), 10e6);
             assertEq(vault.totalAssets(), 200e6);
 
@@ -432,7 +448,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
 
             vm.prank(alice);
             assertEq(vault.requestRedeem(40e18, alice, alice), FundConstants.ERC7540_REQUEST_ID);
-            assertEq(vault.balanceOf(address(vault)), 40e18);
+            assertEq(share.balanceOf(address(vault)), 40e18);
             assertEq(vault.pendingRedeemRequest(0, alice), 40e18);
             assertEq(vault.maxRedeem(alice), 0);
 
@@ -445,7 +461,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             (uint16 processed, bool complete) = flow.processRedeemBatch(1, 16);
             assertEq(processed, 1);
             assertTrue(complete);
-            assertEq(vault.totalSupply(), 60e18);
+            assertEq(share.totalSupply(), 60e18);
             assertEq(vault.pendingRedeemRequest(0, alice), 0);
             assertEq(vault.claimableRedeemRequest(0, alice), 40e18);
             assertEq(vault.maxDeposit(alice), type(uint256).max);
@@ -479,23 +495,23 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             vm.prank(operator);
             vault.cancelRedeemRequest(alice, 40e18);
 
-            assertEq(vault.balanceOf(alice), 100e18);
-            assertEq(vault.balanceOf(operator), 0);
-            assertEq(vault.balanceOf(address(vault)), 0);
+            assertEq(share.balanceOf(alice), 100e18);
+            assertEq(share.balanceOf(operator), 0);
+            assertEq(share.balanceOf(address(vault)), 0);
         }
 
         function test_allowanceRequesterCannotReceiveOwnersCancelledShares() public {
             _depositForAlice(100e6);
             vm.prank(alice);
-            vault.approve(operator, 40e18);
+            share.approve(operator, 40e18);
 
             vm.prank(operator);
             vault.requestRedeem(40e18, operator, alice);
             vm.prank(operator);
             vault.cancelPending(40e18);
 
-            assertEq(vault.balanceOf(alice), 100e18);
-            assertEq(vault.balanceOf(operator), 0);
+            assertEq(share.balanceOf(alice), 100e18);
+            assertEq(share.balanceOf(operator), 0);
         }
 
         function test_processorCannotChooseMarginalExitCost() public {
@@ -558,7 +574,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
 
             assertEq(flow.nextProcessBatchId(), 2);
             assertEq(vault.pendingRedeemRequest(0, alice), 0);
-            assertEq(vault.balanceOf(alice), 80e18);
+            assertEq(share.balanceOf(alice), 80e18);
         }
 
         function test_windowOutflowAccumulatesAcrossSuccessiveBatches() public {
@@ -754,10 +770,10 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
 
             _submitNav(110e6, 100e6);
 
-            assertGt(vault.balanceOf(feeRecipient), 0);
+            assertGt(share.balanceOf(feeRecipient), 0);
             assertEq(asset.balanceOf(address(vault)), rawAssetsBefore);
             assertEq(vault.totalAssets(), 110e6);
-            uint256 postFeePps = Math.mulDiv(110e6, FundConstants.SHARE_SCALE, vault.totalSupply());
+            uint256 postFeePps = Math.mulDiv(110e6, FundConstants.SHARE_SCALE, share.totalSupply());
             assertEq(accounting.feeState().highWaterMark, postFeePps);
             assertLt(postFeePps, 1.1e6);
         }
@@ -781,7 +797,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             flow.sealRedeemBatch(1);
             flow.startRedeemBatch(1, 40e18, 0);
 
-            assertGt(vault.balanceOf(feeRecipient), 0);
+            assertGt(share.balanceOf(feeRecipient), 0);
             assertLt(asset.balanceOf(vault.claimEscrow()), 40e6);
         }
 
@@ -805,8 +821,8 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             newConfig.feeRecipient = newRecipient;
             _scheduleAndCall(address(accounting), abi.encodeCall(accounting.setFeeConfig, (newConfig)));
 
-            assertGt(vault.balanceOf(feeRecipient), 0);
-            assertEq(vault.balanceOf(newRecipient), 0);
+            assertGt(share.balanceOf(feeRecipient), 0);
+            assertEq(share.balanceOf(newRecipient), 0);
 
             vm.warp(block.timestamp + 30 days);
             asset.mint(bob, 1e6);
@@ -814,7 +830,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             asset.approve(address(vault), 1e6);
             vault.deposit(1e6, bob);
             vm.stopPrank();
-            assertGt(vault.balanceOf(newRecipient), 0);
+            assertGt(share.balanceOf(newRecipient), 0);
         }
 
         function test_depositRejectsPositiveAssetsWhenVirtualConversionRoundsToZero() public {
@@ -845,7 +861,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(accounting.feeState().highWaterMark, 1e6);
             _submitNav(100e6, 100e6);
 
-            assertEq(vault.balanceOf(feeRecipient), 0);
+            assertEq(share.balanceOf(feeRecipient), 0);
             assertEq(accounting.feeState().highWaterMark, 1e6);
         }
 
@@ -855,8 +871,8 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(vault.maxDeposit(alice), 0);
 
             vm.prank(alice);
-            vault.transfer(bob, 10e18);
-            assertEq(vault.balanceOf(bob), 10e18);
+            share.transfer(bob, 10e18);
+            assertEq(share.balanceOf(bob), 10e18);
 
             vm.prank(alice);
             vault.requestRedeem(40e18, alice, alice);
@@ -897,7 +913,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
                 address(uint160(uint256(vm.load(address(vault), ERC1967_IMPLEMENTATION_SLOT)))),
                 address(nextImplementation)
             );
-            assertEq(vault.balanceOf(alice), 100e18);
+            assertEq(share.balanceOf(alice), 100e18);
             assertEq(vault.totalAssets(), 100e6);
             assertEq(vault.accounting(), address(accounting));
             assertEq(vault.flowManager(), address(flow));

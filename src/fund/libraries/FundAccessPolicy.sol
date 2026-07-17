@@ -25,6 +25,11 @@ library FundAccessPolicy {
         rules[4] = Rule(IFundVault.resumeRedemptions.selector, FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
     }
 
+    function shareRules() internal pure returns (Rule[] memory rules) {
+        rules = new Rule[](1);
+        rules[0] = Rule(UPGRADE_TO_AND_CALL_SELECTOR, FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
+    }
+
     function accountingRules() internal pure returns (Rule[] memory rules) {
         rules = new Rule[](5);
         rules[0] = Rule(UPGRADE_TO_AND_CALL_SELECTOR, FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
