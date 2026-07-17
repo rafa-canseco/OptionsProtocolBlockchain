@@ -6,6 +6,7 @@ interface IFundVaultModuleCallbacks {
     function returnEscrowedShares(address receiver, uint256 shares) external;
     function reserveAccountingAssets(uint256 assets) external;
     function releaseClaimReserve(uint256 assets) external;
+    function mintFeeShares(uint256 shares, address recipient) external;
     function recordStrategyReturn(address asset, uint256 balanceBefore) external returns (uint256 received);
     function invalidateNav() external;
     function restoreNavWindow(uint64 reportNonce, uint64 validUntilBlock, bytes32 positionsHash) external;

@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
 import {FundVault} from "../../src/fund/FundVault.sol";
@@ -592,6 +593,75 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertGt(vault.balanceOf(feeRecipient), 0);
             assertEq(asset.balanceOf(address(vault)), rawAssetsBefore);
             assertEq(vault.totalAssets(), 110e6);
+            uint256 postFeePps = Math.mulDiv(110e6, FundConstants.SHARE_SCALE, vault.totalSupply());
+            assertEq(accounting.feeState().highWaterMark, postFeePps);
+            assertLt(postFeePps, 1.1e6);
+        }
+
+        function test_managementFeeCrystallizesBeforeRedemptionProcessing() public {
+            _depositForAlice(100e6);
+            FundTypes.FeeConfig memory config = FundTypes.FeeConfig({
+                managementFeeWad: uint64(0.02e18),
+                performanceFeeBps: 0,
+                maxManagementFeeBps: 200,
+                maxPerformanceFeeBps: 0,
+                maxAccrualInterval: 365 days,
+                crystallizationPeriod: 0,
+                feeRecipient: feeRecipient
+            });
+            _scheduleAndCall(address(accounting), abi.encodeCall(accounting.setFeeConfig, (config)));
+            vm.warp(block.timestamp + 365 days);
+
+            vm.prank(alice);
+            vault.requestRedeem(40e18, alice, alice);
+            flow.sealRedeemBatch(1);
+            flow.startRedeemBatch(1, 40e18, 0);
+
+            assertGt(vault.balanceOf(feeRecipient), 0);
+            assertLt(asset.balanceOf(vault.claimEscrow()), 40e6);
+        }
+
+        function test_feeConfigCheckpointsOldRateAndRecipient() public {
+            _depositForAlice(100e6);
+            FundTypes.FeeConfig memory oldConfig = FundTypes.FeeConfig({
+                managementFeeWad: uint64(0.01e18),
+                performanceFeeBps: 0,
+                maxManagementFeeBps: 200,
+                maxPerformanceFeeBps: 0,
+                maxAccrualInterval: 365 days,
+                crystallizationPeriod: 0,
+                feeRecipient: feeRecipient
+            });
+            _scheduleAndCall(address(accounting), abi.encodeCall(accounting.setFeeConfig, (oldConfig)));
+            vm.warp(block.timestamp + 100 days);
+
+            address newRecipient = makeAddr("new-fee-recipient");
+            FundTypes.FeeConfig memory newConfig = oldConfig;
+            newConfig.managementFeeWad = uint64(0.02e18);
+            newConfig.feeRecipient = newRecipient;
+            _scheduleAndCall(address(accounting), abi.encodeCall(accounting.setFeeConfig, (newConfig)));
+
+            assertGt(vault.balanceOf(feeRecipient), 0);
+            assertEq(vault.balanceOf(newRecipient), 0);
+
+            vm.warp(block.timestamp + 30 days);
+            asset.mint(bob, 1e6);
+            vm.startPrank(bob);
+            asset.approve(address(vault), 1e6);
+            vault.deposit(1e6, bob);
+            vm.stopPrank();
+            assertGt(vault.balanceOf(newRecipient), 0);
+        }
+
+        function test_depositRejectsPositiveAssetsWhenVirtualConversionRoundsToZero() public {
+            _depositForAlice(1e6);
+            _submitNav(2e18, 1e6);
+            asset.mint(bob, 1);
+            vm.startPrank(bob);
+            asset.approve(address(vault), 1);
+            vm.expectRevert(abi.encodeWithSelector(FundVault.ZeroSharesDeposit.selector, uint256(1)));
+            vault.deposit(1, bob);
+            vm.stopPrank();
         }
 
         function test_highWaterMarkDoesNotResetAfterAReportedLoss() public {

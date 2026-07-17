@@ -11,6 +11,7 @@ import {FundFlowManagerStorage} from "./storage/FundFlowManagerStorage.sol";
 import {IFundFlowManager} from "./interfaces/IFundFlowManager.sol";
 import {IFundVault} from "./interfaces/IFundVault.sol";
 import {IFundVaultModuleCallbacks} from "./interfaces/IFundModuleCallbacks.sol";
+import {IFundAccounting} from "./interfaces/IFundAccounting.sol";
 
 interface IFundVaultFlow is IFundVault, IFundVaultModuleCallbacks {
     function totalSupply() external view returns (uint256);
@@ -235,6 +236,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
     function startRedeemBatch(uint64 batchId, uint256 shares, uint256 marginalExitCost) external restricted {
         FundFlowManagerStorageLayout storage $ = _getFundFlowManagerStorage();
         IFundVaultFlow vault = IFundVaultFlow($.fund);
+        IFundAccounting(vault.accounting()).accrueManagementFee();
         FundTypes.RedemptionBatch storage redeemBatch = $.batches[batchId];
         if (
             batchId != $.nextProcessBatchId || !redeemBatch.isSealed || redeemBatch.isReleased || redeemBatch.processing
@@ -258,8 +260,15 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         if (marginalExitCost != authorizedExitCost) {
             revert InvalidMarginalExitCost(authorizedExitCost, marginalExitCost);
         }
-        (, uint256 roundAssetBudget,) =
-            FundMath.redemptionPayout(shares, processingNav, eligibleSupply, marginalExitCost, $.maxExitFeeBps);
+        (, uint256 roundAssetBudget,) = FundMath.redemptionPayout(
+            shares,
+            processingNav,
+            eligibleSupply,
+            vault.virtualShares(),
+            FundConstants.VIRTUAL_ASSETS,
+            marginalExitCost,
+            $.maxExitFeeBps
+        );
         _validateBatchMinimums($, batchId, shares, redeemBatch.totalPendingShares, roundAssetBudget);
 
         uint256 lockId = vault.beginModuleExecution($.compatibilityVersion);

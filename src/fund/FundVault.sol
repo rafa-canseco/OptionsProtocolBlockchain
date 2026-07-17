@@ -16,6 +16,7 @@ import {FundConstants} from "./FundConstants.sol";
 import {FundTypes} from "./FundTypes.sol";
 import {FundVaultStorage} from "./storage/FundVaultStorage.sol";
 import {IFundFlowManager} from "./interfaces/IFundFlowManager.sol";
+import {IFundAccounting} from "./interfaces/IFundAccounting.sol";
 
 interface IFundFlowManagerVault is IFundFlowManager {
     function setOperator(address controller, address operator, bool approved) external;
@@ -33,6 +34,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
     error InvalidModule(address caller);
     error IncompatibleModuleVersion(uint64 expected, uint64 actual);
     error MinimumSharesNotMet(uint256 minimum, uint256 actual);
+    error ZeroSharesDeposit(uint256 assets);
     error UnsupportedAccountingAssetDecimals(uint8 decimals);
     error UnaccountedBalance(address asset, uint256 amount);
     error InvalidAddress();
@@ -141,6 +143,10 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         return _idleStateHash($);
     }
 
+    function virtualShares() external view returns (uint256) {
+        return 10 ** _getFundVaultStorage().shareDecimalsOffset;
+    }
+
     function executionLockOwner() external view returns (address) {
         return _getFundVaultStorage().executionLockOwner;
     }
@@ -204,6 +210,16 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
     {
         shares = deposit(assets, receiver);
         if (shares < minSharesOut) revert MinimumSharesNotMet(minSharesOut, shares);
+    }
+
+    function deposit(uint256 assets, address receiver) public override(ERC4626Upgradeable) returns (uint256 shares) {
+        _accrueManagementFee();
+        return super.deposit(assets, receiver);
+    }
+
+    function mint(uint256 shares, address receiver) public override(ERC4626Upgradeable) returns (uint256 assets) {
+        _accrueManagementFee();
+        return super.mint(shares, receiver);
     }
 
     function isOperator(address controller, address operator) public view returns (bool) {
@@ -377,6 +393,15 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         ++$.fundFlowNonce;
     }
 
+    function mintFeeShares(uint256 shares, address recipient) external {
+        FundVaultStorageLayout storage $ = _requireLockedModule(_getFundVaultStorage().accounting);
+        if (shares == 0 || recipient == address(0) || (totalSupply() != 0 && $.committedNav == 0)) {
+            revert InvalidNavCommit();
+        }
+        _mint(recipient, shares);
+        ++$.fundFlowNonce;
+    }
+
     function transferToStrategy(address asset_, address adapter, uint256 amount) external {
         FundVaultStorageLayout storage $ = _requireLockedModule(_getFundVaultStorage().strategyManager);
         if (asset_ != $.accountingAsset || adapter == address(0) || amount > $.accountedIdleAssets) {
@@ -488,6 +513,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
 
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
         if (!_creationOpen()) revert InactiveNavWindow();
+        if (assets != 0 && shares == 0) revert ZeroSharesDeposit(assets);
         FundVaultStorageLayout storage $ = _getFundVaultStorage();
         _enterUserExecution();
         IERC20 token = IERC20($.accountingAsset);
@@ -566,6 +592,10 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
     function _requireLockedModule(address module) private view returns (FundVaultStorageLayout storage $) {
         $ = _getFundVaultStorage();
         if (msg.sender != module || $.executionLockOwner != module) revert InvalidModule(msg.sender);
+    }
+
+    function _accrueManagementFee() private {
+        IFundAccounting(_getFundVaultStorage().accounting).accrueManagementFee();
     }
 
     function _idleStateHash(FundVaultStorageLayout storage $) private view returns (bytes32) {

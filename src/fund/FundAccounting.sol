@@ -3,6 +3,7 @@ pragma solidity 0.8.24;
 
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {FundUpgradeable} from "./FundUpgradeable.sol";
 import {FundConstants} from "./FundConstants.sol";
@@ -11,6 +12,7 @@ import {FundMath} from "./libraries/FundMath.sol";
 import {FundAccountingStorage} from "./storage/FundAccountingStorage.sol";
 import {IFundAccounting} from "./interfaces/IFundAccounting.sol";
 import {IFundVault} from "./interfaces/IFundVault.sol";
+import {IFundVaultModuleCallbacks} from "./interfaces/IFundModuleCallbacks.sol";
 import {IPositionValuator} from "./interfaces/IPositionValuator.sol";
 
 interface IFundVaultAccounting is IFundVault {
@@ -42,6 +44,7 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
     error InvalidFeeConfig();
     error InvalidValuator(address valuator);
     error UnauthorizedStrategyManager(address caller);
+    error UnauthorizedFeeAccrual(address caller);
 
     event ReporterSetUpdated(uint64 indexed version, uint16 threshold, address[] reporters);
     event ComponentUpdated(bytes32 indexed componentId, address valuator, uint64 interfaceVersion, bool active);
@@ -291,7 +294,16 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
 
     function setFeeConfig(FundTypes.FeeConfig calldata config) external restricted {
         FundAccountingStorageLayout storage $ = _getFundAccountingStorage();
+        _checkpointManagementFee($);
         _setFeeConfig($, config);
+    }
+
+    function accrueManagementFee() external returns (uint256 feeShares) {
+        FundAccountingStorageLayout storage $ = _getFundAccountingStorage();
+        IFundVaultAccounting vault = IFundVaultAccounting($.fund);
+        if (msg.sender != $.fund && msg.sender != vault.flowManager()) revert UnauthorizedFeeAccrual(msg.sender);
+        feeShares = _accrueManagementFee($, vault.totalAssets(), vault.totalSupply(), true);
+        _mintCheckpointShares($, feeShares);
     }
 
     function _setFeeConfig(FundAccountingStorageLayout storage $, FundTypes.FeeConfig calldata config) private {
@@ -316,27 +328,53 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
         FundTypes.FeeConfig storage config = $.feeConfig;
         FundTypes.FeeState storage state = $.feeState;
 
-        if (config.managementFeeWad != 0 && supply != 0 && preFeeNav != 0) {
-            uint256 elapsed = block.timestamp - state.lastManagementAccrual;
-            if (elapsed > config.maxAccrualInterval) elapsed = config.maxAccrualInterval;
-            if (elapsed != 0) {
-                (, uint256 managementShares) =
-                    FundMath.managementFeeShares(preFeeNav, supply, config.managementFeeWad, elapsed);
-                feeShares += managementShares;
-                state.lastManagementAccrual += uint48(elapsed);
-            }
-        } else {
-            state.lastManagementAccrual = uint48(block.timestamp);
-        }
+        feeShares = _accrueManagementFee($, preFeeNav, supply, true);
 
         if (supply != 0 && preFeeNav != 0) {
             (, uint256 performanceShares, uint256 preFeePps) = FundMath.performanceFeeShares(
                 preFeeNav, supply + feeShares, FundConstants.SHARE_SCALE, state.highWaterMark, config.performanceFeeBps
             );
             feeShares += performanceShares;
-            if (preFeePps > state.highWaterMark) state.highWaterMark = preFeePps;
+            if (preFeePps > state.highWaterMark) {
+                state.highWaterMark = Math.mulDiv(preFeeNav, FundConstants.SHARE_SCALE, supply + feeShares);
+            }
         }
         state.lastCrystallization = uint48(block.timestamp);
+    }
+
+    function _checkpointManagementFee(FundAccountingStorageLayout storage $) private {
+        IFundVaultAccounting vault = IFundVaultAccounting($.fund);
+        if (IFlowProcessingState(vault.flowManager()).hasActiveProcessing()) revert InvalidReportWindow();
+        uint256 feeShares = _accrueManagementFee($, vault.totalAssets(), vault.totalSupply(), false);
+        _mintCheckpointShares($, feeShares);
+    }
+
+    function _mintCheckpointShares(FundAccountingStorageLayout storage $, uint256 feeShares) private {
+        if (feeShares == 0) return;
+        IFundVaultAccounting vault = IFundVaultAccounting($.fund);
+        uint256 lockId = vault.beginModuleExecution($.compatibilityVersion);
+        IFundVaultModuleCallbacks($.fund).mintFeeShares(feeShares, $.feeConfig.feeRecipient);
+        vault.endModuleExecution(lockId);
+    }
+
+    function _accrueManagementFee(
+        FundAccountingStorageLayout storage $,
+        uint256 preFeeNav,
+        uint256 supply,
+        bool capElapsed
+    ) private returns (uint256 feeShares) {
+        FundTypes.FeeConfig storage config = $.feeConfig;
+        FundTypes.FeeState storage state = $.feeState;
+        if (config.managementFeeWad == 0 || supply == 0 || preFeeNav == 0) {
+            state.lastManagementAccrual = uint48(block.timestamp);
+            return 0;
+        }
+
+        uint256 elapsed = block.timestamp - state.lastManagementAccrual;
+        if (capElapsed && elapsed > config.maxAccrualInterval) elapsed = config.maxAccrualInterval;
+        if (elapsed == 0) return 0;
+        (, feeShares) = FundMath.managementFeeShares(preFeeNav, supply, config.managementFeeWad, elapsed);
+        state.lastManagementAccrual += uint48(elapsed);
     }
 
     function _validateReporters(

@@ -28,4 +28,5 @@ interface IFundAccounting {
     function setReporterSet(address[] calldata reporters, uint16 threshold, uint64 version) external;
     function setComponent(bytes32 componentId, address valuator, uint64 interfaceVersion, bool active) external;
     function setFeeConfig(FundTypes.FeeConfig calldata config) external;
+    function accrueManagementFee() external returns (uint256 feeShares);
 }
