@@ -425,3 +425,52 @@ accounted NAV, and unsynchronized donations across randomized operation
 sequences. `--force` is mandatory for any test run containing
 `StorageLayoutSpec`: OpenZeppelin intentionally rejects partial/incremental
 Foundry build-info.
+
+## 12. B1N-351 CSP adapter executable contract
+
+The first production strategy component adds:
+
+| Component | Form | Authority |
+| --- | --- | --- |
+| `CspFundAdapter` | UUPS proxy, ERC-7201 | Adapter AccessManager |
+| `CspFundAdapterOperations` | Stateless linked library | Fixed in implementation bytecode |
+| `CspFundValuator` | Immutable read-only policy | No mutation authority |
+
+The adapter namespace is `b1nary.storage.CspFundAdapter` at
+`0xd22de47223fb04c91ae131d6d8b510768988ac2102d26bf6a5b1c57722278200`.
+The storage harness recomputes this slot, and OpenZeppelin validates the
+production implementation with the explicitly reviewed
+`external-library-linking` allowance.
+
+The executable tests prove:
+
+- allocation is impossible before all physical-delivery capabilities and the
+  adapter-specific BatchSettler authorization exist onchain;
+- only StrategyManager can allocate, deallocate, recover in kind, or trigger an
+  emergency exit;
+- OTM expiry, ITM physical assignment, cash fallback, WETH liquidation, and raw
+  recovery reconcile measured balances and per-vault V1 ledgers;
+- premium and a conservative short-put liability appear in the same component
+  value, while assigned WETH appears as collective fund NAV;
+- no NAV can activate while physical delivery is pending or has occurred but
+  the adapter's final nonce/hash has not yet synchronized through StrategyManager;
+- observer quorum, independent-observer, block/hash binding, and conservative
+  maximum selection fail closed;
+- StrategyManager, FundVault, and FundAccounting publish the same new adapter
+  nonce/hash on normal, in-kind, and emergency operations;
+- the adapter, linked library, valuator, and modified core remain inside their
+  runtime budgets; and
+- the Base mainnet fork leaves V1 code hashes untouched and rejects activation
+  while the deployed Controller lacks the required physical-delivery gate.
+
+The mainnet-fork command is:
+
+```shell
+forge test --match-contract CspFundAdapterForkTest \
+  --fork-url "$BASE_RPC_URL" -vv
+```
+
+An adapter deployment is not active merely because its proxy exists. B1N-352
+must configure the delayed adapter selectors, verify the linked library, grant
+`setPhysicalDeliveryVault(adapter, true)`, and record successful `isOnboarded()`
+evidence before enabling its StrategyManager configuration.
