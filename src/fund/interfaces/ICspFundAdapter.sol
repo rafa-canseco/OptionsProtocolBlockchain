@@ -100,6 +100,7 @@ interface ICspFundAdapter is IFundStrategyAdapter {
     event AccountingAssetsReturned(uint256 amount);
     event AssignedWethSwapped(uint256 wethIn, uint256 usdcOut);
     event RawAssetsRecovered(address indexed escrow, address[] assets, uint256[] amounts, bool emergency);
+    event UnaccountedAssetIsolated(address indexed asset, uint256 amount);
     event AdapterConfigUpdated(RiskConfig riskConfig, address indexed swapRouter, uint24 swapFeeTier);
 
     error AdapterNotOnboarded();

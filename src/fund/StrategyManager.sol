@@ -26,6 +26,10 @@ interface IFundAccountingStrategyRegistry {
 
 interface IFlowProcessingState {
     function hasActiveProcessing() external view returns (bool);
+    function strategyExitEscrows() external view returns (address inKindEscrow, address emergencyEscrow);
+    function consumeStrategyInKindBatch(bytes32 batchId, address adapter, uint256 fractionWad)
+        external
+        returns (address escrow);
 }
 
 /// @notice Adapter registry and bounded allocation authority for one fund.
@@ -41,7 +45,11 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
     event StrategyAllocated(address indexed adapter, address indexed asset, uint256 amount, uint64 positionNonce);
     event StrategyDeallocated(address indexed adapter, uint256 targetValue, uint256 assetsOut, uint64 positionNonce);
     event StrategyDeallocatedInKind(
-        address indexed adapter, address indexed escrow, uint256 fractionWad, uint64 positionNonce
+        bytes32 indexed batchId,
+        address indexed adapter,
+        address indexed escrow,
+        uint256 fractionWad,
+        uint64 positionNonce
     );
     event StrategyEmergencyExited(address indexed adapter, address indexed escrow, uint64 positionNonce);
     event AllocationPaused(address indexed adapter);
@@ -178,20 +186,21 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
         emit StrategyDeallocated(adapter, targetValue, assetsOut, nonce);
     }
 
-    function deallocateInKind(address adapter, uint256 fractionWad, address escrow, bytes calldata data)
+    function deallocateInKind(bytes32 batchId, address adapter, uint256 fractionWad, bytes calldata data)
         external
         restricted
         returns (address[] memory assets, uint256[] memory amounts)
     {
         StrategyManagerStorageLayout storage $ = _getStrategyManagerStorage();
         FundTypes.StrategyConfig storage config = $.strategies[adapter];
-        if (config.interfaceVersion == 0 || fractionWad == 0 || fractionWad > FundConstants.WAD || escrow == address(0))
-        {
+        if (config.interfaceVersion == 0 || fractionWad == 0 || fractionWad > FundConstants.WAD) {
             revert AdapterNotActive(adapter);
         }
         IFundVaultStrategy vault = IFundVaultStrategy($.fund);
         uint256 lockId = vault.beginModuleExecution($.compatibilityVersion);
         vault.invalidateNav();
+        address escrow =
+            IFlowProcessingState(vault.flowManager()).consumeStrategyInKindBatch(batchId, adapter, fractionWad);
         (assets, amounts) = IFundStrategyAdapter(adapter).deallocateInKind(fractionWad, escrow, data);
         if (assets.length == 0 || assets.length != amounts.length) revert InvalidAddress();
 
@@ -205,18 +214,20 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
         vault.recordStrategyPositions($.positionsHash);
         _syncAccounting(vault.accounting(), adapter, nonce, stateHash);
         vault.endModuleExecution(lockId);
-        emit StrategyDeallocatedInKind(adapter, escrow, fractionWad, nonce);
+        emit StrategyDeallocatedInKind(batchId, adapter, escrow, fractionWad, nonce);
     }
 
-    function emergencyExit(address adapter, address escrow, bytes calldata data)
+    function emergencyExit(address adapter, bytes calldata data)
         external
         restricted
         returns (address[] memory assets, uint256[] memory amounts)
     {
         StrategyManagerStorageLayout storage $ = _getStrategyManagerStorage();
         FundTypes.StrategyConfig storage config = $.strategies[adapter];
-        if (config.interfaceVersion == 0 || escrow == address(0)) revert AdapterNotActive(adapter);
+        if (config.interfaceVersion == 0) revert AdapterNotActive(adapter);
         IFundVaultStrategy vault = IFundVaultStrategy($.fund);
+        (, address escrow) = IFlowProcessingState(vault.flowManager()).strategyExitEscrows();
+        if (escrow == address(0) || escrow.code.length == 0) revert InvalidAddress();
         uint256 lockId = vault.beginModuleExecution($.compatibilityVersion);
         vault.invalidateNav();
         (assets, amounts) = IFundStrategyAdapter(adapter).emergencyExit(escrow, data);

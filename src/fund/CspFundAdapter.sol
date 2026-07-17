@@ -286,6 +286,7 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
         returns (address[] memory assets, uint256[] memory amounts)
     {
         if (escrow == address(0)) revert InvalidAddress();
+        if (_getCspFundAdapterStorage().activePositionCount != 0) revert InvalidRiskConfig();
         return _recoverRawAssets(FundConstants.WAD, escrow, true);
     }
 
@@ -377,15 +378,17 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
             }
             uint256 expectedWeth = current.optionAmount * 1e10;
             uint256 wethBalance = IERC20($.weth).balanceOf(address(this));
-            if (
-                wethBalance < current.wethBalanceBeforeDelivery
-                    || wethBalance - current.wethBalanceBeforeDelivery != expectedWeth
-            ) revert LedgerMismatch(positionId);
+            if (wethBalance < current.wethBalanceBeforeDelivery) revert LedgerMismatch(positionId);
+            uint256 deliveredWeth = wethBalance - current.wethBalanceBeforeDelivery;
+            if (deliveredWeth < expectedWeth) revert LedgerMismatch(positionId);
             $.accountedWeth += expectedWeth;
             current.assignedWeth = expectedWeth;
             current.lifecycle = Lifecycle.Assigned;
             --$.activePositionCount;
             _checkpointPosition($, positionId, current);
+            if (deliveredWeth > expectedWeth) {
+                emit UnaccountedAssetIsolated($.weth, deliveredWeth - expectedWeth);
+            }
             emit PositionTransitioned(
                 positionId, current.protocolVaultId, current.lifecycle, 0, 0, expectedWeth, current.lifecycleHash
             );
