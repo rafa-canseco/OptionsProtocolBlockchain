@@ -173,7 +173,7 @@ shares in the new fund at an audited checkpoint.
 | [ERC-2612](https://eips.ethereum.org/EIPS/eip-2612) | Signed `permit` approvals | Required for share UX and integrations |
 | [ERC-4626](https://eips.ethereum.org/EIPS/eip-4626) | Final standard for single-asset tokenized vaults; shares are ERC-20 | Core fund interface |
 | [ERC-7540](https://eips.ethereum.org/EIPS/eip-7540) | Final extension for asynchronous ERC-4626 requests | Model for delayed redemptions; exact compliance evaluated separately |
-| [ERC-7575](https://eips.ethereum.org/EIPS/eip-7575) | Final extension for multiple asset entry points and external share tokens | Defer until a fund genuinely needs multiple entry assets |
+| [ERC-7575](https://eips.ethereum.org/EIPS/eip-7575) | Final extension for multiple asset entry points and external share tokens | Required for the external `FundShare` boundary |
 
 ERC-4626 is the correct base because it standardizes the interface expected by
 wallets, routers, aggregators, lending protocols, analytics, and other DeFi
@@ -277,10 +277,10 @@ Non-responsibilities:
 - Implementing every strategy protocol directly.
 - Making arbitrary external calls selected by an allocator.
 
-The fund contract should itself be the ERC-20 share token. A separate share
-contract would split authorization and supply invariants without providing a
-current benefit. ERC-7575 allows an external share if multi-entry architecture
-later makes that separation necessary.
+The fund vault should expose the ERC-4626/7540 entrypoints and discover its
+external ERC-20/Permit share token through `share()`. The external share token
+is a standard ERC-7575 boundary and keeps transferable share state out of the
+custody/NAV implementation.
 
 ### 5.3 `StrategyRegistry` and adapters
 
@@ -696,9 +696,9 @@ Do not add multi-asset deposits directly to the core fund in the first version.
 Use a router or zap that converts the user's token to the accounting asset and
 then calls `depositWithMinShares` with `minSharesOut`.
 
-Adopt ERC-7575 only if the product requires multiple canonical asset entry
-points sharing one share token. This preserves simple ERC-4626 integrations now
-without closing the future path.
+Use the ERC-7575 `share()` boundary from the first fund core implementation.
+Additional canonical asset entrypoints remain out of scope for the first
+version; routers or zaps still convert into the accounting asset before deposit.
 
 ### 10.4 Multi-strategy funds
 
@@ -855,7 +855,7 @@ independent validation, competition, bounds, or conservative haircuts.
 
 The architecture review should explicitly approve or change:
 
-1. ERC-4626 vault-as-share versus an external ERC-7575 share.
+1. Exact `FundShare` discovery and metadata conventions across backend/frontend.
 2. Accounting asset for each initial product.
 3. Accumulating premium in NAV versus periodic cash distributions.
 4. NAV reporter trust model and minimum source set.
@@ -1006,10 +1006,10 @@ execution while avoiding excessive contract fragmentation.
 
 ### 19.1 Final design decisions
 
-1. Every fund share is the transferable ERC-20 surface of an
-   ERC-4626-compatible fund vault. For ERC-7540/ERC-7575 compatibility,
-   `share()` returns the vault itself and the required interfaces are exposed
-   through ERC-165.
+1. Every fund share is an external `FundShare` ERC-20/Permit token authorized
+   by one ERC-4626-compatible fund vault. For ERC-7540/ERC-7575 compatibility,
+   `FundVault.share()` returns `FundShare`, while the vault keeps custody,
+   entrypoints, async redemption, and NAV callbacks.
 2. All direct redemptions use one authoritative ERC-7540 request lifecycle.
    There is no second synchronous share-burning path.
 3. A liquid request may become claimable immediately, but requesting and
@@ -1033,7 +1033,8 @@ execution while avoiding excessive contract fragmentation.
 
 ### 19.2 Contract map
 
-The production stack has four stateful core proxies per fund:
+The production stack has four functional core modules plus the external share
+token proxy per fund:
 
 ```text
                          OpenZeppelin AccessManager
@@ -1045,24 +1046,35 @@ The production stack has four stateful core proxies per fund:
  +----------------+      +------------------+      +------------------+
  | FundVault      |<---->| FundAccounting   |      | StrategyManager  |
  | UUPS proxy     |      | UUPS proxy       |      | UUPS proxy       |
- | ERC20/4626/    |      | NAV + fees       |      | caps + adapters  |
- | 7540 facade    |      +------------------+      +---------+--------+
- +-------+--------+                                           |
-         |                                                    |
-         v                                                    v
- +----------------+                              +-------------------------+
- | FundFlowManager|                              | Strategy adapter proxies|
- | UUPS proxy     |                              | option / wheel / LP     |
- | requests/claims|                              +------------+------------+
- +-------+--------+                                           |
-         |                                                    v
-         v                                        protocol-specific systems
- ClaimEscrow / DistributionEscrow                 Controller / Settler / AMM
+ | 4626/7540/7575 |      | NAV + fees       |      | caps + adapters  |
+ | custody facade |      +--------+---------+      +---------+--------+
+ +-------+--------+               |                          |
+         |                        v                          v
+         v              +-------------------+    +-------------------------+
+ +----------------+     | NavReportVerifier |    | Strategy adapter proxies|
+ | FundFlowManager|     | stateless version |    | option / wheel / LP     |
+ | UUPS proxy     |     +-------------------+    +------------+------------+
+ | requests/claims|                                      |
+ +-------+--------+                                      v
+         |                                   protocol-specific systems
+         v                                   Controller / Settler / AMM
+ ClaimEscrow / DistributionEscrow
+         ^
+         |
+ +----------------+
+ | FundShare      |
+ | UUPS proxy     |
+ | ERC20/Permit   |
+ +----------------+
 ```
 
 Shared or replaceable supporting contracts:
 
 - `AccessManager`: standard OpenZeppelin deployment, not custom proxy logic.
+- `FundShare`: ERC-20/Permit balances, allowances, and total supply. Only the
+  configured `FundVault` may mint, burn, escrow, or return escrowed shares.
+- `NavReportVerifier`: stateless, versioned contract used by `FundAccounting`
+  with a normal external `view` call. It has no custody, fees, or fund storage.
 - `IPositionValuator` implementations: stateless, non-proxy contracts selected
   by the delayed registry in `FundAccounting`.
 - `OptionCloseSettler`: optional UUPS proxy shared by compatible option adapters
@@ -1072,11 +1084,14 @@ Shared or replaceable supporting contracts:
   per fund. They record and release declared liabilities, have no admin sweep,
   and contain no strategy or governance logic.
 - `FundFactory`: versioned deployer that creates ERC-1967 proxies from approved
-  implementations. It has no authority over deployed fund assets.
+  implementations. It has no authority over deployed fund assets. Its CREATE2
+  deployment ID commits to the factory, chain, creator, intended admin, user
+  salt, and full fund configuration, so another caller or configuration cannot
+  front-run the same global salt.
 
-The four-contract fund core is an intentional boundary. Combining them creates
-a large implementation with mixed trust domains. Splitting further would spread
-share and NAV invariants across too many cross-contract calls.
+The fund core remains four functional modules. `FundShare` is a standard
+ERC-7575 boundary, not a strategy/accounting module. `NavReportVerifier` is a
+stateless verifier and does not own fund state.
 
 ### 19.3 Lightweight contract budgets
 
@@ -1084,8 +1099,10 @@ The following are design budgets, not reasons to omit required checks:
 
 | Contract | Responsibilities | Runtime target |
 | --- | --- | ---: |
-| `FundVault` | ERC-20/4626 surface, custody, committed NAV, authorized mint/burn, reserves | `< 18 KB` |
-| `FundAccounting` | NAV reports, component aggregation, fee crystallization | `< 16 KB` |
+| `FundVault` | ERC-4626/7540/7575 entrypoints, custody, committed NAV, reserves, authorized share callbacks | `< 18 KB` |
+| `FundShare` | ERC-20/Permit balances, allowances, mint/burn/escrow restricted to vault | `< 14 KB` |
+| `FundAccounting` | NAV report nonce/state, fee crystallization, verifier binding | `< 16 KB` |
+| `NavReportVerifier` | Stateless reporter quorum and component report validation | `< 14 KB` |
 | `FundFlowManager` | ERC-7540 requests, processing, accounting/in-kind claims | `< 18 KB` |
 | `StrategyManager` | Adapter registry, caps, allocation/deallocation | `< 14 KB` |
 | Strategy adapter | One strategy lifecycle only | `< 18 KB` |
@@ -1100,10 +1117,10 @@ internal library does not reduce deployed bytecode when inlined.
 
 ### 20.1 `FundVault`
 
-`FundVault` is the only share token and the only contract allowed to change
-share supply. It is an upgradeable ERC-4626/2612 implementation and exposes the
-ERC-7540/ERC-7575 user interface through thin calls into `FundFlowManager`.
-Because the vault itself is the share token, `share()` returns `address(this)`.
+`FundVault` owns custody, NAV-sensitive accounting asset movement, synchronous
+ERC-4626 entrypoints, and the ERC-7540/ERC-7575 redemption facade. It is the
+only contract allowed to ask `FundShare` to mint, burn, escrow, or return
+shares. `share()` returns the external `FundShare` proxy.
 It exposes the required ERC-165 interface IDs and emits all standard request and
 claim events from the vault address, even though the flow manager owns the
 request state machine.
@@ -1111,8 +1128,7 @@ request state machine.
 It stores only fund-critical source-of-truth state:
 
 - Accounting asset.
-- ERC-20 balances, allowances, permit nonces, and total supply through
-  OpenZeppelin upgradeable modules.
+- External share token address.
 - Active `FundAccounting`, `FundFlowManager`, and `StrategyManager` addresses.
 - Last committed NAV, NAV activation/expiry blocks, report nonce, and
   `positionsHash`.
@@ -1395,6 +1411,12 @@ a production multisig. OpenZeppelin supports function-level permissions,
 execution delays, and guardians across multiple targets; see
 [AccessManager](https://docs.openzeppelin.com/contracts/5.x/access-control).
 
+Admin and upgrader roles both require a 72-hour grant delay and a 72-hour
+execution delay. Core targets also require 72 hours for target-admin policy
+changes. Consequently an admin cannot create an immediate upgrader or remap an
+upgrade selector to an immediate role. Later delay reductions remain subject to
+OpenZeppelin's setback mechanism.
+
 Minimum policy:
 
 | Change | Delay |
@@ -1494,6 +1516,11 @@ increments a component nonce. Deterministic cash movements that do not change
 share price, such as a deposit at the committed rate, are recorded as NAV deltas
 inside the same window. A price-sensitive operation invalidates the window.
 
+The idle component report binds its nonce and state hash to the vault's current
+fund-flow nonce, accounted idle assets, and raw accounting-token balance. Any
+deposit, claim, fee mint, strategy cash flow, or direct donation after the
+snapshot makes that report stale and causes submission to revert.
+
 `totalAssets()` may continue to show the last committed value after expiry, but
 all max creation/claim-processing functions return zero until a new active
 window. This separates informational NAV from executable NAV.
@@ -1562,10 +1589,11 @@ Exact conformance includes:
 A request may be cancelled only while fully pending and before the manager has
 committed an unwind for its batch. Sealing alone does not commit the unwind, so
 a sealed request remains cancelable until processing preflight succeeds.
-Cancellation returns escrowed shares and does not change supply. A partially
-processed, claimable, or claimed request cannot be cancelled. Emergency
-governance may extend claim deadlines but cannot seize or reprice a processed
-claim.
+Cancellation returns escrowed shares to their original owner and does not change
+supply. Aggregation by controller cannot mix shares from different owners, so a
+controller operator cannot redirect the refund. A partially processed,
+claimable, or claimed request cannot be cancelled. Emergency governance may
+extend claim deadlines but cannot seize or reprice a processed claim.
 
 ### 24.2.1 Bounded batch execution
 
@@ -1584,8 +1612,9 @@ budget and validates all persisted per-controller minimum outputs without state
 changes. Only a successful preflight commits the unwind, closes primary entry,
 and moves the complete net asset budget into the claim reserve.
 
-`releaseRedeemBatch` provides O(1) recovery for a sealed batch that has not
-started. It advances the monotonic processing cursor without moving or burning
+`releaseRedeemBatch` provides O(1) recovery for a sealed batch with no active
+round or committed unwind, including a remainder after partial processing. It
+advances the monotonic processing cursor without moving or burning remaining
 shares. Requests in the released batch remain pending and cancelable. Therefore
 an impossible minimum cannot block later batches even when its controller does
 not cooperate.
@@ -1615,13 +1644,17 @@ Costs are allocated by cause:
   all-holder benefit are socialized through NAV.
 
 ```text
-gross redemption value = processedShares * processingNAV / eligibleSupply
-round net budget = floor(gross redemption value) - marginal exit cost - disclosed exit fee
+gross redemption value = processedShares * (processingNAV + virtualAssets)
+                         / (eligibleSupply + virtualShares)
+authorized exit cost = ceil(signedBaseExitCost * processedShares / eligibleSupply)
+round net budget = floor(gross redemption value) - authorized exit cost - disclosed exit fee
 controller payout = cumulative net budget difference at controller boundary
 ```
 
 The manager records reference price, actual proceeds, cost classification, and
-allocation. The protected `requestRedeemWithMinAssets` extension persists
+allocation. The processor must supply exactly the pro-rata base exit cost from
+the accepted signed NAV and cannot set an arbitrary payout reduction. The
+protected `requestRedeemWithMinAssets` extension persists
 `minAssetsOut`; partial processing applies it pro rata with ceiling rounding.
 The standard request records zero minimum. Any unspent exit fee remains fund
 NAV; it is not an undisclosed transfer to the manager.
@@ -1631,6 +1664,13 @@ NAV; it is not an undisclosed transfer to the manager.
 The liquidity buffer is a fund risk parameter, not a guaranteed fixed-rate
 redemption promise. `StrategyManager` enforces a configured `minimumIdleBps`,
 while `FundFlowManager` also enforces per-window and rolling outflow caps.
+For each accepted `reportNonce`, the first processing round snapshots
+`eligibleSupply` as the fixed denominator for the window cap. The numerator is
+the cumulative shares from rounds that completed processing; a partial page
+does not consume the cap until its round completes. Restoring the same NAV
+window, releasing a batch, or cancelling a released remainder does not reset
+either value. Only a newly accepted report nonce starts a new outflow window
+and snapshots a new denominator.
 Immediate claimability uses only accounting assets remaining after processed
 claims, declared distributions, fees payable in assets, minimum idle, and
 strategy collateral requirements.
@@ -1829,11 +1869,12 @@ Raw `balanceOf` is not automatically NAV. Unexpected token transfers enter an
 unaccounted balance bucket. They become shareholder assets only through a
 `syncDonation` operation covered by a new NAV report. They cannot be allocated,
 distributed, or used to manipulate deposit share price before synchronization.
-While an accounting-asset surplus remains unaccounted, entry and NAV-priced
-redemption processing are closed (`maxDeposit` and `maxMint` return zero), so a
-new depositor cannot buy at the pre-donation NAV. Fixed claims remain available.
-Recognition occurs only through `FundAccounting` atomically with a fresh NAV
-commit.
+An accounting-asset surplus is excluded from accounted capacity but does not
+block entry, allocation, distribution, or redemption processing that uses only
+accounted assets; this prevents a one-unit direct-transfer denial of service. A
+raw deficit still closes those operations. Recognition occurs only through
+`FundAccounting` atomically with a fresh fund-flow nonce and idle-state
+checkpoint.
 OpenZeppelin virtual assets/shares remain required for first-deposit protection.
 
 ### 29.3 Adapter deficit

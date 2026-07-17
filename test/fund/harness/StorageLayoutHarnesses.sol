@@ -101,6 +101,7 @@ abstract contract FundVaultStorageV2Definition {
     /// @custom:storage-location erc7201:b1nary.storage.FundVault
     struct FundVaultStorageLayout {
         address accountingAsset;
+        address shareToken;
         address accounting;
         address flowManager;
         address strategyManager;
@@ -126,6 +127,10 @@ abstract contract FundVaultStorageV2Definition {
         bool depositsPaused;
         bool redemptionsPaused;
         mapping(address asset => uint256 amount) unaccountedBalances;
+        uint256 baseExitCost;
+        uint64 fundFlowNonce;
+        uint64 acceptedFlowNonce;
+        bytes32 acceptedIdleStateHash;
         uint256 appendedField;
     }
 
@@ -167,6 +172,7 @@ abstract contract FundVaultStorageBadTypeDefinition {
     /// @custom:storage-location erc7201:b1nary.storage.FundVault
     struct FundVaultStorageLayout {
         address accountingAsset;
+        address shareToken;
         address accounting;
         address flowManager;
         address strategyManager;

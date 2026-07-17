@@ -36,12 +36,16 @@ contract FundMathHarness {
         );
     }
 
-    function redemptionPayout(uint256 shares, uint256 nav, uint256 supply, uint256 marginalCost, uint256 feeBps)
-        external
-        pure
-        returns (uint256 gross, uint256 payout, uint256 fee)
-    {
-        return FundMath.redemptionPayout(shares, nav, supply, marginalCost, feeBps);
+    function redemptionPayout(
+        uint256 shares,
+        uint256 nav,
+        uint256 supply,
+        uint256 virtualShares,
+        uint256 virtualAssets,
+        uint256 marginalCost,
+        uint256 feeBps
+    ) external pure returns (uint256 gross, uint256 payout, uint256 fee) {
+        return FundMath.redemptionPayout(shares, nav, supply, virtualShares, virtualAssets, marginalCost, feeBps);
     }
 
     function proRata(uint256 controllerShares, uint256 processedShares, uint256 batchShares)
@@ -111,7 +115,8 @@ contract FundMathSpecTest is Test {
     }
 
     function test_swingPricingChargesOnlyExitingFlow() public view {
-        (uint256 gross, uint256 payout, uint256 fee) = harness.redemptionPayout(100e18, 1_000e6, 1_000e18, 2e6, 50);
+        (uint256 gross, uint256 payout, uint256 fee) =
+            harness.redemptionPayout(100e18, 1_000e6, 1_000e18, 1e12, 1, 2e6, 50);
 
         assertEq(gross, 100e6);
         assertEq(fee, 490_000);
@@ -123,7 +128,7 @@ contract FundMathSpecTest is Test {
         harness.convertToShares(1e6, 1e18, 0, 1e18, 1);
 
         vm.expectRevert(FundMath.ZeroNavWithExistingSupply.selector);
-        harness.redemptionPayout(1e18, 0, 1e18, 0, 0);
+        harness.redemptionPayout(1e18, 0, 1e18, 1e12, 1, 0, 0);
     }
 
     function test_virtualSharesCaptureDonationValue() public view {
@@ -133,6 +138,14 @@ contract FundMathSpecTest is Test {
 
         assertEq(sharesBeforeDonation, 100e18);
         assertLt(sharesAfterDonation, sharesBeforeDonation);
+    }
+
+    function test_eighteenDecimalRedemptionUsesSameVirtualTermsAsDeposit() public view {
+        uint256 victimShares = harness.convertToShares(1e18, 1, 1e18 + 1, 1, 1);
+        assertEq(victimShares, 1);
+
+        (uint256 attackerAssets,,) = harness.redemptionPayout(1, 2e18 + 1, 2, 1, 1, 0, 0);
+        assertLt(attackerAssets, 1e18);
     }
 
     function test_sharePrecisionIsAlwaysEighteenDecimals() public view {

@@ -30,14 +30,15 @@ linked into deployed bytecode.
 
 ## 2. Standards Surface
 
-`FundVault` is simultaneously:
+`FundVault` is:
 
-- A transferable ERC-20 share.
-- An ERC-2612 permit token.
 - An ERC-4626 vault with synchronous `deposit` and `mint`.
 - An ERC-7540 asynchronous redemption vault.
-- An ERC-7575 vault whose `share()` returns `address(this)`.
+- An ERC-7575 vault whose `share()` returns the external `FundShare` token.
 - An ERC-165 responder for the required async interfaces.
+
+`FundShare` is the transferable ERC-20/ERC-2612 share token. Only its configured
+vault may mint, burn, escrow, or return escrowed shares.
 
 Required interface IDs:
 
@@ -47,6 +48,7 @@ Required interface IDs:
 | ERC-7540 operators | `0xe3bc4e65` |
 | ERC-7540 async redeem | `0x620ee8e4` |
 | ERC-7575 vault | `0x2f0a18c5` |
+| ERC-7575 share | `0xf815c03d` |
 
 `previewRedeem` and `previewWithdraw` always revert. `maxRedeem` and
 `maxWithdraw` expose only claimable shares/assets. ERC-4626 entry previews
@@ -84,7 +86,7 @@ revert because an ID is unsupported.
 ```text
 Pending
   requestRedeem(shares, controller, owner)
-  shares move from owner to FundVault escrow
+  shares move from owner to FundVault escrow in FundShare
   shares remain in totalSupply and participate in NAV
 
 Claimable
@@ -106,14 +108,17 @@ call is mandatory.
 Authorization is exact ERC-7540 behavior:
 
 - The owner may request directly.
-- An approved controller operator may act without consuming ERC-20 allowance.
-- Otherwise, a delegated requester must consume share allowance.
+- When the controller is also the owner, an approved controller operator may
+  request without consuming ERC-20 allowance.
+- Otherwise, a delegated requester must consume the owner's share allowance.
 - A controller operator may claim on the controller's behalf.
 
 Cancellation is an extension, not part of ERC-7540. It is allowed only while
 the controller has no claimable portion and no unwind is committed, including
 after sealing but before a successful processing preflight. It returns escrowed
-shares without changing supply.
+shares to the original owner without changing supply. A controller's aggregated
+request cannot mix shares from different owners, so an operator can never make
+itself the cancellation recipient.
 
 `requestRedeemWithMinAssets` is the slippage-protected extension used by the
 product. Its `minAssetsOut` is stored with the controller's pending shares. On
@@ -138,10 +143,11 @@ Processing has three explicit phases and one recovery transition:
 3. `processRedeemBatch` advances a persistent cursor over at most 16 controllers
    per transaction.
 
-`releaseRedeemBatch` is an O(1) recovery for a sealed batch that has not started.
-It advances `nextProcessBatchId` without burning, repricing, or moving shares.
-The released requests remain pending and cancelable, so an impossible minimum
-cannot block later batches even if its controller never cancels.
+`releaseRedeemBatch` is an O(1) recovery for a sealed batch with no active round
+and no committed unwind, including a remainder left by partial processing. It
+advances `nextProcessBatchId` without burning, repricing, or moving the remaining
+shares. The released requests remain pending and cancelable, so an impossible
+minimum cannot block later batches even if its controller never cancels.
 
 Allocation uses cumulative pro-rata differences:
 
@@ -177,6 +183,14 @@ provides a `FundTypes.ComponentReport` containing:
 - Gross assets, liabilities, liquid assets, and base exit cost.
 - Hash of valuation evidence.
 
+The idle accounting-asset component is also a custody checkpoint. Its
+`componentNonce` must equal the vault's `fundFlowNonce`, and its
+`positionStateHash` commits to the fund, chain, nonce, accounted idle assets,
+and raw token balance. Deposits, claims, fee minting, and strategy cash flows
+advance that nonce. A deposit or direct transfer after the reporter snapshot
+therefore makes the report fail at submission instead of combining new custody
+state with old NAV.
+
 The accounting implementation must reject:
 
 - Missing, duplicate, or inactive components.
@@ -197,7 +211,9 @@ signed struct commits to the fund, reporter-set version, monotonic
 `reportNonce`, and hash of every component report. `submitNav` consumes the
 nonce in state and requires exactly `lastReportNonce + 1`. Two funds, two
 accounting proxies, or two report nonces cannot replay reports, and reports
-cannot be accepted out of order.
+cannot be accepted out of order. Reporter quorum, component consistency, and
+block-window validation are delegated to the stateless, versioned
+`NavReportVerifier` using a normal external `view` call.
 The accepted commit also stores a hash of the quorum addresses and signatures
 for onchain auditability without duplicating variable-length signature data.
 
@@ -216,6 +232,11 @@ elapsedRate = annualRateWad * elapsed / YEAR
 feeAssets = preFeeNav * elapsedRate / 1e18
 feeShares = ceil(feeAssets * supply / (preFeeNav - feeAssets))
 ```
+
+Accrual runs before deposit/mint and before redemption-batch pricing. A fee
+configuration change first checkpoints elapsed time under the old rate and old
+recipient, then starts the new period. Performance-fee crystallization writes
+the high-water mark from post-fee NAV and post-fee supply.
 
 ### Performance fee
 
@@ -251,7 +272,9 @@ remains fund NAV.
 ### Redemption and swing pricing
 
 ```text
-roundGrossAssets = floor(processedShares * processingNav / eligibleSupply)
+roundGrossAssets = floor(processedShares * (processingNav + virtualAssets)
+                         / (eligibleSupply + virtualShares))
+authorizedExitCost = ceil(signedBaseExitCost * processedShares / eligibleSupply)
 roundAfterCost = roundGrossAssets - marginalExitCost
 roundExitFee = ceil(roundAfterCost * exitFeeBps / 10_000)
 roundPayout = roundAfterCost - roundExitFee
@@ -260,18 +283,19 @@ controllerPayout = payoutThroughI - payoutThroughPrevious
 ```
 
 Market P&L and expected close cost already represented in NAV are socialized.
-Only marginal unwind cost caused by the exiting batch is charged to that batch.
-Gross assets, marginal cost, and exit fee are calculated once per round; they
-are never independently rounded or subtracted at controller level.
+Only the signed base exit cost committed with NAV may be charged, pro rata, to
+an exiting round; the processor cannot choose a different amount. Gross assets,
+marginal cost, and exit fee are calculated once per round; they are never
+independently rounded or subtracted at controller level.
 
 If supply is nonzero and NAV is zero, deposits, fee minting, and NAV-priced
 processing stop. Virtual assets/shares protect initial deposits. Raw token
 donations enter `unaccountedBalances` and do not affect NAV until a fresh report
-authorizes synchronization. While any raw accounting-asset surplus is
-unaccounted, `maxDeposit` and `maxMint` return zero and deposit, mint, allocation,
-distribution, and NAV-priced redemption processing revert. Fixed claims remain
-claimable. Only `FundAccounting.commitNav` may recognize the surplus atomically
-with the fresh NAV commit.
+authorizes synchronization. A raw surplus is quarantined from accounted NAV,
+claims, distributions, and allocation capacity, but it does not block operations
+that spend only accounted assets. A raw deficit still closes those operations.
+Only `FundAccounting.commitNav` may recognize a surplus atomically with a fresh
+flow-nonce and idle-state checkpoint.
 
 ## 6. Strategy Boundary
 
@@ -312,6 +336,11 @@ Risk-reducing and risk-increasing methods use different selectors. Examples:
 The guardian is configured as guardian of the curator role so it can cancel a
 scheduled risk increase. It cannot schedule or execute that increase itself.
 
+Admin and upgrader grants have a 72-hour grant delay, and both roles have a
+72-hour execution delay. Every core proxy also has a 72-hour target-admin delay,
+so changing selector policy cannot bypass the upgrade delay. OpenZeppelin's
+setback applies to later attempts to reduce these configured delays.
+
 ## 8. ERC-7201 Storage
 
 Each proxy owns one namespaced struct:
@@ -319,6 +348,7 @@ Each proxy owns one namespaced struct:
 | Component | Namespace | Slot |
 | --- | --- | --- |
 | FundVault | `b1nary.storage.FundVault` | `0x06d529727cf5bc6dc96f9652d8da22d6b7df4e899f31f34198b231dafc3c1900` |
+| FundShare | `b1nary.storage.FundShare` | `0xe2a81ba6c0d9ac928aa029ae20ba46e88a57a7f1559bca1aece691f6075ce400` |
 | FundAccounting | `b1nary.storage.FundAccounting` | `0x6474ad405c872fad56414fb52b104b146a40ea9bc4a4a24e367ebf792f16e500` |
 | FundFlowManager | `b1nary.storage.FundFlowManager` | `0xa2150758e26bb44e0a441458c3c47420e0cafabeb20258a8fa06803a087dec00` |
 | StrategyManager | `b1nary.storage.StrategyManager` | `0x25887ea3e5e75cc13395c4a56dac59490fcb6528f03e6c5e7b324f5c7afd6b00` |
@@ -351,18 +381,20 @@ Implementations must not expose a generic `execute(target, calldata)` path.
 
 ## 10. B1N-350 Implementation Contract
 
-B1N-350 can implement the four production proxies without changing these
+B1N-350 can implement the production fund stack without changing these
 decisions:
 
 1. Use the interfaces, types, roles, math, and storage definitions in
    `src/fund/`.
-2. Use OpenZeppelin upgradeable ERC-20, ERC-20 Permit, ERC-4626, access, and
-   pause modules from the pinned release.
+2. Use OpenZeppelin upgradeable ERC-20 and ERC-20 Permit on `FundShare`; keep
+   the ERC-4626/7540/7575 entrypoints, custody, and module callbacks on
+   `FundVault`.
 3. Keep ERC-7540 redemption state in `FundFlowManager`, while standard calls and
    events remain on `FundVault`.
    Implement the bounded 64-controller batches and 16-controller processing
    pages; do not add a global controller array.
-4. Keep NAV/report/fee state in `FundAccounting`.
+4. Keep NAV/report/fee state in `FundAccounting`; keep reporter quorum and
+   component report verification in stateless `NavReportVerifier`.
 5. Keep adapter caps and position nonces in `StrategyManager`.
 6. Keep module proxy addresses fixed after initialization; topology changes use
    migration, not setters.

@@ -88,7 +88,7 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         return address(this);
     }
 
-    function decimals() public view override(ERC20, ERC4626, IERC20Metadata) returns (uint8) {
+    function decimals() public view override(ERC20, ERC4626) returns (uint8) {
         return ERC4626.decimals();
     }
 
@@ -96,7 +96,7 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         return _shareDecimalsOffsetValue;
     }
 
-    function totalAssets() public view override(ERC4626, IERC4626) returns (uint256) {
+    function totalAssets() public view override(ERC4626) returns (uint256) {
         return accountedGrossAssets - totalReservedAssets;
     }
 
@@ -114,12 +114,12 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         accountedGrossAssets += unaccountedBalance();
     }
 
-    function maxDeposit(address) public view override(ERC4626, IERC4626) returns (uint256) {
-        return unaccountedBalance() == 0 && activeProcessingRounds == 0 ? type(uint256).max : 0;
+    function maxDeposit(address) public view override(ERC4626) returns (uint256) {
+        return activeProcessingRounds == 0 ? type(uint256).max : 0;
     }
 
-    function maxMint(address) public view override(ERC4626, IERC4626) returns (uint256) {
-        return unaccountedBalance() == 0 && activeProcessingRounds == 0 ? type(uint256).max : 0;
+    function maxMint(address) public view override(ERC4626) returns (uint256) {
+        return activeProcessingRounds == 0 ? type(uint256).max : 0;
     }
 
     function depositWithMinShares(uint256 assets, address receiver, uint256 minSharesOut)
@@ -179,7 +179,7 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         totalPendingShares += shares;
         emit RedeemRequest(controller, owner, FundConstants.ERC7540_REQUEST_ID, msg.sender, shares);
 
-        if (immediateClaimable && unaccountedBalance() == 0 && activeProcessingRounds == 0) {
+        if (immediateClaimable && activeProcessingRounds == 0) {
             uint256 nav = totalAssets();
             uint256 supply = totalSupply();
             uint256 assets = Math.mulDiv(shares, nav, supply);
@@ -256,7 +256,7 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         Batch storage batch = _batches[batchId];
         if (
             batchId != nextProcessBatchId || !batch.isSealed || batch.isReleased || batch.processing || shares == 0
-                || shares > batch.totalPendingShares || unaccountedBalance() != 0 || activeProcessingRounds != 0
+                || shares > batch.totalPendingShares || activeProcessingRounds != 0
         ) revert IFundFlowManager.BatchNotProcessable(batchId);
 
         uint256 processingNav = totalAssets();
@@ -344,25 +344,25 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
         return requestedProcessedShares;
     }
 
-    function maxRedeem(address controller) public view override(ERC4626, IERC4626) returns (uint256) {
+    function maxRedeem(address controller) public view override(ERC4626) returns (uint256) {
         return _claimableShares[controller];
     }
 
-    function maxWithdraw(address controller) public view override(ERC4626, IERC4626) returns (uint256) {
+    function maxWithdraw(address controller) public view override(ERC4626) returns (uint256) {
         return _claimableAssets[controller];
     }
 
-    function previewRedeem(uint256) public pure override(ERC4626, IERC4626) returns (uint256) {
+    function previewRedeem(uint256) public pure override(ERC4626) returns (uint256) {
         revert AsyncPreviewUnsupported();
     }
 
-    function previewWithdraw(uint256) public pure override(ERC4626, IERC4626) returns (uint256) {
+    function previewWithdraw(uint256) public pure override(ERC4626) returns (uint256) {
         revert AsyncPreviewUnsupported();
     }
 
     function redeem(uint256 shares, address receiver, address controller)
         public
-        override(ERC4626, IERC4626)
+        override(ERC4626)
         returns (uint256 assets)
     {
         _requireController(controller);
@@ -377,7 +377,7 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
 
     function withdraw(uint256 assets, address receiver, address controller)
         public
-        override(ERC4626, IERC4626)
+        override(ERC4626)
         returns (uint256 shares)
     {
         _requireController(controller);
@@ -391,8 +391,6 @@ contract AsyncRedeemVaultHarness is ERC4626, ERC20Permit, ERC165, IERC7540Operat
     }
 
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
-        uint256 surplus = unaccountedBalance();
-        if (surplus != 0) revert IFundVault.UnaccountedBalance(asset(), surplus);
         if (activeProcessingRounds != 0) revert IFundFlowManager.BatchNotProcessable(nextProcessBatchId);
         super._deposit(caller, receiver, assets, shares);
         accountedGrossAssets += assets;
@@ -665,7 +663,7 @@ contract FundStandardsSpecTest is Test {
         assertEq(vault.unaccountedBalance(), 0);
     }
 
-    function test_unaccountedDonationClosesEntryAndNavPricedProcessing() public {
+    function test_unaccountedDonationIsQuarantinedWithoutBlockingOperations() public {
         vm.prank(alice);
         vault.requestRedeem(100e18, alice, alice);
         asset.mint(address(vault), 100e6);
@@ -673,14 +671,15 @@ contract FundStandardsSpecTest is Test {
         vm.prank(bob);
         asset.approve(address(vault), type(uint256).max);
 
-        assertEq(vault.maxDeposit(bob), 0);
-        assertEq(vault.maxMint(bob), 0);
+        assertEq(vault.maxDeposit(bob), type(uint256).max);
+        assertEq(vault.maxMint(bob), type(uint256).max);
         vm.prank(bob);
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, bob, 100e6, 0));
-        vault.deposit(100e6, bob);
-
-        vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.BatchNotProcessable.selector, 1));
+        assertEq(vault.deposit(100e6, bob), 100e18);
         vault.processBatch(100e18);
+
+        assertEq(vault.unaccountedBalance(), 100e6);
+        assertEq(vault.claimableAssets(alice), 100e6);
+        assertEq(vault.balanceOf(bob), 100e18);
     }
 
     function test_freshNavSynchronizationPreventsDonationCapture() public {

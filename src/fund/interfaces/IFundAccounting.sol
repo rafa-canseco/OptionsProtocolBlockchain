@@ -17,7 +17,11 @@ interface IFundAccounting {
 
     function fund() external view returns (address);
     function compatibilityVersion() external view returns (uint64);
+    function navVerifier() external view returns (address);
+    function navVerifierVersion() external view returns (uint64);
     function reporterSetVersion() external view returns (uint64);
+    function reporterThreshold() external view returns (uint16);
+    function isReporter(address reporter) external view returns (bool);
     function componentNonce(bytes32 componentId) external view returns (uint64);
     function submitNav(
         uint64 reportNonce,
@@ -28,4 +32,5 @@ interface IFundAccounting {
     function setReporterSet(address[] calldata reporters, uint16 threshold, uint64 version) external;
     function setComponent(bytes32 componentId, address valuator, uint64 interfaceVersion, bool active) external;
     function setFeeConfig(FundTypes.FeeConfig calldata config) external;
+    function accrueManagementFee() external returns (uint256 feeShares);
 }

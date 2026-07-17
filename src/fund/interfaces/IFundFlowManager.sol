@@ -7,8 +7,10 @@ interface IFundFlowManager {
     error BatchNotReleasable(uint64 batchId);
     error ClaimExceedsAvailable();
     error InvalidProcessingPage(uint16 requested, uint16 maximum);
+    error InvalidMarginalExitCost(uint256 expected, uint256 actual);
     error MinimumAssetsNotMet(address controller, uint256 minimum, uint256 actual);
     error PendingRequestInSealedBatch(address controller, uint64 batchId);
+    error RequestOwnerMismatch(address controller, address expectedOwner, address actualOwner);
     error RequestNotCancelable();
     error UnauthorizedOperator(address controller, address caller);
 
@@ -19,9 +21,11 @@ interface IFundFlowManager {
     function pendingRedeemRequest(uint256 requestId, address controller) external view returns (uint256);
     function claimableRedeemRequest(uint256 requestId, address controller) external view returns (uint256);
     function isOperator(address controller, address operator) external view returns (bool);
+    function windowOutflow(uint64 reportNonce) external view returns (uint256 eligibleSupply, uint256 processedShares);
 
     function recordRedeemRequest(
         address caller,
+        address shareSpender,
         uint256 shares,
         address controller,
         address owner,

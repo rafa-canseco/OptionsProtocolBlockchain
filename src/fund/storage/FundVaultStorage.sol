@@ -5,6 +5,7 @@ abstract contract FundVaultStorage {
     /// @custom:storage-location erc7201:b1nary.storage.FundVault
     struct FundVaultStorageLayout {
         address accountingAsset;
+        address shareToken;
         address accounting;
         address flowManager;
         address strategyManager;
@@ -30,6 +31,10 @@ abstract contract FundVaultStorage {
         bool depositsPaused;
         bool redemptionsPaused;
         mapping(address asset => uint256 amount) unaccountedBalances;
+        uint256 baseExitCost;
+        uint64 fundFlowNonce;
+        uint64 acceptedFlowNonce;
+        bytes32 acceptedIdleStateHash;
     }
 
     bytes32 internal constant FUND_VAULT_STORAGE_LOCATION =

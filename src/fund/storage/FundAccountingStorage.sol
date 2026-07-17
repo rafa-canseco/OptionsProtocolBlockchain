@@ -15,7 +15,9 @@ abstract contract FundAccountingStorage {
     /// @custom:storage-location erc7201:b1nary.storage.FundAccounting
     struct FundAccountingStorageLayout {
         address fund;
+        address navVerifier;
         uint64 compatibilityVersion;
+        uint64 navVerifierVersion;
         uint64 reporterSetVersion;
         uint64 lastReportNonce;
         uint16 reporterThreshold;
@@ -25,6 +27,9 @@ abstract contract FundAccountingStorage {
         mapping(address reporter => bool active) reporters;
         FundTypes.FeeConfig feeConfig;
         FundTypes.FeeState feeState;
+        uint64 activationDelay;
+        uint64 maxSnapshotAge;
+        uint64 maxWindowLength;
     }
 
     bytes32 internal constant FUND_ACCOUNTING_STORAGE_LOCATION =

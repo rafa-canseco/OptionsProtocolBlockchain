@@ -11,11 +11,14 @@ library FundConstants {
     uint8 internal constant SHARE_DECIMALS = 18;
     uint16 internal constant MAX_BATCH_CONTROLLERS = 64;
     uint16 internal constant MAX_PROCESSING_PAGE = 16;
+    bytes32 internal constant INITIAL_POSITIONS_HASH = keccak256("b1nary Fund Positions");
+    bytes32 internal constant IDLE_COMPONENT_ID = keccak256("IDLE_ACCOUNTING_ASSET");
 
     bytes4 internal constant ERC165_INTERFACE_ID = 0x01ffc9a7;
     bytes4 internal constant ERC7540_OPERATOR_INTERFACE_ID = 0xe3bc4e65;
     bytes4 internal constant ERC7540_REDEEM_INTERFACE_ID = 0x620ee8e4;
     bytes4 internal constant ERC7575_VAULT_INTERFACE_ID = 0x2f0a18c5;
+    bytes4 internal constant ERC7575_SHARE_INTERFACE_ID = 0xf815c03d;
 
     uint64 internal constant UPGRADER_ROLE = 1;
     uint64 internal constant ACCOUNTING_ROLE = 2;

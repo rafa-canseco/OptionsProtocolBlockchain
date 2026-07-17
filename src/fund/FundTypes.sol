@@ -39,6 +39,8 @@ library FundTypes {
         bytes32 positionsHash;
         bytes32 reportHash;
         bytes32 signaturesHash;
+        uint64 fundFlowNonce;
+        bytes32 idleStateHash;
     }
 
     struct FeeConfig {
@@ -72,6 +74,7 @@ library FundTypes {
         uint256 pendingShares;
         uint256 pendingMinAssetsOut;
         uint16 indexPlusOne;
+        address refundOwner;
     }
 
     struct RedemptionBatch {
@@ -87,7 +90,10 @@ library FundTypes {
         uint256 roundAllocatedShares;
         uint256 roundAssetBudget;
         uint256 roundAllocatedAssets;
+        bytes32 processingPositionsHash;
         uint64 processingBlock;
+        uint64 processingReportNonce;
+        uint64 processingValidUntilBlock;
         uint16 processingCursor;
         RequestMode mode;
         bool isSealed;

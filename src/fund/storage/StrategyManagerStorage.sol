@@ -15,6 +15,8 @@ abstract contract StrategyManagerStorage {
         mapping(address adapter => uint64 nonce) positionNonces;
         mapping(address asset => bool allowed) allowedAssets;
         mapping(address asset => uint256 amount) totalAllocated;
+        mapping(address adapter => mapping(address asset => uint256 amount)) adapterAllocated;
+        mapping(address adapter => uint48 timestamp) lastOperationAt;
     }
 
     bytes32 internal constant STRATEGY_MANAGER_STORAGE_LOCATION =

@@ -9,6 +9,7 @@ library FundMath {
     error InvalidBps(uint256 bps);
     error InvalidSupply();
     error UnsupportedAssetDecimals(uint8 decimals);
+    error ZeroPayout();
     error ZeroNavWithExistingSupply();
 
     function managementFeeShares(uint256 preFeeNav, uint256 supply, uint256 annualRateWad, uint256 elapsed)
@@ -78,6 +79,8 @@ library FundMath {
         uint256 processedShares,
         uint256 processingNav,
         uint256 eligibleSupply,
+        uint256 virtualShares,
+        uint256 virtualAssets,
         uint256 marginalExitCost,
         uint256 exitFeeBps
     ) internal pure returns (uint256 grossAssets, uint256 payoutAssets, uint256 exitFeeAssets) {
@@ -85,11 +88,12 @@ library FundMath {
         if (processingNav == 0) revert ZeroNavWithExistingSupply();
         if (exitFeeBps > FundConstants.BPS) revert InvalidBps(exitFeeBps);
 
-        grossAssets = Math.mulDiv(processedShares, processingNav, eligibleSupply);
+        grossAssets = Math.mulDiv(processedShares, processingNav + virtualAssets, eligibleSupply + virtualShares);
         if (marginalExitCost > grossAssets) revert FeeExceedsNav();
         uint256 afterMarginalCost = grossAssets - marginalExitCost;
         exitFeeAssets = Math.mulDiv(afterMarginalCost, exitFeeBps, FundConstants.BPS, Math.Rounding.Ceil);
         payoutAssets = afterMarginalCost - exitFeeAssets;
+        if (payoutAssets == 0) revert ZeroPayout();
     }
 
     function proRata(uint256 controllerShares, uint256 processedShares, uint256 batchShares)
