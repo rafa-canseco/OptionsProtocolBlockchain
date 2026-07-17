@@ -123,9 +123,9 @@ contract SmokeCspVaultBaseSepolia is Script {
 
     function _settle() private {
         require(vault.activeBatches() == 3 && vault.preparedSettlementBatchId() == 0, "SETTLE wrong state");
-        (, address otm,, uint256 otmVaultId,,,,) = vault.batches(1);
-        (, address physical,, uint256 physicalVaultId,,,,) = vault.batches(2);
-        (, address fallbackToken,, uint256 fallbackVaultId,,,,) = vault.batches(3);
+        (, address otm, uint256 otmVaultId,,,,,) = vault.batches(1);
+        (, address physical, uint256 physicalVaultId,,,,,) = vault.batches(2);
+        (, address fallbackToken, uint256 fallbackVaultId,,,,,) = vault.batches(3);
         uint256 expiry = OToken(otm).expiry();
         require(block.timestamp >= expiry, "option has not expired");
         require(OToken(physical).expiry() == expiry && OToken(fallbackToken).expiry() == expiry, "expiry mismatch");
