@@ -1,19 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${PRIVATE_KEY:?Set PRIVATE_KEY to the B1N-336 deployer key}"
 : "${BASE_SEPOLIA_RPC_URL:?Set BASE_SEPOLIA_RPC_URL (for example https://sepolia.base.org)}"
 
 PHASE="${1:-}"
+FOUNDRY_ACCOUNT="${FOUNDRY_ACCOUNT:-operator}"
 SCRIPT="script/SmokeCspVaultBaseSepolia.s.sol:SmokeCspVaultBaseSepolia"
 VAULT="0xcf2c5b2e065bB7ADD2a29ed4d3A61910e6a59645"
 DEPLOYER="0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382"
 
 run_phase() {
-  CSP_SMOKE_PHASE="$1" forge script "$SCRIPT" \
+  local phase="$1"
+  local -a wallet_args=(--account "$FOUNDRY_ACCOUNT")
+
+  if [[ "$phase" == OPEN ]]; then
+    : "${PRIVATE_KEY:?OPEN requires PRIVATE_KEY for the EIP-712 quote signatures}"
+    wallet_args=()
+  fi
+
+  CSP_SMOKE_PHASE="$phase" forge script "$SCRIPT" \
     --rpc-url "$BASE_SEPOLIA_RPC_URL" \
     --broadcast \
     --slow \
+    "${wallet_args[@]}" \
     -vvv
 }
 

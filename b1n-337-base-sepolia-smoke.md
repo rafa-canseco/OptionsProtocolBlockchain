@@ -98,7 +98,8 @@ Indexer addresses are the `integrationEnv` values in `deployments-csp-base-sepol
 
 ## Commands
 
-Export `PRIVATE_KEY` and `BASE_SEPOLIA_RPC_URL`, then run each phase only once:
+Export `BASE_SEPOLIA_RPC_URL`. The pending settlement phases use the Foundry
+`operator` keystore and prompt for its password interactively:
 
 ```bash
 script/smoke-csp-base-sepolia.sh open
@@ -106,6 +107,10 @@ script/smoke-csp-base-sepolia.sh settle
 script/smoke-csp-base-sepolia.sh emergency
 script/smoke-csp-base-sepolia.sh finalize
 ```
+
+Set `FOUNDRY_ACCOUNT` to override the default `operator` account. The already-completed `open`
+phase is the only legacy phase that still requires `PRIVATE_KEY`, because it creates EIP-712 quote
+signatures inside the Solidity script.
 
 `settle` must run after expiry. `finalize` must run at least one hour after `settle` because the deployed vault enforces the minimum default delay.
 
