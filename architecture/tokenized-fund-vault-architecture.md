@@ -1651,6 +1651,13 @@ NAV; it is not an undisclosed transfer to the manager.
 The liquidity buffer is a fund risk parameter, not a guaranteed fixed-rate
 redemption promise. `StrategyManager` enforces a configured `minimumIdleBps`,
 while `FundFlowManager` also enforces per-window and rolling outflow caps.
+For each accepted `reportNonce`, the first processing round snapshots
+`eligibleSupply` as the fixed denominator for the window cap. The numerator is
+the cumulative shares from rounds that completed processing; a partial page
+does not consume the cap until its round completes. Restoring the same NAV
+window, releasing a batch, or cancelling a released remainder does not reset
+either value. Only a newly accepted report nonce starts a new outflow window
+and snapshots a new denominator.
 Immediate claimability uses only accounting assets remaining after processed
 claims, declared distributions, fees payable in assets, minimum idle, and
 strategy collateral requirements.

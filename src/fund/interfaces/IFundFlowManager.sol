@@ -21,6 +21,7 @@ interface IFundFlowManager {
     function pendingRedeemRequest(uint256 requestId, address controller) external view returns (uint256);
     function claimableRedeemRequest(uint256 requestId, address controller) external view returns (uint256);
     function isOperator(address controller, address operator) external view returns (bool);
+    function windowOutflow(uint64 reportNonce) external view returns (uint256 eligibleSupply, uint256 processedShares);
 
     function recordRedeemRequest(
         address caller,

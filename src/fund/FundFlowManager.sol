@@ -84,6 +84,11 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         return _getFundFlowManagerStorage().totalReservedAssets;
     }
 
+    function windowOutflow(uint64 reportNonce) external view returns (uint256 eligibleSupply, uint256 processedShares) {
+        OutflowWindow storage window = _getFundFlowManagerStorage().outflowWindows[reportNonce];
+        return (window.eligibleSupply, window.processedShares);
+    }
+
     function hasActiveProcessing() external view returns (bool) {
         FundFlowManagerStorageLayout storage $ = _getFundFlowManagerStorage();
         return $.batches[$.nextProcessBatchId].processing;
@@ -250,9 +255,13 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         }
         uint256 processingNav = vault.totalAssets();
         uint256 eligibleSupply = vault.totalSupply();
+        OutflowWindow storage outflowWindow = $.outflowWindows[nav.reportNonce];
+        uint256 windowEligibleSupply = outflowWindow.eligibleSupply;
+        if (windowEligibleSupply == 0) windowEligibleSupply = eligibleSupply;
+        uint256 windowCap = Math.mulDiv(windowEligibleSupply, $.maxWindowOutflowBps, FundConstants.BPS);
         if (
-            eligibleSupply == 0 || processingNav == 0
-                || shares > Math.mulDiv(eligibleSupply, $.maxWindowOutflowBps, FundConstants.BPS)
+            eligibleSupply == 0 || processingNav == 0 || outflowWindow.processedShares >= windowCap
+                || shares > windowCap - outflowWindow.processedShares
                 || (redeemBatch.processedShares != 0 && nav.reportNonce <= redeemBatch.processingReportNonce)
         ) revert BatchNotProcessable(batchId);
 
@@ -274,6 +283,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         uint256 lockId = vault.beginModuleExecution($.compatibilityVersion);
         vault.invalidateNav();
         vault.reserveAccountingAssets(roundAssetBudget);
+        if (outflowWindow.eligibleSupply == 0) outflowWindow.eligibleSupply = eligibleSupply;
 
         redeemBatch.processing = true;
         redeemBatch.unwindCommitted = true;
@@ -353,6 +363,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
             ) revert BatchNotProcessable(batchId);
             redeemBatch.totalPendingShares -= redeemBatch.roundTargetShares;
             redeemBatch.processedShares += redeemBatch.roundTargetShares;
+            $.outflowWindows[redeemBatch.processingReportNonce].processedShares += redeemBatch.roundTargetShares;
             redeemBatch.processing = false;
             redeemBatch.unwindCommitted = false;
             if (redeemBatch.totalPendingShares == 0) $.nextProcessBatchId = batchId + 1;

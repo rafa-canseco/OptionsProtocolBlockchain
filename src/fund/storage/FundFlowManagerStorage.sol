@@ -4,6 +4,11 @@ pragma solidity 0.8.24;
 import {FundTypes} from "../FundTypes.sol";
 
 abstract contract FundFlowManagerStorage {
+    struct OutflowWindow {
+        uint256 eligibleSupply;
+        uint256 processedShares;
+    }
+
     /// @custom:storage-location erc7201:b1nary.storage.FundFlowManager
     struct FundFlowManagerStorageLayout {
         address fund;
@@ -21,6 +26,7 @@ abstract contract FundFlowManagerStorage {
         mapping(uint64 batchId => mapping(address controller => FundTypes.RedemptionAccount account)) batchAccounts;
         uint16 maxExitFeeBps;
         uint16 maxWindowOutflowBps;
+        mapping(uint64 reportNonce => OutflowWindow window) outflowWindows;
     }
 
     bytes32 internal constant FUND_FLOW_MANAGER_STORAGE_LOCATION =

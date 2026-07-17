@@ -561,6 +561,123 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(vault.balanceOf(alice), 80e18);
         }
 
+        function test_windowOutflowAccumulatesAcrossSuccessiveBatches() public {
+            _scheduleAndCall(address(flow), abi.encodeCall(flow.setExitPolicy, (uint16(0), uint16(5_000))));
+            _depositForAlice(100e6);
+            uint64 reportNonce = vault.activeNavWindow().reportNonce;
+
+            vm.prank(alice);
+            vault.requestRedeem(30e18, alice, alice);
+            flow.sealRedeemBatch(1);
+            flow.startRedeemBatch(1, 30e18, 0);
+            flow.processRedeemBatch(1, 16);
+
+            (uint256 eligibleSupply, uint256 processedShares) = flow.windowOutflow(reportNonce);
+            assertEq(eligibleSupply, 100e18);
+            assertEq(processedShares, 30e18);
+
+            vm.prank(alice);
+            vault.requestRedeem(20e18, alice, alice);
+            flow.sealRedeemBatch(2);
+            flow.startRedeemBatch(2, 20e18, 0);
+            flow.processRedeemBatch(2, 16);
+
+            (eligibleSupply, processedShares) = flow.windowOutflow(reportNonce);
+            assertEq(eligibleSupply, 100e18);
+            assertEq(processedShares, 50e18);
+
+            vm.prank(alice);
+            vault.requestRedeem(1e18, alice, alice);
+            flow.sealRedeemBatch(3);
+            vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.BatchNotProcessable.selector, uint64(3)));
+            flow.startRedeemBatch(3, 1e18, 0);
+        }
+
+        function test_windowOutflowCountsOnlyAfterPartialRoundCompletes() public {
+            _scheduleAndCall(address(flow), abi.encodeCall(flow.setExitPolicy, (uint16(0), uint16(5_000))));
+            _depositForAlice(60e6);
+            _depositForBob(40e6);
+            uint64 reportNonce = vault.activeNavWindow().reportNonce;
+
+            vm.prank(alice);
+            vault.requestRedeem(20e18, alice, alice);
+            vm.prank(bob);
+            vault.requestRedeem(20e18, bob, bob);
+            flow.sealRedeemBatch(1);
+            flow.startRedeemBatch(1, 40e18, 0);
+
+            (, bool roundComplete) = flow.processRedeemBatch(1, 1);
+            assertFalse(roundComplete);
+            (uint256 eligibleSupply, uint256 processedShares) = flow.windowOutflow(reportNonce);
+            assertEq(eligibleSupply, 100e18);
+            assertEq(processedShares, 0);
+
+            (, roundComplete) = flow.processRedeemBatch(1, 1);
+            assertTrue(roundComplete);
+            (eligibleSupply, processedShares) = flow.windowOutflow(reportNonce);
+            assertEq(eligibleSupply, 100e18);
+            assertEq(processedShares, 40e18);
+        }
+
+        function test_releaseAndCancelDoNotResetWindowOutflow() public {
+            _scheduleAndCall(address(flow), abi.encodeCall(flow.setExitPolicy, (uint16(0), uint16(5_000))));
+            _depositForAlice(100e6);
+            uint64 reportNonce = vault.activeNavWindow().reportNonce;
+
+            vm.prank(alice);
+            vault.requestRedeem(40e18, alice, alice);
+            flow.sealRedeemBatch(1);
+            flow.startRedeemBatch(1, 20e18, 0);
+            flow.processRedeemBatch(1, 16);
+            vm.prank(alice);
+            vault.redeem(20e18, alice, alice);
+
+            flow.releaseRedeemBatch(1);
+            vm.prank(alice);
+            vault.cancelPending(20e18);
+
+            (uint256 eligibleSupply, uint256 processedShares) = flow.windowOutflow(reportNonce);
+            assertEq(eligibleSupply, 100e18);
+            assertEq(processedShares, 20e18);
+
+            vm.prank(alice);
+            vault.requestRedeem(31e18, alice, alice);
+            flow.sealRedeemBatch(2);
+            vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.BatchNotProcessable.selector, uint64(2)));
+            flow.startRedeemBatch(2, 31e18, 0);
+        }
+
+        function test_newNavReportResetsWindowOutflowWithNewEligibleSupply() public {
+            _scheduleAndCall(address(flow), abi.encodeCall(flow.setExitPolicy, (uint16(0), uint16(5_000))));
+            _depositForAlice(100e6);
+            uint64 firstReportNonce = vault.activeNavWindow().reportNonce;
+
+            vm.prank(alice);
+            vault.requestRedeem(50e18, alice, alice);
+            flow.sealRedeemBatch(1);
+            flow.startRedeemBatch(1, 50e18, 0);
+            flow.processRedeemBatch(1, 16);
+
+            vm.prank(alice);
+            vault.requestRedeem(1e18, alice, alice);
+            flow.sealRedeemBatch(2);
+            vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.BatchNotProcessable.selector, uint64(2)));
+            flow.startRedeemBatch(2, 1e18, 0);
+
+            _submitNav(50e6, 50e6);
+            uint64 secondReportNonce = vault.activeNavWindow().reportNonce;
+            assertGt(secondReportNonce, firstReportNonce);
+            flow.startRedeemBatch(2, 1e18, 0);
+            flow.processRedeemBatch(2, 16);
+
+            (uint256 firstEligibleSupply, uint256 firstProcessedShares) = flow.windowOutflow(firstReportNonce);
+            assertEq(firstEligibleSupply, 100e18);
+            assertEq(firstProcessedShares, 50e18);
+            (uint256 secondEligibleSupply, uint256 secondProcessedShares) = flow.windowOutflow(secondReportNonce);
+            assertEq(secondEligibleSupply, 50e18);
+            assertEq(secondProcessedShares, 1e18);
+        }
+
         function test_minimumAssetsIsValidatedBeforeFundsAreCommitted() public {
             _depositForAlice(100e6);
             vm.prank(alice);
@@ -819,6 +936,14 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             vm.startPrank(alice);
             asset.approve(address(vault), assets);
             vault.deposit(assets, alice);
+            vm.stopPrank();
+        }
+
+        function _depositForBob(uint256 assets) private {
+            asset.mint(bob, assets);
+            vm.startPrank(bob);
+            asset.approve(address(vault), assets);
+            vault.deposit(assets, bob);
             vm.stopPrank();
         }
 
