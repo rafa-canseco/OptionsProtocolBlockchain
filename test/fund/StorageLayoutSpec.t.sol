@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
+
+import {Test} from "forge-std/Test.sol";
+import {Upgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
+import {Options} from "openzeppelin-foundry-upgrades/Options.sol";
+import {
+    FundVaultStorageHarnessV1,
+    FundVaultStorageHarnessV2,
+    FundAccountingStorageHarnessV1,
+    FundFlowManagerStorageHarnessV1,
+    StrategyManagerStorageHarnessV1
+} from "./harness/StorageLayoutHarnesses.sol";
+
+contract StorageLayoutSpecTest is Test {
+    string internal constant HARNESS_PATH = "test/fund/harness/StorageLayoutHarnesses.sol:";
+
+    function test_fourFundImplementationsPassUpgradeSafetyValidation() public {
+        Options memory options;
+        Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundVaultStorageHarnessV1"), options);
+        Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundAccountingStorageHarnessV1"), options);
+        Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV1"), options);
+        Upgrades.validateImplementation(string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV1"), options);
+    }
+
+    function test_appendToNamespaceIsCompatible() public {
+        Options memory options;
+        options.referenceContract = string.concat(HARNESS_PATH, "FundVaultStorageHarnessV1");
+        Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "FundVaultStorageHarnessV2"), options);
+    }
+
+    function test_compatibleUupsUpgradePreservesNamespacedState() public {
+        address proxy = Upgrades.deployUUPSProxy(
+            string.concat(HARNESS_PATH, "FundVaultStorageHarnessV1"),
+            abi.encodeCall(FundVaultStorageHarnessV1.initialize, (address(this)))
+        );
+        FundVaultStorageHarnessV1(proxy).setCommittedNav(42);
+
+        Options memory options;
+        options.referenceContract = string.concat(HARNESS_PATH, "FundVaultStorageHarnessV1");
+        Upgrades.upgradeProxy(proxy, string.concat(HARNESS_PATH, "FundVaultStorageHarnessV2"), "", options);
+
+        FundVaultStorageHarnessV2 upgraded = FundVaultStorageHarnessV2(proxy);
+        assertEq(upgraded.committedNav(), 42);
+        upgraded.setAppendedField(99);
+        assertEq(upgraded.appendedField(), 99);
+    }
+
+    function test_namespaceLocationsMatchErc7201Derivations() public {
+        FundVaultStorageHarnessV1 vault = new FundVaultStorageHarnessV1();
+        FundAccountingStorageHarnessV1 accounting = new FundAccountingStorageHarnessV1();
+        FundFlowManagerStorageHarnessV1 flow = new FundFlowManagerStorageHarnessV1();
+        StrategyManagerStorageHarnessV1 strategy = new StrategyManagerStorageHarnessV1();
+
+        assertEq(vault.storageLocation(), _erc7201("b1nary.storage.FundVault"));
+        assertEq(accounting.storageLocation(), _erc7201("b1nary.storage.FundAccounting"));
+        assertEq(flow.storageLocation(), _erc7201("b1nary.storage.FundFlowManager"));
+        assertEq(strategy.storageLocation(), _erc7201("b1nary.storage.StrategyManager"));
+    }
+
+    function _erc7201(string memory namespace) private pure returns (bytes32) {
+        uint256 inner = uint256(keccak256(bytes(namespace))) - 1;
+        return bytes32(uint256(keccak256(abi.encode(inner))) & ~uint256(0xff));
+    }
+}

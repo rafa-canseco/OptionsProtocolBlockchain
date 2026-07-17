@@ -15,23 +15,43 @@ https://book.getfoundry.sh/
 
 ## Usage
 
+### Dependencies
+
+The fund-core upgrade toolchain is pinned in `package-lock.json`. Install it
+before running Foundry from a clean checkout:
+
+```shell
+npm ci --ignore-scripts
+npm run deps:check
+```
+
 ### Build
 
 ```shell
-$ forge build
+forge build --offline
 ```
 
 ### Test
 
 ```shell
-$ forge test
+forge test --offline
 ```
 
 ### Format
 
 ```shell
-$ forge fmt
+forge fmt
 ```
+
+### Fund Core Specifications
+
+```shell
+npm_config_offline=true forge test --offline --match-path 'test/fund/*' --force
+npm run storage:check
+```
+
+The `--force` flag is required because OpenZeppelin upgrade validation rejects
+incremental Foundry build-info files.
 
 ### Gas Snapshots
 

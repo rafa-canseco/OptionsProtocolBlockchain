@@ -694,7 +694,7 @@ accounting asset.
 
 Do not add multi-asset deposits directly to the core fund in the first version.
 Use a router or zap that converts the user's token to the accounting asset and
-then calls `deposit` with `minSharesOut`.
+then calls `depositWithMinShares` with `minSharesOut`.
 
 Adopt ERC-7575 only if the product requires multiple canonical asset entry
 points sharing one share token. This preserves simple ERC-4626 integrations now
@@ -1139,6 +1139,13 @@ proxy address requires the explicit fund migration process in section 29.5.
 flows. It does not call an adapter, oracle, or reporter and therefore satisfies
 the ERC-4626 non-reverting view requirement.
 
+Fund shares always use 18 decimals. Accounting assets above 18 decimals are not
+supported. For an asset with `d` decimals, `_decimalsOffset()` is `18 - d`,
+`shareScale` is `1e18`, virtual assets are `1`, and virtual shares are
+`10 ** (18 - d)`, matching OpenZeppelin ERC-4626. The product entry path calls
+`depositWithMinShares`; the standard two-argument `deposit` remains available
+for ERC-4626 integrations.
+
 ### 20.2 `FundAccounting`
 
 `FundAccounting` is the only component that can propose a NAV commit. It owns:
@@ -1458,7 +1465,11 @@ Reporter domains are separated:
 - Aggregate NAV approval requires a quorum from a reporter set controlled by
   delayed governance.
 
-The accepted report stores reporter-set version and signatures hash for audit.
+The accepted report stores reporter-set version, report nonce, and signatures
+hash for audit. The EIP-712 payload includes a strictly monotonic `reportNonce`.
+`FundAccounting` accepts only `lastReportNonce + 1` and consumes it in state, so
+the same quorum report cannot be replayed or reordered within its validity
+window.
 
 ### 23.3 Primary-market windows
 
@@ -1532,6 +1543,8 @@ Exact conformance includes:
 
 - `pendingRedeemRequest` and `claimableRedeemRequest` report the two balances
   independently.
+- Because this vault always returns request ID zero, both views return zero for
+  every nonzero ID and never revert because an ID is unsupported.
 - `setOperator` and `isOperator` support controller delegation without relying
   on ERC-2612.
 - `previewRedeem` and `previewWithdraw` revert for the asynchronous redemption
@@ -1547,10 +1560,44 @@ Exact conformance includes:
 ### 24.2 Cancellation
 
 A request may be cancelled only while fully pending and before the manager has
-committed an unwind for its batch. Cancellation returns escrowed shares and does
-not change supply. A partially processed, claimable, or claimed request cannot
-be cancelled. Emergency governance may extend claim deadlines but cannot seize
-or reprice a processed claim.
+committed an unwind for its batch. Sealing alone does not commit the unwind, so
+a sealed request remains cancelable until processing preflight succeeds.
+Cancellation returns escrowed shares and does not change supply. A partially
+processed, claimable, or claimed request cannot be cancelled. Emergency
+governance may extend claim deadlines but cannot seize or reprice a processed
+claim.
+
+### 24.2.1 Bounded batch execution
+
+Operational batches never scan a historical controller list. Each batch holds
+at most 64 unique controllers and is processed through a cursor with at most 16
+controllers per transaction. Full cancellation from an open batch removes the
+member with bounded swap-and-pop. Full cancellation from a sealed but unstarted
+batch uses the same bounded removal. Sealing closes additions and opens a new
+batch, but does not commit an unwind; a controller with pending shares in a
+sealed batch cannot join another batch until that pending balance is cancelled
+or processed.
+
+`startRedeemBatch` fixes one NAV, eligible supply, target share amount, and
+marginal exit cost for a processing round. It first computes the net asset
+budget and validates all persisted per-controller minimum outputs without state
+changes. Only a successful preflight commits the unwind, closes primary entry,
+and moves the complete net asset budget into the claim reserve.
+
+`releaseRedeemBatch` provides O(1) recovery for a sealed batch that has not
+started. It advances the monotonic processing cursor without moving or burning
+shares. Requests in the released batch remain pending and cancelable. Therefore
+an impossible minimum cannot block later batches even when its controller does
+not cooperate.
+
+Pages allocate both shares and net assets using differences between consecutive
+cumulative pro-rata values. All pages together allocate exactly the round target
+and exactly its reserved net budget. Gross value and marginal cost are not
+rounded independently at controller level. Remaining pending shares require
+another round and a fresh NAV checkpoint. The final page verifies exact reserve
+reconciliation and permits primary entry to reopen. If no pending shares remain,
+it also advances the monotonic processing-batch cursor. Later sealed batches
+cannot start before that cursor reaches them.
 
 ### 24.3 Exit-cost allocation and swing pricing
 
@@ -1569,12 +1616,15 @@ Costs are allocated by cause:
 
 ```text
 gross redemption value = processedShares * processingNAV / eligibleSupply
-batch payout = gross value - allocated marginal exit cost - disclosed exit fee
+round net budget = floor(gross redemption value) - marginal exit cost - disclosed exit fee
+controller payout = cumulative net budget difference at controller boundary
 ```
 
 The manager records reference price, actual proceeds, cost classification, and
-allocation. `minAssetsOut` protects the requester. Any unspent exit fee remains
-fund NAV; it is not an undisclosed transfer to the manager.
+allocation. The protected `requestRedeemWithMinAssets` extension persists
+`minAssetsOut`; partial processing applies it pro rata with ceiling rounding.
+The standard request records zero minimum. Any unspent exit fee remains fund
+NAV; it is not an undisclosed transfer to the manager.
 
 ### 24.4 Liquidity buffer and unwind order
 
@@ -1685,6 +1735,12 @@ claimable shares do not pay future fees.
 
 Cash distributions reduce the high-water mark by distribution per eligible
 share so returning to the pre-distribution NAV does not create a false new gain.
+The division remainder is persisted and carried into later distributions. Gain
+and fee assets round down, while fee-share minting rounds up. The remainder is
+tagged with its eligible-supply denominator and is reset if supply changes; it
+is never combined across incompatible denominators. This reset only
+undercharges the protocol by bounded dust. Sub-unit fee dust remains in NAV
+rather than being charged early.
 
 ### 26.3 Distribution lifecycle
 
@@ -1773,6 +1829,11 @@ Raw `balanceOf` is not automatically NAV. Unexpected token transfers enter an
 unaccounted balance bucket. They become shareholder assets only through a
 `syncDonation` operation covered by a new NAV report. They cannot be allocated,
 distributed, or used to manipulate deposit share price before synchronization.
+While an accounting-asset surplus remains unaccounted, entry and NAV-priced
+redemption processing are closed (`maxDeposit` and `maxMint` return zero), so a
+new depositor cannot buy at the pre-donation NAV. Fixed claims remain available.
+Recognition occurs only through `FundAccounting` atomically with a fresh NAV
+commit.
 OpenZeppelin virtual assets/shares remain required for first-deposit protection.
 
 ### 29.3 Adapter deficit
