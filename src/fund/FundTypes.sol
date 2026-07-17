@@ -87,7 +87,10 @@ library FundTypes {
         uint256 roundAllocatedShares;
         uint256 roundAssetBudget;
         uint256 roundAllocatedAssets;
+        bytes32 processingPositionsHash;
         uint64 processingBlock;
+        uint64 processingReportNonce;
+        uint64 processingValidUntilBlock;
         uint16 processingCursor;
         RequestMode mode;
         bool isSealed;

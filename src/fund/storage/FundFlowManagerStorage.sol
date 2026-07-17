@@ -19,6 +19,8 @@ abstract contract FundFlowManagerStorage {
         mapping(uint64 batchId => FundTypes.RedemptionBatch batch) batches;
         mapping(uint64 batchId => address[] controllers) batchControllers;
         mapping(uint64 batchId => mapping(address controller => FundTypes.RedemptionAccount account)) batchAccounts;
+        uint16 maxExitFeeBps;
+        uint16 maxWindowOutflowBps;
     }
 
     bytes32 internal constant FUND_FLOW_MANAGER_STORAGE_LOCATION =

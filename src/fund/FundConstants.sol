@@ -11,6 +11,7 @@ library FundConstants {
     uint8 internal constant SHARE_DECIMALS = 18;
     uint16 internal constant MAX_BATCH_CONTROLLERS = 64;
     uint16 internal constant MAX_PROCESSING_PAGE = 16;
+    bytes32 internal constant INITIAL_POSITIONS_HASH = keccak256("b1nary Fund Positions");
 
     bytes4 internal constant ERC165_INTERFACE_ID = 0x01ffc9a7;
     bytes4 internal constant ERC7540_OPERATOR_INTERFACE_ID = 0xe3bc4e65;
