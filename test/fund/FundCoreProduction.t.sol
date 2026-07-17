@@ -12,6 +12,7 @@ import {FundFlowManager} from "../../src/fund/FundFlowManager.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
 import {FundConstants} from "../../src/fund/FundConstants.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
+import {IFundAccounting} from "../../src/fund/interfaces/IFundAccounting.sol";
 import {IFundFlowManager} from "../../src/fund/interfaces/IFundFlowManager.sol";
 import {IStrategyManager} from "../../src/fund/interfaces/IStrategyManager.sol";
 import {IFundStrategyAdapter} from "../../src/fund/interfaces/IFundStrategyAdapter.sol";
@@ -232,19 +233,150 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(vault.balanceOf(alice), 75e18);
         }
 
-        function test_donationClosesEntryUntilItIsSynchronizedByNav() public {
+        function test_donationIsQuarantinedWithoutClosingEntry() public {
             _depositForAlice(100e6);
             asset.mint(address(this), 10e6);
             asset.transfer(address(vault), 10e6);
 
             assertEq(vault.unaccountedBalance(address(asset)), 10e6);
-            assertEq(vault.maxDeposit(alice), 0);
+            assertEq(vault.maxDeposit(bob), type(uint256).max);
 
-            _submitNav(110e6, 110e6);
+            asset.mint(bob, 100e6);
+            vm.startPrank(bob);
+            asset.approve(address(vault), 100e6);
+            vault.deposit(100e6, bob);
+            vm.stopPrank();
+
+            assertEq(vault.balanceOf(bob), 100e18);
+            assertEq(vault.unaccountedBalance(address(asset)), 10e6);
+            assertEq(vault.totalAssets(), 200e6);
+
+            _submitNav(210e6, 210e6);
             assertEq(vault.unaccountedBalance(address(asset)), 0);
-            assertEq(vault.totalAssets(), 110e6);
-            assertEq(vault.accountedIdleAssets(), 110e6);
+            assertEq(vault.totalAssets(), 210e6);
+            assertEq(vault.accountedIdleAssets(), 210e6);
             assertEq(vault.maxDeposit(alice), type(uint256).max);
+        }
+
+        function test_navCommitRejectsPostSnapshotDonation() public {
+            _depositForAlice(100e6);
+            (
+                uint64 reportNonce,
+                FundTypes.ComponentReport[] memory reports,
+                address[] memory reporters,
+                bytes[] memory signatures,
+                uint64 ignoredValidAfterBlock
+            ) = _buildSignedNav(100e6, 100e6, 0);
+            ignoredValidAfterBlock;
+
+            asset.mint(address(vault), 1);
+            vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidPositionState.selector, IDLE_COMPONENT));
+            accounting.submitNav(reportNonce, reports, reporters, signatures);
+        }
+
+        function test_navCommitRejectsPostSnapshotDepositFlowNonce() public {
+            _depositForAlice(100e6);
+            (
+                uint64 reportNonce,
+                FundTypes.ComponentReport[] memory reports,
+                address[] memory reporters,
+                bytes[] memory signatures,
+                uint64 ignoredValidAfterBlock
+            ) = _buildSignedNav(100e6, 100e6, 0);
+            ignoredValidAfterBlock;
+
+            asset.mint(bob, 10e6);
+            vm.startPrank(bob);
+            asset.approve(address(vault), 10e6);
+            vault.deposit(10e6, bob);
+            vm.stopPrank();
+
+            vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidPositionState.selector, IDLE_COMPONENT));
+            accounting.submitNav(reportNonce, reports, reporters, signatures);
+        }
+
+        function test_unsignedBootstrapIsRejectedAfterIdleComponentActivation() public {
+            FundFactory.RoleAccounts memory roles = FundFactory.RoleAccounts({
+                admin: address(this),
+                upgrader: address(this),
+                accounting: address(this),
+                allocator: address(this),
+                processor: address(this),
+                curator: address(this),
+                guardian: address(this)
+            });
+            FundTypes.FeeConfig memory feeConfig = FundTypes.FeeConfig({
+                managementFeeWad: 0,
+                performanceFeeBps: 0,
+                maxManagementFeeBps: 0,
+                maxPerformanceFeeBps: 0,
+                maxAccrualInterval: 0,
+                crystallizationPeriod: 0,
+                feeRecipient: address(0)
+            });
+            FundFactory.FundDeployment memory deployed = factory.createFund(
+                FundFactory.CreateFundParams({
+                    implementationVersion: 1,
+                    salt: keccak256("unsigned-bootstrap"),
+                    name: "Bootstrap Fund",
+                    symbol: "BOOT",
+                    asset: asset,
+                    minimumIdleBps: 0,
+                    navActivationDelay: 1,
+                    maxSnapshotAge: 20,
+                    maxNavWindowLength: 20,
+                    feeConfig: feeConfig,
+                    roles: roles
+                })
+            );
+            FundVault bootstrapVault = FundVault(deployed.vault);
+            FundAccounting bootstrapAccounting = FundAccounting(deployed.accounting);
+            AccessManager bootstrapManager = AccessManager(deployed.accessManager);
+
+            bytes memory componentData =
+                abi.encodeCall(bootstrapAccounting.setComponent, (IDLE_COMPONENT, address(0), uint64(1), true));
+            bootstrapManager.schedule(address(bootstrapAccounting), componentData, 0);
+            vm.warp(block.timestamp + FundConstants.CURATOR_DELAY);
+            bootstrapAccounting.setComponent(IDLE_COMPONENT, address(0), 1, true);
+
+            vm.roll(block.number + 2);
+            uint64 snapshotBlock = uint64(block.number - 1);
+            bytes32 snapshotHash = keccak256("unsigned-bootstrap-snapshot");
+            vm.setBlockhash(snapshotBlock, snapshotHash);
+            FundTypes.ComponentReport[] memory reports = new FundTypes.ComponentReport[](1);
+            reports[0] = FundTypes.ComponentReport({
+                fund: address(bootstrapVault),
+                componentId: IDLE_COMPONENT,
+                chainId: block.chainid,
+                snapshotBlock: snapshotBlock,
+                snapshotBlockHash: snapshotHash,
+                validAfterBlock: uint64(block.number + 1),
+                validUntilBlock: uint64(block.number + 11),
+                reporterSetVersion: 0,
+                componentNonce: bootstrapVault.fundFlowNonce(),
+                positionStateHash: bootstrapVault.idleStateHash(),
+                grossAssets: 0,
+                liabilities: 0,
+                liquidAccountingAssets: 0,
+                baseExitCost: 0,
+                dataHash: bytes32(0)
+            });
+
+            vm.expectRevert(abi.encodeWithSelector(IFundAccounting.InvalidReporterSet.selector, uint64(0)));
+            bootstrapAccounting.submitNav(1, reports, new address[](0), new bytes[](0));
+        }
+
+        function test_donationDoesNotBlockRedemptionProcessing() public {
+            _depositForAlice(100e6);
+            asset.mint(address(vault), 1);
+            vm.prank(alice);
+            vault.requestRedeem(40e18, alice, alice);
+            flow.sealRedeemBatch(1);
+            flow.startRedeemBatch(1, 40e18, 0);
+            flow.processRedeemBatch(1, 16);
+
+            assertEq(vault.unaccountedBalance(address(asset)), 1);
+            assertEq(vault.claimableRedeemRequest(0, alice), 40e18);
         }
 
         function test_requestBecomesClaimableOnlyAfterBoundedProcessing() public {
@@ -432,13 +564,13 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             strategy.allocate(address(adapter), address(asset), 11e6, "");
 
             asset.mint(address(vault), 1);
-            vm.expectRevert(abi.encodeWithSelector(IStrategyManager.AllocationCapExceeded.selector, address(adapter)));
             strategy.allocate(address(adapter), address(asset), 1, "");
+            assertEq(vault.unaccountedBalance(address(asset)), 1);
 
             assertEq(strategy.deallocate(address(adapter), 15e6, 15e6, ""), 15e6);
-            assertEq(asset.balanceOf(address(adapter)), 25e6);
-            assertEq(vault.accountedIdleAssets(), 75e6);
-            assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 25e6);
+            assertEq(asset.balanceOf(address(adapter)), 25e6 + 1);
+            assertEq(vault.accountedIdleAssets(), 75e6 - 1);
+            assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 25e6 + 1);
         }
 
         function test_performanceFeeMintsSharesWithoutMovingAssets() public {
@@ -475,7 +607,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             });
             _scheduleAndCall(address(accounting), abi.encodeCall(accounting.setFeeConfig, (config)));
 
-            _submitNav(90e6, 90e6);
+            _submitNav(90e6, 100e6);
             assertEq(accounting.feeState().highWaterMark, 1e6);
             _submitNav(100e6, 100e6);
 
@@ -576,15 +708,36 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         }
 
         function _submitNavWithExitCost(uint256 grossAssets, uint256 liquidAssets, uint256 baseExitCost) private {
+            (
+                uint64 reportNonce,
+                FundTypes.ComponentReport[] memory reports,
+                address[] memory reporters,
+                bytes[] memory signatures,
+                uint64 validAfterBlock
+            ) = _buildSignedNav(grossAssets, liquidAssets, baseExitCost);
+            accounting.submitNav(reportNonce, reports, reporters, signatures);
+            vm.roll(validAfterBlock);
+        }
+
+        function _buildSignedNav(uint256 grossAssets, uint256 liquidAssets, uint256 baseExitCost)
+            private
+            returns (
+                uint64 reportNonce,
+                FundTypes.ComponentReport[] memory reports,
+                address[] memory reporters,
+                bytes[] memory signatures,
+                uint64 validAfterBlock
+            )
+        {
             vm.roll(block.number + 2);
             uint64 snapshotBlock = uint64(block.number - 1);
             bytes32 snapshotHash = keccak256(abi.encode("snapshot", snapshotBlock));
             vm.setBlockhash(snapshotBlock, snapshotHash);
-            uint64 validAfterBlock = uint64(block.number + 1);
+            validAfterBlock = uint64(block.number + 1);
             uint64 validUntilBlock = validAfterBlock + 10;
-            uint64 reportNonce = accounting.lastReportNonce() + 1;
+            reportNonce = accounting.lastReportNonce() + 1;
 
-            FundTypes.ComponentReport[] memory reports = new FundTypes.ComponentReport[](1);
+            reports = new FundTypes.ComponentReport[](1);
             reports[0] = FundTypes.ComponentReport({
                 fund: address(vault),
                 componentId: IDLE_COMPONENT,
@@ -594,8 +747,8 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
                 validAfterBlock: validAfterBlock,
                 validUntilBlock: validUntilBlock,
                 reporterSetVersion: 1,
-                componentNonce: 0,
-                positionStateHash: bytes32(0),
+                componentNonce: vault.fundFlowNonce(),
+                positionStateHash: vault.idleStateHash(),
                 grossAssets: grossAssets,
                 liabilities: 0,
                 liquidAccountingAssets: liquidAssets,
@@ -604,14 +757,12 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             });
 
             bytes32 digest = accounting.signatureDigest(reportNonce, reports);
-            address[] memory reporters = new address[](2);
-            bytes[] memory signatures = new bytes[](2);
+            reporters = new address[](2);
+            signatures = new bytes[](2);
             reporters[0] = vm.addr(REPORTER_ONE_KEY);
             reporters[1] = vm.addr(REPORTER_TWO_KEY);
             signatures[0] = _signature(REPORTER_ONE_KEY, digest);
             signatures[1] = _signature(REPORTER_TWO_KEY, digest);
-            accounting.submitNav(reportNonce, reports, reporters, signatures);
-            vm.roll(validAfterBlock);
         }
 
         function _signature(uint256 key, bytes32 digest) private pure returns (bytes memory) {

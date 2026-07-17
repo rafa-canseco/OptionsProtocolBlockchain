@@ -17,6 +17,7 @@ interface IFundVaultAccounting is IFundVault {
     function totalSupply() external view returns (uint256);
     function asset() external view returns (address);
     function strategyManager() external view returns (address);
+    function accountedIdleAssets() external view returns (uint256);
 }
 
 interface IStrategyPositions {
@@ -152,6 +153,10 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
         if (IFlowProcessingState(vault.flowManager()).hasActiveProcessing()) revert InvalidReportWindow();
         uint64 expectedNonce = $.lastReportNonce + 1;
         if (reportNonce != expectedNonce) revert InvalidReportNonce(expectedNonce, reportNonce);
+        if ($.reporterSetVersion == 0 || $.reporterThreshold == 0) {
+            revert InvalidReporterSet($.reporterSetVersion);
+        }
+        if (!$.components[FundConstants.IDLE_COMPONENT_ID].active) revert IncompleteComponentSet();
         if (reports.length == 0 || reports.length != $.activeComponentIds.length) {
             revert IncompleteComponentSet();
         }
@@ -186,6 +191,10 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
             nav.liabilities += report.liabilities;
             nav.liquidAccountingAssets += report.liquidAccountingAssets;
             nav.baseExitCost += report.baseExitCost;
+            if (report.componentId == FundConstants.IDLE_COMPONENT_ID) {
+                nav.fundFlowNonce = report.componentNonce;
+                nav.idleStateHash = report.positionStateHash;
+            }
         }
 
         nav.netAssets = nav.grossAssets - nav.liabilities;
@@ -365,7 +374,13 @@ contract FundAccounting is FundUpgradeable, EIP712Upgradeable, FundAccountingSto
 
         ComponentState storage state = $.components[report.componentId];
         if (!state.active) revert IncompleteComponentSet();
-        if (report.componentNonce != state.nonce || report.positionStateHash != state.positionStateHash) {
+        if (report.componentId == FundConstants.IDLE_COMPONENT_ID) {
+            IFundVaultAccounting vault = IFundVaultAccounting($.fund);
+            if (
+                report.componentNonce != vault.fundFlowNonce() || report.positionStateHash != vault.idleStateHash()
+                    || report.liquidAccountingAssets != IERC20Metadata(vault.asset()).balanceOf(address(vault))
+            ) revert InvalidPositionState(report.componentId);
+        } else if (report.componentNonce != state.nonce || report.positionStateHash != state.positionStateHash) {
             revert InvalidPositionState(report.componentId);
         }
         for (uint256 j; j < index; ++j) {

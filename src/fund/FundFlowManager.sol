@@ -239,7 +239,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         if (
             batchId != $.nextProcessBatchId || !redeemBatch.isSealed || redeemBatch.isReleased || redeemBatch.processing
                 || shares == 0 || shares > redeemBatch.totalPendingShares || vault.redemptionsPaused()
-                || IERC20(vault.asset()).balanceOf($.fund) != vault.accountedIdleAssets()
+                || IERC20(vault.asset()).balanceOf($.fund) < vault.accountedIdleAssets()
         ) revert BatchNotProcessable(batchId);
 
         FundTypes.NavCommit memory nav = vault.activeNavWindow();

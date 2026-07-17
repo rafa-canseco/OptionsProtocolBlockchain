@@ -132,6 +132,15 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         return _getFundVaultStorage().reservedClaimAssets;
     }
 
+    function fundFlowNonce() external view returns (uint64) {
+        return _getFundVaultStorage().fundFlowNonce;
+    }
+
+    function idleStateHash() public view returns (bytes32) {
+        FundVaultStorageLayout storage $ = _getFundVaultStorage();
+        return _idleStateHash($);
+    }
+
     function executionLockOwner() external view returns (address) {
         return _getFundVaultStorage().executionLockOwner;
     }
@@ -170,6 +179,8 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         nav.positionsHash = $.positionsHash;
         nav.reportHash = $.reportHash;
         nav.signaturesHash = $.signaturesHash;
+        nav.fundFlowNonce = $.acceptedFlowNonce;
+        nav.idleStateHash = $.acceptedIdleStateHash;
     }
 
     function supportsInterface(bytes4 interfaceId) public pure returns (bool) {
@@ -299,6 +310,9 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         }
 
         uint256 rawIdle = IERC20($.accountingAsset).balanceOf(address(this));
+        if (nav.fundFlowNonce != $.fundFlowNonce || nav.idleStateHash != _idleStateHash($)) {
+            revert InvalidNavCommit();
+        }
         $.committedNav = nav.netAssets;
         $.accountedIdleAssets = rawIdle;
         $.baseExitCost = nav.baseExitCost;
@@ -311,6 +325,9 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         $.navValidUntilBlock = nav.validUntilBlock;
         $.reporterSetVersion = nav.reporterSetVersion;
         $.reportNonce = nav.reportNonce;
+        $.acceptedFlowNonce = nav.fundFlowNonce;
+        $.acceptedIdleStateHash = nav.idleStateHash;
+        ++$.fundFlowNonce;
         if (feeShares != 0) _mint(feeRecipient, feeShares);
 
         emit NavCommitted(nav.reportNonce, nav.netAssets, nav.validAfterBlock, nav.validUntilBlock);
@@ -342,12 +359,14 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         $.accountedIdleAssets -= assets;
         $.committedNav -= assets;
         $.reservedClaimAssets += assets;
+        ++$.fundFlowNonce;
     }
 
     function processAccountingAssetClaim(address controller, uint256 shares, uint256 assets) external {
         FundVaultStorageLayout storage $ = _requireLockedModule(_getFundVaultStorage().flowManager);
         if (controller == address(0) || shares == 0 || assets > $.reservedClaimAssets) revert InvalidNavCommit();
         _burn(address(this), shares);
+        ++$.fundFlowNonce;
         emit ClaimReserved(controller, shares, assets);
     }
 
@@ -355,6 +374,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         FundVaultStorageLayout storage $ = _requireLockedModule(_getFundVaultStorage().flowManager);
         if (assets > $.reservedClaimAssets) revert InvalidNavCommit();
         $.reservedClaimAssets -= assets;
+        ++$.fundFlowNonce;
     }
 
     function transferToStrategy(address asset_, address adapter, uint256 amount) external {
@@ -372,6 +392,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
             revert UnsupportedAssetBehavior(asset_);
         }
         $.accountedIdleAssets -= amount;
+        ++$.fundFlowNonce;
     }
 
     function recordStrategyReturn(address asset_, uint256 balanceBefore) external returns (uint256 received) {
@@ -381,6 +402,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         if (currentBalance < balanceBefore) revert UnsupportedAssetBehavior(asset_);
         received = currentBalance - balanceBefore;
         $.accountedIdleAssets += received;
+        ++$.fundFlowNonce;
     }
 
     function invalidateNav() external {
@@ -477,6 +499,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         _mint(receiver, shares);
         $.accountedIdleAssets += assets;
         $.committedNav += assets;
+        ++$.fundFlowNonce;
         emit Deposit(caller, receiver, assets, shares);
         _exitUserExecution();
     }
@@ -521,7 +544,7 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
         if ($.depositsPaused || $.executionLockOwner != address(0)) return false;
         if (block.number < $.navValidAfterBlock || block.number > $.navValidUntilBlock) return false;
         if (totalSupply() != 0 && $.committedNav == 0) return false;
-        return IERC20($.accountingAsset).balanceOf(address(this)) == $.accountedIdleAssets;
+        return IERC20($.accountingAsset).balanceOf(address(this)) >= $.accountedIdleAssets;
     }
 
     function _requireUnlocked() private view {
@@ -543,5 +566,17 @@ contract FundVault is FundUpgradeable, ERC20Upgradeable, ERC20PermitUpgradeable,
     function _requireLockedModule(address module) private view returns (FundVaultStorageLayout storage $) {
         $ = _getFundVaultStorage();
         if (msg.sender != module || $.executionLockOwner != module) revert InvalidModule(msg.sender);
+    }
+
+    function _idleStateHash(FundVaultStorageLayout storage $) private view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                address(this),
+                block.chainid,
+                $.fundFlowNonce,
+                $.accountedIdleAssets,
+                IERC20($.accountingAsset).balanceOf(address(this))
+            )
+        );
     }
 }

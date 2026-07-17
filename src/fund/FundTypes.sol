@@ -39,6 +39,8 @@ library FundTypes {
         bytes32 positionsHash;
         bytes32 reportHash;
         bytes32 signaturesHash;
+        uint64 fundFlowNonce;
+        bytes32 idleStateHash;
     }
 
     struct FeeConfig {

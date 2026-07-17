@@ -110,7 +110,7 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
         if (!$.allowedAssets[asset_]) revert UnsupportedAsset(asset_);
         IFundVaultStrategy vault = IFundVaultStrategy($.fund);
         if (
-            amount == 0 || IERC20Balance(asset_).balanceOf($.fund) != vault.accountedIdleAssets()
+            amount == 0 || IERC20Balance(asset_).balanceOf($.fund) < vault.accountedIdleAssets()
                 || IFlowProcessingState(vault.flowManager()).hasActiveProcessing()
         ) {
             revert AllocationCapExceeded(adapter);

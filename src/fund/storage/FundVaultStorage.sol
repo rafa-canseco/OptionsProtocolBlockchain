@@ -31,6 +31,9 @@ abstract contract FundVaultStorage {
         bool redemptionsPaused;
         mapping(address asset => uint256 amount) unaccountedBalances;
         uint256 baseExitCost;
+        uint64 fundFlowNonce;
+        uint64 acceptedFlowNonce;
+        bytes32 acceptedIdleStateHash;
     }
 
     bytes32 internal constant FUND_VAULT_STORAGE_LOCATION =

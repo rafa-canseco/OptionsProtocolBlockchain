@@ -24,6 +24,8 @@ interface IFundVault is IERC165, IERC20Permit, IERC7540Operator, IERC7540Redeem,
     function compatibilityVersion() external view returns (uint64);
     function committedNav() external view returns (uint256);
     function reservedClaimAssets() external view returns (uint256);
+    function fundFlowNonce() external view returns (uint64);
+    function idleStateHash() external view returns (bytes32);
     function activeNavWindow() external view returns (FundTypes.NavCommit memory);
     function depositWithMinShares(uint256 assets, address receiver, uint256 minSharesOut)
         external
