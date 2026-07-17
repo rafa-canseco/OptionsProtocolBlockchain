@@ -894,7 +894,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
                     (expiredBatchId, address(adapter), 0.5e18, uint64(block.timestamp + 3 days))
                 )
             );
-            vm.warp(block.timestamp + 2 days);
+            vm.warp(block.timestamp + 2 days + 1);
             vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.StrategyExitBatchInvalid.selector, expiredBatchId));
             strategy.deallocateInKind(expiredBatchId, address(adapter), 0.5e18, "");
         }

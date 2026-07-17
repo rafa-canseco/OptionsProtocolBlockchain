@@ -445,7 +445,7 @@ production implementation with the explicitly reviewed
 FundFlowManager owns the strategy-exit destination registry. Both in-kind and
 emergency destinations require delayed curator configuration. Each in-kind
 operation additionally consumes a one-use authorization bound to its batch ID,
-adapter, fraction, registered escrow, and expiry; the immediate processor role
+adapter, fraction, registered escrow, and inclusive `validUntil`; the immediate processor role
 cannot select or replace any destination. The appended FundFlowManager fields
 are validated as an upgrade from the pre-B1N-351 namespace layout.
 

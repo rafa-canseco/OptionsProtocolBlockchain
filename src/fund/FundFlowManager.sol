@@ -480,6 +480,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         FundFlowManagerStorageLayout storage $ = _getFundFlowManagerStorage();
         if (msg.sender != IFundVaultFlow($.fund).strategyManager()) revert InvalidAddress();
         StrategyInKindBatch storage exitBatch = $.strategyInKindBatches[batchId];
+        // validUntil is inclusive, matching the fund's NAV and observation validity windows.
         if (
             exitBatch.adapter != adapter || exitBatch.escrow == address(0) || exitBatch.escrow != $.strategyInKindEscrow
                 || exitBatch.fractionWad != fractionWad || exitBatch.consumed || block.timestamp > exitBatch.validUntil
