@@ -23,8 +23,19 @@ contract RuntimeBudgetTest is Test {
         assertLt(address(new ClaimEscrow(asset, address(this))).code.length, EIP170_RUNTIME_LIMIT);
     }
 
-    function test_flowAndStrategyMeetArchitecturalDesignTargets() public {
+    function test_fundVaultMeetsArchitecturalDesignTarget() public {
+        assertLt(address(new FundVault()).code.length, 18 * 1024);
+    }
+
+    function test_fundAccountingMeetsArchitecturalDesignTarget() public {
+        assertLt(address(new FundAccounting()).code.length, 16 * 1024);
+    }
+
+    function test_fundFlowManagerMeetsArchitecturalDesignTarget() public {
         assertLt(address(new FundFlowManager()).code.length, 18 * 1024);
+    }
+
+    function test_strategyManagerMeetsArchitecturalDesignTarget() public {
         assertLt(address(new StrategyManager()).code.length, 14 * 1024);
     }
 }
