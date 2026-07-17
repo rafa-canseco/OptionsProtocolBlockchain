@@ -25,6 +25,9 @@ abstract contract FundAccountingStorage {
         mapping(address reporter => bool active) reporters;
         FundTypes.FeeConfig feeConfig;
         FundTypes.FeeState feeState;
+        uint64 activationDelay;
+        uint64 maxSnapshotAge;
+        uint64 maxWindowLength;
     }
 
     bytes32 internal constant FUND_ACCOUNTING_STORAGE_LOCATION =
