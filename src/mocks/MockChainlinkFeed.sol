@@ -15,6 +15,10 @@ contract MockChainlinkFeed {
         price = _price;
     }
 
+    function decimals() external pure returns (uint8) {
+        return 8;
+    }
+
     function setPrice(int256 _price) external {
         require(msg.sender == owner, "MockChainlinkFeed: only owner");
         require(_price > 0, "MockChainlinkFeed: price must be positive");

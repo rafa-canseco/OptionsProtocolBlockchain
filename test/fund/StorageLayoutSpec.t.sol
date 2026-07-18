@@ -9,7 +9,9 @@ import {
     FundVaultStorageHarnessV2,
     FundAccountingStorageHarnessV1,
     FundFlowManagerStorageHarnessV1,
-    StrategyManagerStorageHarnessV1
+    FundFlowManagerStorageHarnessV2,
+    StrategyManagerStorageHarnessV1,
+    CspFundAdapterStorageHarnessV1
 } from "./harness/StorageLayoutHarnesses.sol";
 
 contract StorageLayoutSpecTest is Test {
@@ -22,6 +24,8 @@ contract StorageLayoutSpecTest is Test {
         Upgrades.validateImplementation("src/fund/FundAccounting.sol:FundAccounting", options);
         Upgrades.validateImplementation("src/fund/FundFlowManager.sol:FundFlowManager", options);
         Upgrades.validateImplementation("src/fund/StrategyManager.sol:StrategyManager", options);
+        options.unsafeAllow = "external-library-linking";
+        Upgrades.validateImplementation("src/fund/CspFundAdapter.sol:CspFundAdapter", options);
     }
 
     function test_storageHarnessImplementationsPassUpgradeSafetyValidation() public {
@@ -29,13 +33,17 @@ contract StorageLayoutSpecTest is Test {
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundVaultStorageHarnessV1"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundAccountingStorageHarnessV1"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV1"), options);
+        Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV2"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV1"), options);
+        Upgrades.validateImplementation(string.concat(HARNESS_PATH, "CspFundAdapterStorageHarnessV1"), options);
     }
 
     function test_appendToNamespaceIsCompatible() public {
         Options memory options;
         options.referenceContract = string.concat(HARNESS_PATH, "FundVaultStorageHarnessV1");
         Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "FundVaultStorageHarnessV2"), options);
+        options.referenceContract = string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV1");
+        Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV2"), options);
     }
 
     function test_compatibleUupsUpgradePreservesNamespacedState() public {
@@ -60,11 +68,13 @@ contract StorageLayoutSpecTest is Test {
         FundAccountingStorageHarnessV1 accounting = new FundAccountingStorageHarnessV1();
         FundFlowManagerStorageHarnessV1 flow = new FundFlowManagerStorageHarnessV1();
         StrategyManagerStorageHarnessV1 strategy = new StrategyManagerStorageHarnessV1();
+        CspFundAdapterStorageHarnessV1 cspAdapter = new CspFundAdapterStorageHarnessV1();
 
         assertEq(vault.storageLocation(), _erc7201("b1nary.storage.FundVault"));
         assertEq(accounting.storageLocation(), _erc7201("b1nary.storage.FundAccounting"));
         assertEq(flow.storageLocation(), _erc7201("b1nary.storage.FundFlowManager"));
         assertEq(strategy.storageLocation(), _erc7201("b1nary.storage.StrategyManager"));
+        assertEq(cspAdapter.storageLocation(), _erc7201("b1nary.storage.CspFundAdapter"));
     }
 
     function _erc7201(string memory namespace) private pure returns (bytes32) {

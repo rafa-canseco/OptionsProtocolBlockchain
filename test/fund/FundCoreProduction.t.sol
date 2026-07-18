@@ -61,24 +61,34 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         ++positionNonce;
     }
 
-    function deallocateInKind(uint256, address, bytes calldata)
+    function deallocateInKind(uint256 fractionWad, address escrow, bytes calldata)
         external
-        pure
         returns (address[] memory assets, uint256[] memory amounts)
     {
-        assets = new address[](0);
-        amounts = new uint256[](0);
+        require(msg.sender == FundVault(fund).strategyManager(), "ONLY_MANAGER");
+        assets = new address[](1);
+        amounts = new uint256[](1);
+        assets[0] = accountingAsset;
+        amounts[0] = Math.mulDiv(IERC20(accountingAsset).balanceOf(address(this)), fractionWad, FundConstants.WAD);
+        IERC20(accountingAsset).transfer(escrow, amounts[0]);
+        ++positionNonce;
     }
 
-    function emergencyExit(address, bytes calldata)
+    function emergencyExit(address escrow, bytes calldata)
         external
-        pure
         returns (address[] memory assets, uint256[] memory amounts)
     {
-        assets = new address[](0);
-        amounts = new uint256[](0);
+        require(msg.sender == FundVault(fund).strategyManager(), "ONLY_MANAGER");
+        assets = new address[](1);
+        amounts = new uint256[](1);
+        assets[0] = accountingAsset;
+        amounts[0] = IERC20(accountingAsset).balanceOf(address(this));
+        IERC20(accountingAsset).transfer(escrow, amounts[0]);
+        ++positionNonce;
     }
 }
+
+    contract ProductionAssetEscrow {}
 
     contract ProductionPositionValuator is IPositionValuator {
         function interfaceVersion() external pure returns (uint64) {
@@ -827,6 +837,97 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 25e6 + 1);
         }
 
+        function test_strategyInKindExitSynchronizesNonceAndAccountingHash() public {
+            _depositForAlice(100e6);
+            (ProductionStrategyAdapter adapter,) = _configureProductionStrategy(50e6, 10_000);
+            strategy.allocate(address(adapter), address(asset), 40e6, "");
+            bytes32 componentId = accounting.strategyComponentId(address(adapter));
+
+            FundAccounting.ComponentState memory afterAllocation = accounting.componentState(componentId);
+            assertEq(afterAllocation.nonce, 1);
+            assertEq(afterAllocation.positionStateHash, adapter.positionStateHash());
+            bytes32 positionsBefore = strategy.positionsHash();
+
+            address rawEscrow = address(new ProductionAssetEscrow());
+            address emergencyEscrow = address(new ProductionAssetEscrow());
+            _scheduleAndCall(address(flow), abi.encodeCall(flow.setStrategyExitEscrows, (rawEscrow, emergencyEscrow)));
+            bytes32 batchId = keccak256("production-in-kind-batch");
+
+            vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.StrategyExitBatchInvalid.selector, batchId));
+            strategy.deallocateInKind(batchId, address(adapter), 0.5e18, "");
+
+            _scheduleAndCall(
+                address(flow),
+                abi.encodeCall(
+                    flow.authorizeStrategyInKindBatch,
+                    (batchId, address(adapter), 0.5e18, uint64(block.timestamp + 7 days))
+                )
+            );
+            vm.expectRevert(FundFlowManager.InvalidAddress.selector);
+            flow.consumeStrategyInKindBatch(batchId, address(adapter), 0.5e18);
+            vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.StrategyExitBatchInvalid.selector, batchId));
+            strategy.deallocateInKind(batchId, address(adapter), 0.4e18, "");
+
+            (address[] memory assets, uint256[] memory amounts) =
+                strategy.deallocateInKind(batchId, address(adapter), 0.5e18, "");
+
+            assertEq(assets.length, 1);
+            assertEq(assets[0], address(asset));
+            assertEq(amounts[0], 20e6);
+            assertEq(asset.balanceOf(rawEscrow), 20e6);
+            assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 20e6);
+            assertEq(strategy.positionNonce(address(adapter)), 2);
+            assertNotEq(strategy.positionsHash(), positionsBefore);
+            FundAccounting.ComponentState memory afterExit = accounting.componentState(componentId);
+            assertEq(afterExit.nonce, 2);
+            assertEq(afterExit.positionStateHash, adapter.positionStateHash());
+            assertEq(vault.maxDeposit(alice), 0);
+
+            vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.StrategyExitBatchInvalid.selector, batchId));
+            strategy.deallocateInKind(batchId, address(adapter), 0.5e18, "");
+
+            bytes32 expiredBatchId = keccak256("expired-production-in-kind-batch");
+            _scheduleAndCall(
+                address(flow),
+                abi.encodeCall(
+                    flow.authorizeStrategyInKindBatch,
+                    (expiredBatchId, address(adapter), 0.5e18, uint64(block.timestamp + 3 days))
+                )
+            );
+            vm.warp(block.timestamp + 2 days + 1);
+            vm.expectRevert(abi.encodeWithSelector(IFundFlowManager.StrategyExitBatchInvalid.selector, expiredBatchId));
+            strategy.deallocateInKind(expiredBatchId, address(adapter), 0.5e18, "");
+        }
+
+        function test_strategyEmergencyExitSynchronizesHashAndDisablesAllocation() public {
+            _depositForAlice(100e6);
+            (ProductionStrategyAdapter adapter,) = _configureProductionStrategy(50e6, 10_000);
+            strategy.allocate(address(adapter), address(asset), 40e6, "");
+            bytes32 componentId = accounting.strategyComponentId(address(adapter));
+            address inKindEscrow = address(new ProductionAssetEscrow());
+            address emergencyEscrow = address(new ProductionAssetEscrow());
+            _scheduleAndCall(
+                address(flow), abi.encodeCall(flow.setStrategyExitEscrows, (inKindEscrow, emergencyEscrow))
+            );
+
+            (address[] memory assets, uint256[] memory amounts) = strategy.emergencyExit(address(adapter), "");
+
+            assertEq(assets.length, 1);
+            assertEq(assets[0], address(asset));
+            assertEq(amounts[0], 40e6);
+            assertEq(asset.balanceOf(emergencyEscrow), 40e6);
+            assertEq(asset.balanceOf(inKindEscrow), 0);
+            assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 0);
+            assertFalse(strategy.strategyConfig(address(adapter)).active);
+            assertEq(strategy.positionNonce(address(adapter)), 2);
+            FundAccounting.ComponentState memory afterExit = accounting.componentState(componentId);
+            assertEq(afterExit.nonce, 2);
+            assertEq(afterExit.positionStateHash, adapter.positionStateHash());
+
+            vm.expectRevert(abi.encodeWithSelector(IStrategyManager.AdapterNotActive.selector, address(adapter)));
+            strategy.allocate(address(adapter), address(asset), 1, "");
+        }
+
         function test_performanceFeeMintsSharesWithoutMovingAssets() public {
             _depositForAlice(100e6);
             FundTypes.FeeConfig memory config = FundTypes.FeeConfig({
@@ -1007,6 +1108,31 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             accounting.setReporterSet(reporters, 2, 1);
             accounting.setComponent(IDLE_COMPONENT, address(0), 1, true);
             vm.warp(block.timestamp + 1 days);
+        }
+
+        function _configureProductionStrategy(uint256 absoluteCap, uint16 maxLossBps)
+            private
+            returns (ProductionStrategyAdapter adapter, ProductionPositionValuator valuator)
+        {
+            adapter = new ProductionStrategyAdapter(address(vault), address(asset));
+            valuator = new ProductionPositionValuator();
+            _scheduleAndCall(
+                address(accounting),
+                abi.encodeCall(
+                    accounting.setComponent,
+                    (accounting.strategyComponentId(address(adapter)), address(valuator), uint64(1), true)
+                )
+            );
+            FundTypes.StrategyConfig memory config = FundTypes.StrategyConfig({
+                active: true,
+                maxAllocationBps: 5_000,
+                maxLossBps: maxLossBps,
+                cooldown: 0,
+                interfaceVersion: 1,
+                valuator: address(valuator),
+                absoluteCap: absoluteCap
+            });
+            _scheduleAndCall(address(strategy), abi.encodeCall(strategy.setStrategyConfig, (address(adapter), config)));
         }
 
         function _scheduleAndCall(address target, bytes memory data) private {

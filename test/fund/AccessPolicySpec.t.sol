@@ -153,6 +153,16 @@ contract AccessPolicySpecTest is Test {
         assertEq(rules[4].role, FundConstants.PROCESSOR_ROLE);
     }
 
+    function test_strategyExitDestinationsAndBatchesRequireCuratorDelay() public pure {
+        FundAccessPolicy.Rule[] memory rules = FundAccessPolicy.flowRules();
+        assertEq(rules[6].selector, IFundFlowManager.setStrategyExitEscrows.selector);
+        assertEq(rules[6].role, FundConstants.CURATOR_ROLE);
+        assertEq(rules[6].executionDelay, FundConstants.CURATOR_DELAY);
+        assertEq(rules[7].selector, IFundFlowManager.authorizeStrategyInKindBatch.selector);
+        assertEq(rules[7].role, FundConstants.CURATOR_ROLE);
+        assertEq(rules[7].executionDelay, FundConstants.CURATOR_DELAY);
+    }
+
     function _applyRules(FundAccessPolicy.Rule[] memory rules) private {
         for (uint256 i; i < rules.length; ++i) {
             bytes4[] memory selectors = new bytes4[](1);

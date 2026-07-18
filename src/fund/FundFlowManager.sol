@@ -99,6 +99,20 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         return ($.maxExitFeeBps, $.maxWindowOutflowBps);
     }
 
+    function strategyExitEscrows() external view returns (address inKindEscrow, address emergencyEscrow) {
+        FundFlowManagerStorageLayout storage $ = _getFundFlowManagerStorage();
+        return ($.strategyInKindEscrow, $.strategyEmergencyEscrow);
+    }
+
+    function strategyInKindBatch(bytes32 batchId)
+        external
+        view
+        returns (address adapter, address escrow, uint64 validUntil, bool consumed, uint256 fractionWad)
+    {
+        StrategyInKindBatch storage exitBatch = _getFundFlowManagerStorage().strategyInKindBatches[batchId];
+        return (exitBatch.adapter, exitBatch.escrow, exitBatch.validUntil, exitBatch.consumed, exitBatch.fractionWad);
+    }
+
     function pendingRedeemRequest(uint256 requestId, address controller) external view returns (uint256) {
         return requestId == FundConstants.ERC7540_REQUEST_ID
             ? _getFundFlowManagerStorage().redemptions[controller].pendingShares
@@ -426,6 +440,54 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         FundFlowManagerStorageLayout storage $ = _getFundFlowManagerStorage();
         $.maxExitFeeBps = maxExitFeeBps;
         $.maxWindowOutflowBps = maxWindowOutflowBps;
+    }
+
+    function setStrategyExitEscrows(address inKindEscrow, address emergencyEscrow) external restricted {
+        if (
+            inKindEscrow == address(0) || emergencyEscrow == address(0) || inKindEscrow.code.length == 0
+                || emergencyEscrow.code.length == 0
+        ) revert InvalidAddress();
+        FundFlowManagerStorageLayout storage $ = _getFundFlowManagerStorage();
+        $.strategyInKindEscrow = inKindEscrow;
+        $.strategyEmergencyEscrow = emergencyEscrow;
+        emit StrategyExitEscrowsUpdated(inKindEscrow, emergencyEscrow);
+    }
+
+    function authorizeStrategyInKindBatch(bytes32 batchId, address adapter, uint256 fractionWad, uint64 validUntil)
+        external
+        restricted
+    {
+        FundFlowManagerStorageLayout storage $ = _getFundFlowManagerStorage();
+        if (
+            batchId == bytes32(0) || adapter == address(0) || adapter.code.length == 0 || fractionWad == 0
+                || fractionWad > FundConstants.WAD || validUntil <= block.timestamp
+                || $.strategyInKindEscrow == address(0) || $.strategyInKindBatches[batchId].adapter != address(0)
+        ) revert StrategyExitBatchInvalid(batchId);
+        $.strategyInKindBatches[batchId] = StrategyInKindBatch({
+            adapter: adapter,
+            escrow: $.strategyInKindEscrow,
+            validUntil: validUntil,
+            consumed: false,
+            fractionWad: fractionWad
+        });
+        emit StrategyInKindBatchAuthorized(batchId, adapter, $.strategyInKindEscrow, fractionWad, validUntil);
+    }
+
+    function consumeStrategyInKindBatch(bytes32 batchId, address adapter, uint256 fractionWad)
+        external
+        returns (address escrow)
+    {
+        FundFlowManagerStorageLayout storage $ = _getFundFlowManagerStorage();
+        if (msg.sender != IFundVaultFlow($.fund).strategyManager()) revert InvalidAddress();
+        StrategyInKindBatch storage exitBatch = $.strategyInKindBatches[batchId];
+        // validUntil is inclusive, matching the fund's NAV and observation validity windows.
+        if (
+            exitBatch.adapter != adapter || exitBatch.escrow == address(0) || exitBatch.escrow != $.strategyInKindEscrow
+                || exitBatch.fractionWad != fractionWad || exitBatch.consumed || block.timestamp > exitBatch.validUntil
+        ) revert StrategyExitBatchInvalid(batchId);
+        exitBatch.consumed = true;
+        escrow = exitBatch.escrow;
+        emit StrategyInKindBatchConsumed(batchId, adapter);
     }
 
     function batch(uint64 batchId) external view returns (FundTypes.RedemptionBatch memory) {

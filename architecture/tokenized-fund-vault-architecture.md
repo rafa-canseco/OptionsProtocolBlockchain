@@ -1965,3 +1965,66 @@ section 18.2 after documenting the required V1 `BatchSettler` authorization
 onboarding. The architecture is approved and implementation begins with B1N-349.
 Each phase receives its own threat model, tests, storage-layout baseline, and
 audit scope.
+
+## 31. B1N-351 CSP adapter implementation boundary
+
+The Phase 2 CSP adapter is implemented as `CspFundAdapter`, a UUPS strategy
+proxy using the `b1nary.storage.CspFundAdapter` ERC-7201 namespace. Its asset
+surface is deliberately narrow:
+
+- `allocate`, `deallocate`, `deallocateInKind`, and `emergencyExit` accept only
+  the configured `StrategyManager` as caller.
+- Normal allocation accepts only the fund accounting asset and opens only
+  fully collateralized WETH/USDC puts through the deployed Controller and
+  BatchSettler interfaces.
+- Raw recovery returns only accounted USDC and WETH. StrategyManager never
+  accepts a caller-selected destination: FundFlowManager supplies escrows that
+  were registered through the delayed curator policy.
+- In-kind recovery is blocked while a CSP position is active, so reducing the
+  StrategyManager allocation cannot hide collateral that remains locked in V1.
+  It also consumes a one-use FundFlowManager batch authorization bound to the
+  adapter, fraction, registered escrow, and expiry. Emergency recovery is
+  likewise blocked while exposure is active and routes only to the registered
+  emergency escrow; a successful emergency recovery disables allocations.
+- Assigned WETH remains adapter-held collective fund inventory. There is no
+  holder claim index, share generation, epoch, or covered-call transition.
+
+Every adapter mutation increments `stateNonce` and updates `positionsHash`.
+`StrategyManager` then records the adapter `positionStateHash`, updates its own
+aggregate hash, invalidates NAV under the cross-proxy lock, and synchronizes the
+same nonce/hash into `FundAccounting`. In-kind and emergency paths follow the
+same sequence. Physical delivery occurs only after a StrategyManager settlement
+step has invalidated the active NAV. The valuator fails closed throughout
+`AwaitingPhysicalDelivery`, including after an external delivery but before
+adapter finalization. Finalization requires at least the exact assigned WETH,
+accounts only that expected amount, and quarantines any donated surplus as
+unaccounted inventory. It then publishes the terminal adapter hash before a new
+NAV can activate.
+
+`CspFundValuator` is an immutable-policy, read-only component valuator. It uses
+the accounting ledgers and raw balances, validates the matching V1 vault and
+BatchSettler ledgers, values WETH from a fixed Chainlink feed, and requires an
+exact quorum of unique approved signed option observations before expiry. At
+least one observer must differ from the executing MM. It selects the maximum
+liability and exit cost, applies the configured conservative liability buffer,
+binds every observation to the current adapter hash and snapshot block, and
+fails closed on stale spot data, missing quorum, ledger mismatch, or an
+unonboarded adapter. An expired but unsettled short put is valued at full locked
+collateral liability.
+
+Activation is a runtime capability check, not a deployment assumption. The
+adapter verifies Controller/BatchSettler/AddressBook wiring, custodial-only
+redemption, a nonzero physical-delivery router, and
+`authorizedPhysicalDeliveryVault(adapter)`. Missing legacy selectors return
+`false` rather than bubbling an ABI decode failure. The Base mainnet fork test
+records the current boundary: the deployed Controller does not yet expose the
+required custodial-redemption gate, so the adapter remains inactive and cannot
+move fund USDC. No V1 implementation is changed by B1N-351.
+
+The post-assignment swap is isolated in the stateless linked library
+`CspFundAdapterOperations` to retain EIP-170 margin. It can mutate only the
+adapter namespace through Solidity's library delegatecall, contains no upgrade,
+ownership, arbitrary-call, or custody surface, and enforces measured token
+deltas plus curator-configured router, fee tier, maximum WETH, and slippage.
+Deployments must record and verify both the adapter implementation and the
+linked library code hash. Replacing either requires a delayed adapter upgrade.

@@ -9,6 +9,14 @@ abstract contract FundFlowManagerStorage {
         uint256 processedShares;
     }
 
+    struct StrategyInKindBatch {
+        address adapter;
+        address escrow;
+        uint64 validUntil;
+        bool consumed;
+        uint256 fractionWad;
+    }
+
     /// @custom:storage-location erc7201:b1nary.storage.FundFlowManager
     struct FundFlowManagerStorageLayout {
         address fund;
@@ -27,6 +35,9 @@ abstract contract FundFlowManagerStorage {
         uint16 maxExitFeeBps;
         uint16 maxWindowOutflowBps;
         mapping(uint64 reportNonce => OutflowWindow window) outflowWindows;
+        address strategyInKindEscrow;
+        address strategyEmergencyEscrow;
+        mapping(bytes32 batchId => StrategyInKindBatch batch) strategyInKindBatches;
     }
 
     bytes32 internal constant FUND_FLOW_MANAGER_STORAGE_LOCATION =

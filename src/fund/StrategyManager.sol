@@ -26,6 +26,10 @@ interface IFundAccountingStrategyRegistry {
 
 interface IFlowProcessingState {
     function hasActiveProcessing() external view returns (bool);
+    function strategyExitEscrows() external view returns (address inKindEscrow, address emergencyEscrow);
+    function consumeStrategyInKindBatch(bytes32 batchId, address adapter, uint256 fractionWad)
+        external
+        returns (address escrow);
 }
 
 /// @notice Adapter registry and bounded allocation authority for one fund.
@@ -40,6 +44,14 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
     event StrategyConfigured(address indexed adapter, address indexed valuator, bool active);
     event StrategyAllocated(address indexed adapter, address indexed asset, uint256 amount, uint64 positionNonce);
     event StrategyDeallocated(address indexed adapter, uint256 targetValue, uint256 assetsOut, uint64 positionNonce);
+    event StrategyDeallocatedInKind(
+        bytes32 indexed batchId,
+        address indexed adapter,
+        address indexed escrow,
+        uint256 fractionWad,
+        uint64 positionNonce
+    );
+    event StrategyEmergencyExited(address indexed adapter, address indexed escrow, uint64 positionNonce);
     event AllocationPaused(address indexed adapter);
     event AllocationResumed(address indexed adapter);
 
@@ -172,6 +184,66 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
         _syncAccounting(vault.accounting(), adapter, nonce, stateHash);
         vault.endModuleExecution(lockId);
         emit StrategyDeallocated(adapter, targetValue, assetsOut, nonce);
+    }
+
+    function deallocateInKind(bytes32 batchId, address adapter, uint256 fractionWad, bytes calldata data)
+        external
+        restricted
+        returns (address[] memory assets, uint256[] memory amounts)
+    {
+        StrategyManagerStorageLayout storage $ = _getStrategyManagerStorage();
+        FundTypes.StrategyConfig storage config = $.strategies[adapter];
+        if (config.interfaceVersion == 0 || fractionWad == 0 || fractionWad > FundConstants.WAD) {
+            revert AdapterNotActive(adapter);
+        }
+        IFundVaultStrategy vault = IFundVaultStrategy($.fund);
+        uint256 lockId = vault.beginModuleExecution($.compatibilityVersion);
+        vault.invalidateNav();
+        address escrow =
+            IFlowProcessingState(vault.flowManager()).consumeStrategyInKindBatch(batchId, adapter, fractionWad);
+        (assets, amounts) = IFundStrategyAdapter(adapter).deallocateInKind(fractionWad, escrow, data);
+        if (assets.length == 0 || assets.length != amounts.length) revert InvalidAddress();
+
+        address accountingAsset = vault.asset();
+        uint256 allocated = $.adapterAllocated[adapter][accountingAsset];
+        uint256 reduction = Math.mulDiv(allocated, fractionWad, FundConstants.WAD);
+        $.adapterAllocated[adapter][accountingAsset] = allocated - reduction;
+        $.totalAllocated[accountingAsset] -= reduction;
+        $.lastOperationAt[adapter] = uint48(block.timestamp);
+        (uint64 nonce, bytes32 stateHash) = _recordPosition($, adapter);
+        vault.recordStrategyPositions($.positionsHash);
+        _syncAccounting(vault.accounting(), adapter, nonce, stateHash);
+        vault.endModuleExecution(lockId);
+        emit StrategyDeallocatedInKind(batchId, adapter, escrow, fractionWad, nonce);
+    }
+
+    function emergencyExit(address adapter, bytes calldata data)
+        external
+        restricted
+        returns (address[] memory assets, uint256[] memory amounts)
+    {
+        StrategyManagerStorageLayout storage $ = _getStrategyManagerStorage();
+        FundTypes.StrategyConfig storage config = $.strategies[adapter];
+        if (config.interfaceVersion == 0) revert AdapterNotActive(adapter);
+        IFundVaultStrategy vault = IFundVaultStrategy($.fund);
+        (, address escrow) = IFlowProcessingState(vault.flowManager()).strategyExitEscrows();
+        if (escrow == address(0) || escrow.code.length == 0) revert InvalidAddress();
+        uint256 lockId = vault.beginModuleExecution($.compatibilityVersion);
+        vault.invalidateNav();
+        (assets, amounts) = IFundStrategyAdapter(adapter).emergencyExit(escrow, data);
+        if (assets.length == 0 || assets.length != amounts.length) revert InvalidAddress();
+
+        address accountingAsset = vault.asset();
+        uint256 allocated = $.adapterAllocated[adapter][accountingAsset];
+        $.adapterAllocated[adapter][accountingAsset] = 0;
+        $.totalAllocated[accountingAsset] -= allocated;
+        $.strategies[adapter].active = false;
+        $.lastOperationAt[adapter] = uint48(block.timestamp);
+        (uint64 nonce, bytes32 stateHash) = _recordPosition($, adapter);
+        vault.recordStrategyPositions($.positionsHash);
+        _syncAccounting(vault.accounting(), adapter, nonce, stateHash);
+        vault.endModuleExecution(lockId);
+        emit StrategyEmergencyExited(adapter, escrow, nonce);
     }
 
     function setStrategyConfig(address adapter, FundTypes.StrategyConfig calldata config) external restricted {

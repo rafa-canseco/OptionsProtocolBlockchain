@@ -12,9 +12,15 @@ interface IFundFlowManager {
     error PendingRequestInSealedBatch(address controller, uint64 batchId);
     error RequestOwnerMismatch(address controller, address expectedOwner, address actualOwner);
     error RequestNotCancelable();
+    error StrategyExitBatchInvalid(bytes32 batchId);
     error UnauthorizedOperator(address controller, address caller);
 
     event RedeemBatchReleased(uint64 indexed batchId);
+    event StrategyExitEscrowsUpdated(address indexed inKindEscrow, address indexed emergencyEscrow);
+    event StrategyInKindBatchAuthorized(
+        bytes32 indexed batchId, address indexed adapter, address indexed escrow, uint256 fractionWad, uint64 validUntil
+    );
+    event StrategyInKindBatchConsumed(bytes32 indexed batchId, address indexed adapter);
 
     function fund() external view returns (address);
     function compatibilityVersion() external view returns (uint64);
@@ -22,6 +28,11 @@ interface IFundFlowManager {
     function claimableRedeemRequest(uint256 requestId, address controller) external view returns (uint256);
     function isOperator(address controller, address operator) external view returns (bool);
     function windowOutflow(uint64 reportNonce) external view returns (uint256 eligibleSupply, uint256 processedShares);
+    function strategyExitEscrows() external view returns (address inKindEscrow, address emergencyEscrow);
+    function strategyInKindBatch(bytes32 batchId)
+        external
+        view
+        returns (address adapter, address escrow, uint64 validUntil, bool consumed, uint256 fractionWad);
 
     function recordRedeemRequest(
         address caller,
@@ -40,4 +51,10 @@ interface IFundFlowManager {
     function consumeClaim(address caller, address controller, uint256 shares) external returns (uint256 assets);
     function cancelPending(address caller, address controller, uint256 shares) external;
     function setExitPolicy(uint16 maxExitFeeBps, uint16 maxWindowOutflowBps) external;
+    function setStrategyExitEscrows(address inKindEscrow, address emergencyEscrow) external;
+    function authorizeStrategyInKindBatch(bytes32 batchId, address adapter, uint256 fractionWad, uint64 validUntil)
+        external;
+    function consumeStrategyInKindBatch(bytes32 batchId, address adapter, uint256 fractionWad)
+        external
+        returns (address escrow);
 }
