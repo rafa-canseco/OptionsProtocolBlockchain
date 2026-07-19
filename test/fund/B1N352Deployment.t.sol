@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {AddressBook} from "../../src/core/AddressBook.sol";
 import {BatchSettler} from "../../src/core/BatchSettler.sol";
 import {Controller} from "../../src/core/Controller.sol";
@@ -30,6 +31,14 @@ contract B1N352DeployHarness is DeployTokenizedCspFundBaseSepolia {
     function deployForTest(DeployConfig memory config) external returns (DeploymentAddresses memory) {
         return _deploy(config, address(this));
     }
+
+    function requireExpectedV1Baseline(address addressBook_) external view {
+        _requireExpectedV1Baseline(addressBook_);
+    }
+
+    function envUint16(string memory key) external view returns (uint16) {
+        return _envUint16(key);
+    }
 }
 
 contract B1N352OperationsHarness is B1N352Operations {
@@ -47,6 +56,13 @@ contract B1N352OperationsHarness is B1N352Operations {
 
     function activationOperation(address strategyManager, address adapter) external view returns (Operation memory) {
         return _activationOperation(strategyManager, adapter);
+    }
+
+    function verifyDeployedPolicy(DeployConfig memory deployConfig, PolicyConfig memory policyConfig, bool active)
+        external
+        view
+    {
+        _verifyDeployedPolicy(deployConfig, policyConfig, active);
     }
 }
 
@@ -74,7 +90,8 @@ contract B1N352DeploymentTest is Test {
     }
 
     function test_localDryRunDeployConfigureOnboardAndActivate() public {
-        B1N352Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(_deployConfig());
+        B1N352Base.DeployConfig memory deployConfig = _deployConfig();
+        B1N352Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(deployConfig);
         AccessManager manager = AccessManager(deployed.accessManager);
 
         assertEq(FundFactory(deployed.fundFactory).owner(), address(this));
@@ -109,10 +126,12 @@ contract B1N352DeploymentTest is Test {
             address(manager), address(adapter), deployed.inKindStrategyEscrow, deployed.emergencyStrategyEscrow
         );
         _scheduleAndExecute(manager, accessOperations, FundConstants.CORE_UPGRADE_DELAY);
+        uint256 accessExecutedAt = block.timestamp;
         assertEq(
             manager.getTargetFunctionRole(address(adapter), bytes4(keccak256("upgradeToAndCall(address,bytes)"))),
             FundConstants.ADAPTER_UPGRADER_ROLE
         );
+        assertEq(manager.getTargetAdminDelay(address(adapter)), 0);
 
         B1N352Operations.PolicyConfig memory policy = _policyConfig(deployed);
         _scheduleAndExecute(manager, operationsHarness.policyOperations(policy), FundConstants.CURATOR_DELAY);
@@ -129,7 +148,38 @@ contract B1N352DeploymentTest is Test {
         _scheduleAndExecute(manager, activationOperations, FundConstants.CURATOR_DELAY);
         assertTrue(strategy.strategyConfig(address(adapter)).active);
 
+        operationsHarness.verifyDeployedPolicy(deployConfig, policy, true);
+        _assertPolicyMismatchesRejected(deployConfig, policy);
+
+        assertEq(manager.getTargetAdminDelay(address(adapter)), 0);
+        vm.warp(accessExecutedAt + manager.minSetback());
+        assertEq(manager.getTargetAdminDelay(address(adapter)), FundConstants.CORE_UPGRADE_DELAY);
+        assertEq(manager.getTargetAdminDelay(deployed.inKindStrategyEscrow), FundConstants.CORE_UPGRADE_DELAY);
+        assertEq(manager.getTargetAdminDelay(deployed.emergencyStrategyEscrow), FundConstants.CORE_UPGRADE_DELAY);
+
         _assertLegacyPerUserStateAbsent(address(vault));
+    }
+
+    function test_expectedV1BaselineRejectsStructurallyValidWrongImplementation() public {
+        address controllerImplementation = _implementation(addressBook.controller());
+        address settlerImplementation = _implementation(addressBook.batchSettler());
+        _setExpectedV1Baseline(controllerImplementation, settlerImplementation);
+        deployHarness.requireExpectedV1Baseline(address(addressBook));
+
+        address wrongControllerImplementation = address(new Controller());
+        vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_IMPLEMENTATION", vm.toString(wrongControllerImplementation));
+        vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_CODEHASH", vm.toString(wrongControllerImplementation.codehash));
+        vm.expectRevert(bytes("B1N352: controller implementation"));
+        deployHarness.requireExpectedV1Baseline(address(addressBook));
+    }
+
+    function test_envDowncastRevertsInsteadOfWrapping() public {
+        vm.setEnv("B1N352_TEST_UINT16", "65535");
+        assertEq(deployHarness.envUint16("B1N352_TEST_UINT16"), type(uint16).max);
+
+        vm.setEnv("B1N352_TEST_UINT16", "65536");
+        vm.expectRevert(abi.encodeWithSelector(SafeCast.SafeCastOverflowedUintDowncast.selector, 16, 65_536));
+        deployHarness.envUint16("B1N352_TEST_UINT16");
     }
 
     function _deployV1() private {
@@ -264,6 +314,42 @@ contract B1N352DeploymentTest is Test {
             adapterInterfaceVersion: 1,
             absoluteCap: 1_000e6
         });
+    }
+
+    function _assertPolicyMismatchesRejected(
+        B1N352Base.DeployConfig memory deployConfig,
+        B1N352Operations.PolicyConfig memory policy
+    ) private {
+        policy.reporterThreshold = 1;
+        vm.expectRevert(bytes("B1N352: reporter threshold"));
+        operationsHarness.verifyDeployedPolicy(deployConfig, policy, true);
+        policy.reporterThreshold = 2;
+
+        policy.maxExitFeeBps += 1;
+        vm.expectRevert(bytes("B1N352: exit fee"));
+        operationsHarness.verifyDeployedPolicy(deployConfig, policy, true);
+        policy.maxExitFeeBps -= 1;
+
+        policy.maxLossBps += 1;
+        vm.expectRevert(bytes("B1N352: strategy config"));
+        operationsHarness.verifyDeployedPolicy(deployConfig, policy, true);
+        policy.maxLossBps -= 1;
+
+        deployConfig.adapterSwapFeeTier = 3_000;
+        vm.expectRevert(bytes("B1N352: adapter config"));
+        operationsHarness.verifyDeployedPolicy(deployConfig, policy, true);
+        deployConfig.adapterSwapFeeTier = 500;
+
+        deployConfig.approvedObservers[0] = address(0xBAD);
+        vm.expectRevert(bytes("B1N352: valuator observer order"));
+        operationsHarness.verifyDeployedPolicy(deployConfig, policy, true);
+    }
+
+    function _setExpectedV1Baseline(address controllerImplementation, address settlerImplementation) private {
+        vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_IMPLEMENTATION", vm.toString(controllerImplementation));
+        vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_CODEHASH", vm.toString(controllerImplementation.codehash));
+        vm.setEnv("FUND_EXPECTED_V1_BATCH_SETTLER_IMPLEMENTATION", vm.toString(settlerImplementation));
+        vm.setEnv("FUND_EXPECTED_V1_BATCH_SETTLER_CODEHASH", vm.toString(settlerImplementation.codehash));
     }
 
     function _scheduleAndExecute(AccessManager manager, B1N352Operations.Operation[] memory operations, uint256 delay)

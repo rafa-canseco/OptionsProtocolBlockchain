@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {AddressBook} from "../../src/core/AddressBook.sol";
 import {BatchSettler} from "../../src/core/BatchSettler.sol";
 import {Controller} from "../../src/core/Controller.sol";
@@ -14,6 +15,8 @@ import {FundTypes} from "../../src/fund/FundTypes.sol";
 import {ICspFundAdapter} from "../../src/fund/interfaces/ICspFundAdapter.sol";
 
 abstract contract B1N352Base is Script {
+    using SafeCast for uint256;
+
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     bytes32 internal constant ERC1967_IMPLEMENTATION_SLOT =
         0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
@@ -82,23 +85,23 @@ abstract contract B1N352Base is Script {
         config.accountingAsset = vm.envAddress("FUND_ACCOUNTING_ASSET");
         config.weth = vm.envAddress("FUND_WETH");
         config.adapterSwapRouter = vm.envAddress("FUND_ADAPTER_SWAP_ROUTER");
-        config.adapterSwapFeeTier = uint24(vm.envUint("FUND_ADAPTER_SWAP_FEE_TIER"));
-        config.implementationVersion = uint64(vm.envUint("FUND_IMPLEMENTATION_VERSION"));
-        config.compatibilityVersion = uint64(vm.envUint("FUND_COMPATIBILITY_VERSION"));
+        config.adapterSwapFeeTier = _envUint24("FUND_ADAPTER_SWAP_FEE_TIER");
+        config.implementationVersion = _envUint64("FUND_IMPLEMENTATION_VERSION");
+        config.compatibilityVersion = _envUint64("FUND_COMPATIBILITY_VERSION");
         config.fundSalt = vm.envBytes32("FUND_DEPLOYMENT_SALT");
         config.fundName = vm.envString("FUND_NAME");
         config.fundSymbol = vm.envString("FUND_SYMBOL");
-        config.minimumIdleBps = uint16(vm.envUint("FUND_MINIMUM_IDLE_BPS"));
-        config.navActivationDelay = uint64(vm.envUint("FUND_NAV_ACTIVATION_DELAY_BLOCKS"));
-        config.maxSnapshotAge = uint64(vm.envUint("FUND_MAX_SNAPSHOT_AGE_BLOCKS"));
-        config.maxNavWindowLength = uint64(vm.envUint("FUND_MAX_NAV_WINDOW_LENGTH_BLOCKS"));
+        config.minimumIdleBps = _envUint16("FUND_MINIMUM_IDLE_BPS");
+        config.navActivationDelay = _envUint64("FUND_NAV_ACTIVATION_DELAY_BLOCKS");
+        config.maxSnapshotAge = _envUint64("FUND_MAX_SNAPSHOT_AGE_BLOCKS");
+        config.maxNavWindowLength = _envUint64("FUND_MAX_NAV_WINDOW_LENGTH_BLOCKS");
         config.feeConfig = FundTypes.FeeConfig({
-            managementFeeWad: uint64(vm.envUint("FUND_MANAGEMENT_FEE_WAD")),
-            performanceFeeBps: uint16(vm.envUint("FUND_PERFORMANCE_FEE_BPS")),
-            maxManagementFeeBps: uint16(vm.envUint("FUND_MAX_MANAGEMENT_FEE_BPS")),
-            maxPerformanceFeeBps: uint16(vm.envUint("FUND_MAX_PERFORMANCE_FEE_BPS")),
-            maxAccrualInterval: uint32(vm.envUint("FUND_MAX_ACCRUAL_INTERVAL_SECONDS")),
-            crystallizationPeriod: uint32(vm.envUint("FUND_CRYSTALLIZATION_PERIOD_SECONDS")),
+            managementFeeWad: _envUint64("FUND_MANAGEMENT_FEE_WAD"),
+            performanceFeeBps: _envUint16("FUND_PERFORMANCE_FEE_BPS"),
+            maxManagementFeeBps: _envUint16("FUND_MAX_MANAGEMENT_FEE_BPS"),
+            maxPerformanceFeeBps: _envUint16("FUND_MAX_PERFORMANCE_FEE_BPS"),
+            maxAccrualInterval: _envUint32("FUND_MAX_ACCRUAL_INTERVAL_SECONDS"),
+            crystallizationPeriod: _envUint32("FUND_CRYSTALLIZATION_PERIOD_SECONDS"),
             feeRecipient: vm.envAddress("FUND_FEE_RECIPIENT")
         });
         config.roles = FundFactory.RoleAccounts({
@@ -111,23 +114,23 @@ abstract contract B1N352Base is Script {
             guardian: vm.envAddress("FUND_GUARDIAN")
         });
         config.adapterRiskConfig = ICspFundAdapter.RiskConfig({
-            minExpiryDelay: uint64(vm.envUint("FUND_CSP_MIN_EXPIRY_DELAY_SECONDS")),
-            maxExpiryDelay: uint64(vm.envUint("FUND_CSP_MAX_EXPIRY_DELAY_SECONDS")),
-            settlementDefaultDelay: uint64(vm.envUint("FUND_CSP_SETTLEMENT_DEFAULT_DELAY_SECONDS")),
-            minPremiumBps: uint16(vm.envUint("FUND_CSP_MIN_PREMIUM_BPS")),
-            maxSwapSlippageBps: uint16(vm.envUint("FUND_CSP_MAX_SWAP_SLIPPAGE_BPS")),
-            maxOpenPositions: uint16(vm.envUint("FUND_CSP_MAX_OPEN_POSITIONS")),
+            minExpiryDelay: _envUint64("FUND_CSP_MIN_EXPIRY_DELAY_SECONDS"),
+            maxExpiryDelay: _envUint64("FUND_CSP_MAX_EXPIRY_DELAY_SECONDS"),
+            settlementDefaultDelay: _envUint64("FUND_CSP_SETTLEMENT_DEFAULT_DELAY_SECONDS"),
+            minPremiumBps: _envUint16("FUND_CSP_MIN_PREMIUM_BPS"),
+            maxSwapSlippageBps: _envUint16("FUND_CSP_MAX_SWAP_SLIPPAGE_BPS"),
+            maxOpenPositions: _envUint16("FUND_CSP_MAX_OPEN_POSITIONS"),
             minStrike: vm.envUint("FUND_CSP_MIN_STRIKE"),
             maxStrike: vm.envUint("FUND_CSP_MAX_STRIKE"),
             maxCollateralPerPosition: vm.envUint("FUND_CSP_MAX_COLLATERAL_PER_POSITION"),
             maxWethPerSwap: vm.envUint("FUND_CSP_MAX_WETH_PER_SWAP")
         });
         config.spotFeed = vm.envAddress("FUND_CSP_SPOT_FEED");
-        config.spotFeedDecimals = uint8(vm.envUint("FUND_CSP_SPOT_FEED_DECIMALS"));
-        config.maxSpotStaleness = uint64(vm.envUint("FUND_CSP_MAX_SPOT_STALENESS_SECONDS"));
-        config.maxObservationWindow = uint64(vm.envUint("FUND_CSP_MAX_OBSERVATION_WINDOW_BLOCKS"));
-        config.observationQuorum = uint8(vm.envUint("FUND_CSP_OBSERVATION_QUORUM"));
-        config.liabilityBufferBps = uint16(vm.envUint("FUND_CSP_LIABILITY_BUFFER_BPS"));
+        config.spotFeedDecimals = _envUint8("FUND_CSP_SPOT_FEED_DECIMALS");
+        config.maxSpotStaleness = _envUint64("FUND_CSP_MAX_SPOT_STALENESS_SECONDS");
+        config.maxObservationWindow = _envUint64("FUND_CSP_MAX_OBSERVATION_WINDOW_BLOCKS");
+        config.observationQuorum = _envUint8("FUND_CSP_OBSERVATION_QUORUM");
+        config.liabilityBufferBps = _envUint16("FUND_CSP_LIABILITY_BUFFER_BPS");
         config.approvedObservers = vm.envAddress("FUND_CSP_APPROVED_OBSERVERS", ",");
     }
 
@@ -184,6 +187,28 @@ abstract contract B1N352Base is Script {
         return address(uint160(uint256(vm.load(proxy, ERC1967_IMPLEMENTATION_SLOT))));
     }
 
+    function _requireExpectedV1Baseline(address addressBook_) internal view {
+        AddressBook book = AddressBook(addressBook_);
+        address controllerImplementation = _implementationOf(book.controller());
+        address settlerImplementation = _implementationOf(book.batchSettler());
+        require(
+            controllerImplementation == vm.envAddress("FUND_EXPECTED_V1_CONTROLLER_IMPLEMENTATION"),
+            "B1N352: controller implementation"
+        );
+        require(
+            controllerImplementation.codehash == vm.envBytes32("FUND_EXPECTED_V1_CONTROLLER_CODEHASH"),
+            "B1N352: controller codehash"
+        );
+        require(
+            settlerImplementation == vm.envAddress("FUND_EXPECTED_V1_BATCH_SETTLER_IMPLEMENTATION"),
+            "B1N352: settler implementation"
+        );
+        require(
+            settlerImplementation.codehash == vm.envBytes32("FUND_EXPECTED_V1_BATCH_SETTLER_CODEHASH"),
+            "B1N352: settler codehash"
+        );
+    }
+
     function _logV1Baseline(address addressBook_) internal view {
         AddressBook book = AddressBook(addressBook_);
         address controllerImplementation = _implementationOf(book.controller());
@@ -208,5 +233,25 @@ abstract contract B1N352Base is Script {
         (bool success, bytes memory result) = target.staticcall(abi.encodeWithSignature(signature));
         require(success && result.length >= 32, "B1N352: bool read");
         value = abi.decode(result, (bool));
+    }
+
+    function _envUint8(string memory key) internal view returns (uint8) {
+        return vm.envUint(key).toUint8();
+    }
+
+    function _envUint16(string memory key) internal view returns (uint16) {
+        return vm.envUint(key).toUint16();
+    }
+
+    function _envUint24(string memory key) internal view returns (uint24) {
+        return vm.envUint(key).toUint24();
+    }
+
+    function _envUint32(string memory key) internal view returns (uint32) {
+        return vm.envUint(key).toUint32();
+    }
+
+    function _envUint64(string memory key) internal view returns (uint64) {
+        return vm.envUint(key).toUint64();
     }
 }

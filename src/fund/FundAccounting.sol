@@ -117,6 +117,14 @@ contract FundAccounting is FundUpgradeable, FundAccountingStorage, IFundAccounti
         return _getFundAccountingStorage().reporters[reporter];
     }
 
+    function activeReporterCount() external view returns (uint256) {
+        return _getFundAccountingStorage().activeReporters.length;
+    }
+
+    function activeReporterAt(uint256 index) external view returns (address) {
+        return _getFundAccountingStorage().activeReporters[index];
+    }
+
     function lastReportNonce() external view returns (uint64) {
         return _getFundAccountingStorage().lastReportNonce;
     }
@@ -139,6 +147,11 @@ contract FundAccounting is FundUpgradeable, FundAccountingStorage, IFundAccounti
 
     function feeConfig() external view returns (FundTypes.FeeConfig memory) {
         return _getFundAccountingStorage().feeConfig;
+    }
+
+    function navPolicy() external view returns (uint64 activationDelay, uint64 maxSnapshotAge, uint64 maxWindowLength) {
+        FundAccountingStorageLayout storage $ = _getFundAccountingStorage();
+        return ($.activationDelay, $.maxSnapshotAge, $.maxWindowLength);
     }
 
     function feeState() external view returns (FundTypes.FeeState memory) {

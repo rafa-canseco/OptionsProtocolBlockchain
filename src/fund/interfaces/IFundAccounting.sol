@@ -22,7 +22,13 @@ interface IFundAccounting {
     function reporterSetVersion() external view returns (uint64);
     function reporterThreshold() external view returns (uint16);
     function isReporter(address reporter) external view returns (bool);
+    function activeReporterCount() external view returns (uint256);
+    function activeReporterAt(uint256 index) external view returns (address);
     function componentNonce(bytes32 componentId) external view returns (uint64);
+    function activeComponentCount() external view returns (uint256);
+    function activeComponentAt(uint256 index) external view returns (bytes32);
+    function feeConfig() external view returns (FundTypes.FeeConfig memory);
+    function navPolicy() external view returns (uint64 activationDelay, uint64 maxSnapshotAge, uint64 maxWindowLength);
     function submitNav(
         uint64 reportNonce,
         FundTypes.ComponentReport[] calldata reports,

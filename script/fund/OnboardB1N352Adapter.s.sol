@@ -15,6 +15,7 @@ contract OnboardB1N352Adapter is B1N352Base {
         address weth = vm.envAddress("FUND_WETH");
         address adapter = vm.envAddress("FUND_CSP_ADAPTER_PROXY");
         _validateV1(addressBook_, accountingAsset, weth);
+        _requireExpectedV1Baseline(addressBook_);
         _logV1Baseline(addressBook_);
 
         BatchSettler settler = BatchSettler(AddressBook(addressBook_).batchSettler());

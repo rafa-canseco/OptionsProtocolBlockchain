@@ -2,7 +2,6 @@
 pragma solidity 0.8.24;
 
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
-import {AddressBook} from "../../src/core/AddressBook.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
 import {FundVault} from "../../src/fund/FundVault.sol";
 import {FundShare} from "../../src/fund/FundShare.sol";
@@ -13,17 +12,20 @@ import {StrategyAssetEscrow} from "../../src/fund/StrategyAssetEscrow.sol";
 import {CspFundAdapter} from "../../src/fund/CspFundAdapter.sol";
 import {FundConstants} from "../../src/fund/FundConstants.sol";
 import {FundAccessPolicy} from "../../src/fund/libraries/FundAccessPolicy.sol";
-import {B1N352Base} from "./B1N352Base.sol";
+import {B1N352Operations} from "./B1N352Operations.sol";
 
 /// @notice Read-only state reconciliation for manifest finalization and post-configuration checks.
-contract ReconcileB1N352Deployment is B1N352Base {
+contract ReconcileB1N352Deployment is B1N352Operations {
     function run() external view {
         _requireBaseSepolia();
-        address addressBook_ = vm.envAddress("FUND_V1_ADDRESS_BOOK");
-        address accountingAsset = vm.envAddress("FUND_ACCOUNTING_ASSET");
-        address weth = vm.envAddress("FUND_WETH");
-        _validateV1(addressBook_, accountingAsset, weth);
-        _verifyV1Hashes(addressBook_);
+        DeployConfig memory deployConfig = _loadDeployConfig();
+        PolicyConfig memory policyConfig = _loadPolicyConfig();
+        _validateExternalConfig(deployConfig);
+        _requireExpectedV1Baseline(deployConfig.addressBook);
+
+        address addressBook_ = deployConfig.addressBook;
+        address accountingAsset = deployConfig.accountingAsset;
+        address weth = deployConfig.weth;
 
         FundVault vault = FundVault(vm.envAddress("FUND_VAULT_PROXY"));
         FundShare share = FundShare(vm.envAddress("FUND_SHARE_PROXY"));
@@ -87,6 +89,7 @@ contract ReconcileB1N352Deployment is B1N352Base {
             strategy.strategyConfig(address(adapter)).active == vm.envBool("FUND_EXPECT_STRATEGY_ACTIVE"),
             "B1N352: strategy active state"
         );
+        _verifyDeployedPolicy(deployConfig, policyConfig, vm.envBool("FUND_EXPECT_STRATEGY_ACTIVE"));
         require(FundFactory(vm.envAddress("FUND_FACTORY")).owner() == vm.envAddress("FUND_FACTORY_OWNER"));
     }
 
@@ -178,28 +181,6 @@ contract ReconcileB1N352Deployment is B1N352Base {
 
     function _verifyTargetAdminDelay(AccessManager manager, address target) private view {
         require(manager.getTargetAdminDelay(target) == FundConstants.CORE_UPGRADE_DELAY, "B1N352: target admin delay");
-    }
-
-    function _verifyV1Hashes(address addressBook_) private view {
-        AddressBook book = AddressBook(addressBook_);
-        address controllerImplementation = _implementationOf(book.controller());
-        address settlerImplementation = _implementationOf(book.batchSettler());
-        require(
-            controllerImplementation == vm.envAddress("FUND_EXPECTED_V1_CONTROLLER_IMPLEMENTATION"),
-            "B1N352: controller implementation"
-        );
-        require(
-            settlerImplementation == vm.envAddress("FUND_EXPECTED_V1_BATCH_SETTLER_IMPLEMENTATION"),
-            "B1N352: settler implementation"
-        );
-        require(
-            controllerImplementation.codehash == vm.envBytes32("FUND_EXPECTED_V1_CONTROLLER_CODEHASH"),
-            "B1N352: controller codehash"
-        );
-        require(
-            settlerImplementation.codehash == vm.envBytes32("FUND_EXPECTED_V1_BATCH_SETTLER_CODEHASH"),
-            "B1N352: settler codehash"
-        );
     }
 
     function _verifyProxy(string memory implementationEnv, address proxy) private view {

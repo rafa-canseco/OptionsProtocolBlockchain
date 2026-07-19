@@ -11,6 +11,7 @@ contract PreflightB1N352BaseSepolia is B1N352Base {
         _requireBaseSepolia();
         address addressBook_ = vm.envAddress("FUND_V1_ADDRESS_BOOK");
         _validateV1(addressBook_, vm.envAddress("FUND_ACCOUNTING_ASSET"), vm.envAddress("FUND_WETH"));
+        _requireExpectedV1Baseline(addressBook_);
         _logV1Baseline(addressBook_);
 
         address adapter = vm.envOr("FUND_CSP_ADAPTER_PROXY", address(0));

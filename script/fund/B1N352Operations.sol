@@ -6,6 +6,8 @@ import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManage
 import {FundAccounting} from "../../src/fund/FundAccounting.sol";
 import {FundFlowManager} from "../../src/fund/FundFlowManager.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
+import {CspFundAdapter} from "../../src/fund/CspFundAdapter.sol";
+import {CspFundValuator} from "../../src/fund/CspFundValuator.sol";
 import {FundConstants} from "../../src/fund/FundConstants.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
 import {FundAccessPolicy} from "../../src/fund/libraries/FundAccessPolicy.sol";
@@ -96,15 +98,15 @@ abstract contract B1N352Operations is B1N352Base {
         config.inKindEscrow = vm.envAddress("FUND_IN_KIND_STRATEGY_ESCROW");
         config.emergencyEscrow = vm.envAddress("FUND_EMERGENCY_STRATEGY_ESCROW");
         config.reporters = vm.envAddress("FUND_NAV_REPORTERS", ",");
-        config.reporterThreshold = uint16(vm.envUint("FUND_NAV_REPORTER_THRESHOLD"));
-        config.reporterSetVersion = uint64(vm.envUint("FUND_NAV_REPORTER_SET_VERSION"));
-        config.maxExitFeeBps = uint16(vm.envUint("FUND_MAX_EXIT_FEE_BPS"));
-        config.maxWindowOutflowBps = uint16(vm.envUint("FUND_MAX_WINDOW_OUTFLOW_BPS"));
-        config.minimumIdleBps = uint16(vm.envUint("FUND_MINIMUM_IDLE_BPS"));
-        config.maxAllocationBps = uint16(vm.envUint("FUND_STRATEGY_MAX_ALLOCATION_BPS"));
-        config.maxLossBps = uint16(vm.envUint("FUND_STRATEGY_MAX_LOSS_BPS"));
-        config.cooldown = uint32(vm.envUint("FUND_STRATEGY_COOLDOWN_SECONDS"));
-        config.adapterInterfaceVersion = uint64(vm.envUint("FUND_CSP_ADAPTER_INTERFACE_VERSION"));
+        config.reporterThreshold = _envUint16("FUND_NAV_REPORTER_THRESHOLD");
+        config.reporterSetVersion = _envUint64("FUND_NAV_REPORTER_SET_VERSION");
+        config.maxExitFeeBps = _envUint16("FUND_MAX_EXIT_FEE_BPS");
+        config.maxWindowOutflowBps = _envUint16("FUND_MAX_WINDOW_OUTFLOW_BPS");
+        config.minimumIdleBps = _envUint16("FUND_MINIMUM_IDLE_BPS");
+        config.maxAllocationBps = _envUint16("FUND_STRATEGY_MAX_ALLOCATION_BPS");
+        config.maxLossBps = _envUint16("FUND_STRATEGY_MAX_LOSS_BPS");
+        config.cooldown = _envUint32("FUND_STRATEGY_COOLDOWN_SECONDS");
+        config.adapterInterfaceVersion = _envUint64("FUND_CSP_ADAPTER_INTERFACE_VERSION");
         config.absoluteCap = vm.envUint("FUND_STRATEGY_ABSOLUTE_CAP");
     }
 
@@ -191,6 +193,111 @@ abstract contract B1N352Operations is B1N352Base {
             data: abi.encodeCall(strategyManager.setStrategyConfig, (adapter, config)),
             label: keccak256("ACTIVATE_CSP_STRATEGY")
         });
+    }
+
+    function _verifyDeployedPolicy(
+        DeployConfig memory deployConfig,
+        PolicyConfig memory policyConfig,
+        bool expectedActive
+    ) internal view {
+        _verifyAccountingPolicy(deployConfig, policyConfig);
+        _verifyFlowPolicy(policyConfig);
+        _verifyStrategyPolicy(policyConfig, expectedActive);
+        _verifyAdapterPolicy(deployConfig, policyConfig.adapter);
+        _verifyValuatorPolicy(deployConfig, policyConfig.valuator);
+    }
+
+    function _verifyAccountingPolicy(DeployConfig memory deployConfig, PolicyConfig memory policyConfig) private view {
+        FundAccounting accounting = FundAccounting(policyConfig.accounting);
+        require(accounting.reporterSetVersion() == policyConfig.reporterSetVersion, "B1N352: reporter version");
+        require(accounting.reporterThreshold() == policyConfig.reporterThreshold, "B1N352: reporter threshold");
+        require(accounting.activeReporterCount() == policyConfig.reporters.length, "B1N352: reporter count");
+        for (uint256 i; i < policyConfig.reporters.length; ++i) {
+            require(accounting.activeReporterAt(i) == policyConfig.reporters[i], "B1N352: reporter order");
+            require(accounting.isReporter(policyConfig.reporters[i]), "B1N352: reporter inactive");
+        }
+
+        bytes32 cspComponentId = keccak256(abi.encodePacked("STRATEGY", policyConfig.adapter));
+        require(accounting.activeComponentCount() == 2, "B1N352: component count");
+        require(accounting.activeComponentAt(0) == FundConstants.IDLE_COMPONENT_ID, "B1N352: idle component id");
+        require(accounting.activeComponentAt(1) == cspComponentId, "B1N352: CSP component id");
+        FundAccounting.ComponentState memory idle = accounting.componentState(FundConstants.IDLE_COMPONENT_ID);
+        require(idle.valuator == address(0) && idle.interfaceVersion == 1 && idle.active, "B1N352: idle component");
+        FundAccounting.ComponentState memory csp = accounting.componentState(cspComponentId);
+        require(
+            csp.valuator == policyConfig.valuator && csp.interfaceVersion == policyConfig.adapterInterfaceVersion
+                && csp.active,
+            "B1N352: CSP component"
+        );
+
+        (uint64 activationDelay, uint64 maxSnapshotAge, uint64 maxWindowLength) = accounting.navPolicy();
+        require(activationDelay == deployConfig.navActivationDelay, "B1N352: NAV activation delay");
+        require(maxSnapshotAge == deployConfig.maxSnapshotAge, "B1N352: NAV snapshot age");
+        require(maxWindowLength == deployConfig.maxNavWindowLength, "B1N352: NAV window length");
+        require(
+            keccak256(abi.encode(accounting.feeConfig())) == keccak256(abi.encode(deployConfig.feeConfig)),
+            "B1N352: fee config"
+        );
+    }
+
+    function _verifyFlowPolicy(PolicyConfig memory policyConfig) private view {
+        FundFlowManager flowManager = FundFlowManager(policyConfig.flowManager);
+        (uint16 maxExitFeeBps, uint16 maxWindowOutflowBps) = flowManager.exitPolicy();
+        require(maxExitFeeBps == policyConfig.maxExitFeeBps, "B1N352: exit fee");
+        require(maxWindowOutflowBps == policyConfig.maxWindowOutflowBps, "B1N352: exit outflow");
+        (address inKindEscrow, address emergencyEscrow) = flowManager.strategyExitEscrows();
+        require(inKindEscrow == policyConfig.inKindEscrow, "B1N352: in-kind escrow policy");
+        require(emergencyEscrow == policyConfig.emergencyEscrow, "B1N352: emergency escrow policy");
+    }
+
+    function _verifyStrategyPolicy(PolicyConfig memory policyConfig, bool expectedActive) private view {
+        StrategyManager strategyManager = StrategyManager(policyConfig.strategyManager);
+        require(strategyManager.minimumIdleBps() == policyConfig.minimumIdleBps, "B1N352: minimum idle");
+        FundTypes.StrategyConfig memory expected = FundTypes.StrategyConfig({
+            active: expectedActive,
+            maxAllocationBps: policyConfig.maxAllocationBps,
+            maxLossBps: policyConfig.maxLossBps,
+            cooldown: policyConfig.cooldown,
+            interfaceVersion: policyConfig.adapterInterfaceVersion,
+            valuator: policyConfig.valuator,
+            absoluteCap: policyConfig.absoluteCap
+        });
+        require(
+            keccak256(abi.encode(strategyManager.strategyConfig(policyConfig.adapter)))
+                == keccak256(abi.encode(expected)),
+            "B1N352: strategy config"
+        );
+    }
+
+    function _verifyAdapterPolicy(DeployConfig memory deployConfig, address adapter_) private view {
+        ICspFundAdapter.AdapterConfig memory actual = CspFundAdapter(adapter_).adapterConfig();
+        ICspFundAdapter.AdapterConfig memory expected = ICspFundAdapter.AdapterConfig({
+            riskConfig: deployConfig.adapterRiskConfig,
+            swapRouter: deployConfig.adapterSwapRouter,
+            swapFeeTier: deployConfig.adapterSwapFeeTier
+        });
+        require(keccak256(abi.encode(actual)) == keccak256(abi.encode(expected)), "B1N352: adapter config");
+    }
+
+    function _verifyValuatorPolicy(DeployConfig memory deployConfig, address valuator_) private view {
+        CspFundValuator valuator = CspFundValuator(valuator_);
+        require(valuator.spotFeed() == deployConfig.spotFeed, "B1N352: valuator feed");
+        require(valuator.spotFeedDecimals() == deployConfig.spotFeedDecimals, "B1N352: valuator decimals");
+        require(valuator.maxSpotStaleness() == deployConfig.maxSpotStaleness, "B1N352: valuator staleness");
+        require(
+            valuator.maxObservationWindow() == deployConfig.maxObservationWindow, "B1N352: valuator observation window"
+        );
+        require(valuator.observationQuorum() == deployConfig.observationQuorum, "B1N352: valuator quorum");
+        require(valuator.liabilityBufferBps() == deployConfig.liabilityBufferBps, "B1N352: valuator liability buffer");
+        require(
+            valuator.approvedObserverCount() == deployConfig.approvedObservers.length, "B1N352: valuator observer count"
+        );
+        for (uint256 i; i < deployConfig.approvedObservers.length; ++i) {
+            require(
+                valuator.approvedObserverAt(i) == deployConfig.approvedObservers[i], "B1N352: valuator observer order"
+            );
+            require(valuator.isApprovedObserver(deployConfig.approvedObservers[i]), "B1N352: valuator observer");
+        }
     }
 
     function _scheduleOperations(AccessManager manager, Operation[] memory operations, uint256 callerKey) internal {

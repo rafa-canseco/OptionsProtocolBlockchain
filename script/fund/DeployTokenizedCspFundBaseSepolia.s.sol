@@ -23,6 +23,7 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
         _requireBaseSepolia();
         DeployConfig memory config = _loadDeployConfig();
         _validateExternalConfig(config);
+        _requireExpectedV1Baseline(config.addressBook);
         _logV1Baseline(config.addressBook);
 
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
