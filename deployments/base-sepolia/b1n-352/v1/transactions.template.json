@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "1.0.0",
+  "deploymentStatus": "NOT_BROADCAST",
+  "transactions": [
+    {
+      "phase": "deploy",
+      "label": "fresh-fund-stack",
+      "script": "DeployTokenizedCspFundBaseSepolia",
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "access",
+      "label": "schedule-access-operations",
+      "script": "ScheduleB1N352Access",
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "access",
+      "label": "execute-access-operations",
+      "script": "ExecuteB1N352Access",
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "policy",
+      "label": "schedule-inactive-policy",
+      "script": "ScheduleB1N352Policy",
+      "hashes": [],
+      "status": "blocked-by-B1N-346"
+    },
+    {
+      "phase": "policy",
+      "label": "execute-inactive-policy",
+      "script": "ExecuteB1N352Policy",
+      "hashes": [],
+      "status": "blocked-by-B1N-346"
+    },
+    {
+      "phase": "v1-onboarding",
+      "label": "setPhysicalDeliveryVault",
+      "script": "OnboardB1N352Adapter",
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "activation",
+      "label": "schedule-strategy-activation",
+      "script": "ScheduleB1N352Activation",
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "activation",
+      "label": "execute-strategy-activation",
+      "script": "ExecuteB1N352Activation",
+      "hashes": [],
+      "status": "not-authorized"
+    }
+  ]
+}

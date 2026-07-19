@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "1.0.0",
+  "deploymentStatus": "NOT_DEPLOYED",
+  "issue": "B1N-352",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532,
+    "reconciliationBlock": null
+  },
+  "gates": {
+    "b1n346ApprovedPolicyArtifact": null,
+    "custodialPreflightPassed": null,
+    "broadcastSeparatelyApproved": null
+  },
+  "v1Boundary": {
+    "custodiedRedemptionOnly": null,
+    "controller": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "unchanged": null
+    },
+    "batchSettler": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "unchanged": null,
+      "adapterOnboardedBefore": null,
+      "adapterOnboardedAfter": null
+    },
+    "onlyExpectedMutationObserved": null
+  },
+  "topology": {
+    "allAddressesHaveCode": null,
+    "proxyImplementationsMatchManifest": null,
+    "fundModulesPointToExpectedVault": null,
+    "authoritiesMatchAccessManager": null,
+    "adapterPointsToExpectedFundAndStrategyManager": null,
+    "valuatorsAndEscrowsMatchManifest": null,
+    "escrowsReleaseOnlyToFund": null
+  },
+  "accessManager": {
+    "roleAccountsMatchManifest": null,
+    "memberExecutionDelaysMatchMatrix": null,
+    "grantDelaysMatchMatrix": null,
+    "selectorRolesMatchMatrix": null,
+    "targetAdminDelaysMatchMatrix": null,
+    "curatorGuardianRoleMatchesMatrix": null
+  },
+  "policy": {
+    "valuesMatchApprovedB1N346Artifact": null,
+    "reporterSetConfigured": null,
+    "idleComponentActive": null,
+    "cspComponentActive": null,
+    "exitPolicyConfigured": null,
+    "strategyEscrowsConfigured": null,
+    "minimumIdleConfigured": null,
+    "strategyConfiguredInactiveBeforeOnboarding": null,
+    "strategyActiveAfterAuthorizedActivation": null
+  },
+  "state": {
+    "nav": {
+      "reportAccepted": null,
+      "activationDelayObserved": null,
+      "activeWindowValid": null
+    },
+    "balances": {
+      "vaultAccountingAsset": null,
+      "adapterAccountingAsset": null,
+      "adapterWeth": null,
+      "claimEscrowAccountingAsset": null,
+      "inKindEscrowAssets": {},
+      "emergencyEscrowAssets": {}
+    },
+    "shares": {
+      "totalSupply": null,
+      "sumOfKnownBalances": null,
+      "supplyReconciled": null
+    },
+    "redemptions": {
+      "pendingShares": null,
+      "claimableShares": null,
+      "reservedAssets": null,
+      "escrowedAssets": null,
+      "reconciled": null
+    }
+  },
+  "smokeTests": {
+    "deposit": "NOT_RUN",
+    "nav": "NOT_RUN",
+    "allocation": "NOT_RUN",
+    "redeemRequest": "NOT_RUN",
+    "cancellation": "NOT_RUN"
+  }
+}
