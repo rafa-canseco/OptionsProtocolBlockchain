@@ -44,6 +44,9 @@
     "escrowsReleaseOnlyToFund": null
   },
   "accessManager": {
+    "accessExecutionTimestamp": null,
+    "minimumSetbackSeconds": 432000,
+    "targetAdminDelayEffectiveAfter": null,
     "roleAccountsMatchManifest": null,
     "memberExecutionDelaysMatchMatrix": null,
     "grantDelaysMatchMatrix": null,
@@ -53,12 +56,13 @@
   },
   "policy": {
     "valuesMatchApprovedB1N346Artifact": null,
-    "reporterSetConfigured": null,
-    "idleComponentActive": null,
-    "cspComponentActive": null,
-    "exitPolicyConfigured": null,
-    "strategyEscrowsConfigured": null,
-    "minimumIdleConfigured": null,
+    "reporterSetAndThresholdMatch": null,
+    "accountingComponentsAndValuatorMatch": null,
+    "navAndFeePolicyMatch": null,
+    "exitPolicyAndStrategyEscrowsMatch": null,
+    "minimumIdleAndStrategyLimitsMatch": null,
+    "adapterRiskRouterAndFeeTierMatch": null,
+    "valuatorFeedObserversQuorumAndBufferMatch": null,
     "strategyConfiguredInactiveBeforeOnboarding": null,
     "strategyActiveAfterAuthorizedActivation": null
   },

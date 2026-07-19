@@ -77,6 +77,38 @@
   },
   {
     "type": "function",
+    "name": "activeReporterAt",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "activeReporterCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "authority",
     "inputs": [],
     "outputs": [
@@ -393,6 +425,29 @@
     "outputs": [
       {
         "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "navPolicy",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "activationDelay",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "maxSnapshotAge",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "maxWindowLength",
         "type": "uint64",
         "internalType": "uint64"
       }

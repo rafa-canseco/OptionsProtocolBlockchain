@@ -57,6 +57,21 @@
       "script": "ExecuteB1N352Activation",
       "hashes": [],
       "status": "not-authorized"
+    },
+    {
+      "phase": "reconciliation",
+      "label": "wait-for-target-admin-delay-effect",
+      "condition": "execute-access-operations timestamp + AccessManager.minSetback()",
+      "expectedEarliestOffsetSeconds": 691200,
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "reconciliation",
+      "label": "strict-read-only-reconciliation",
+      "script": "ReconcileB1N352Deployment",
+      "hashes": [],
+      "status": "not-authorized"
     }
   ]
 }

@@ -10,7 +10,8 @@ Before any command is run with `--broadcast`:
 
 1. B1N-346 must provide an approved, versioned policy artifact and go decision.
 2. `PreflightB1N352BaseSepolia` must confirm the selected V1 wiring, WETH/USDC product configuration, and `custodiedRedemptionOnly() == true`.
-3. Controller and BatchSettler implementation addresses and codehashes must be captured before any permitted onboarding call.
+3. The approved Controller and BatchSettler implementation addresses and codehashes must be supplied as expected
+   values. Preflight, deployment, and onboarding all fail before any broadcast if the live baseline differs.
 4. A separate user approval is required before adding `--broadcast`, onboarding the adapter, or activating StrategyManager.
 
 ## Local checks
@@ -37,7 +38,13 @@ Deployment and governance scripts are deliberately split into resumable phases:
 3. `ScheduleB1N352Policy` / wait 24h / `ExecuteB1N352Policy` — strategy remains inactive
 4. `OnboardB1N352Adapter` — the only permitted V1 mutation
 5. `ScheduleB1N352Activation` / wait 24h / `ExecuteB1N352Activation`
-6. `ReconcileB1N352Deployment`
+6. Wait until the access execution timestamp plus `AccessManager.minSetback()` (five days), then run
+   `ReconcileB1N352Deployment`.
+
+With access scheduled at T+0 and executed at T+72h, its `setTargetAdminDelay` changes do not become effective until
+T+192h (approximately day 8). Policy execution around day 4 and activation around day 5 can still proceed under their
+own delays, but strict reconciliation intentionally fails until the adapter and both strategy escrows report the final
+target admin delay.
 
 Running any script without `--broadcast` is a simulation. Do not add `--broadcast` until the separate authorization recorded in B1N-352.
 

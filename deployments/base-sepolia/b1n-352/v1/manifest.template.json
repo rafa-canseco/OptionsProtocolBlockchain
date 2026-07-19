@@ -64,6 +64,19 @@
     "navActivationDelayBlocks": null,
     "maxSnapshotAgeBlocks": null,
     "maxNavWindowLengthBlocks": null,
+    "reporterSet": {
+      "version": null,
+      "threshold": null,
+      "reporters": []
+    },
+    "accountingComponents": {
+      "idle": {"componentId": "keccak256(IDLE_ACCOUNTING_ASSET)", "interfaceVersion": 1, "valuator": null},
+      "csp": {"componentId": "keccak256(STRATEGY,adapter)", "interfaceVersion": null, "valuator": "TO_BE_FILLED"}
+    },
+    "strategyEscrows": {
+      "inKind": "TO_BE_FILLED",
+      "emergency": "TO_BE_FILLED"
+    },
     "strategy": {
       "active": false,
       "maxAllocationBps": null,
@@ -72,6 +85,17 @@
       "absoluteCap": null
     },
     "adapterRisk": "TO_BE_COPIED_EXACTLY_FROM_APPROVED_CONFIG",
+    "adapterRouter": "TO_BE_COPIED_EXACTLY_FROM_APPROVED_CONFIG",
+    "adapterSwapFeeTier": null,
+    "valuator": {
+      "spotFeed": "TO_BE_COPIED_EXACTLY_FROM_APPROVED_CONFIG",
+      "spotFeedDecimals": null,
+      "maxSpotStalenessSeconds": null,
+      "maxObservationWindowBlocks": null,
+      "observationQuorum": null,
+      "liabilityBufferBps": null,
+      "approvedObservers": []
+    },
     "fees": "TO_BE_COPIED_EXACTLY_FROM_APPROVED_CONFIG"
   },
   "roles": {
