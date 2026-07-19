@@ -55,7 +55,15 @@ contract AccessPolicySpecTest is Test {
         manager.grantRole(FundConstants.CURATOR_ROLE, curator, FundConstants.CURATOR_DELAY);
         manager.grantRole(FundConstants.ALLOCATOR_ROLE, allocator, 0);
         manager.grantRole(FundConstants.UPGRADER_ROLE, upgrader, FundConstants.CORE_UPGRADE_DELAY);
+        manager.grantRole(FundConstants.ADAPTER_UPGRADER_ROLE, upgrader, FundConstants.ADAPTER_UPGRADE_DELAY);
         manager.setRoleGuardian(FundConstants.CURATOR_ROLE, FundConstants.GUARDIAN_ROLE);
+    }
+
+    function test_adapterUpgradeUsesIndependentDelayRole() public pure {
+        FundAccessPolicy.Rule[] memory rules = FundAccessPolicy.cspAdapterRules();
+        assertEq(rules[0].selector, bytes4(keccak256("upgradeToAndCall(address,bytes)")));
+        assertEq(rules[0].role, FundConstants.ADAPTER_UPGRADER_ROLE);
+        assertEq(rules[0].executionDelay, FundConstants.ADAPTER_UPGRADE_DELAY);
     }
 
     function test_guardianCanPauseImmediatelyButCannotResume() public {

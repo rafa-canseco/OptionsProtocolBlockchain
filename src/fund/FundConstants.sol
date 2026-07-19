@@ -27,6 +27,7 @@ library FundConstants {
     uint64 internal constant CURATOR_ROLE = 5;
     uint64 internal constant GUARDIAN_ROLE = 6;
     uint64 internal constant REPORTER_ROLE = 7;
+    uint64 internal constant ADAPTER_UPGRADER_ROLE = 8;
 
     uint32 internal constant CORE_UPGRADE_DELAY = 72 hours;
     uint32 internal constant ADAPTER_UPGRADE_DELAY = 48 hours;

@@ -198,6 +198,7 @@ contract FundFactory is Ownable {
         manager.setRoleGuardian(FundConstants.CURATOR_ROLE, FundConstants.GUARDIAN_ROLE);
         manager.setGrantDelay(manager.ADMIN_ROLE(), FundConstants.CORE_UPGRADE_DELAY);
         manager.setGrantDelay(FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
+        manager.setGrantDelay(FundConstants.ADAPTER_UPGRADER_ROLE, FundConstants.ADAPTER_UPGRADE_DELAY);
         manager.setGrantDelay(FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
         manager.setTargetAdminDelay(shareProxy, FundConstants.CORE_UPGRADE_DELAY);
         manager.setTargetAdminDelay(vaultProxy, FundConstants.CORE_UPGRADE_DELAY);
@@ -206,6 +207,9 @@ contract FundFactory is Ownable {
         manager.setTargetAdminDelay(strategyProxy, FundConstants.CORE_UPGRADE_DELAY);
 
         manager.grantRole(FundConstants.UPGRADER_ROLE, params.roles.upgrader, FundConstants.CORE_UPGRADE_DELAY);
+        manager.grantRole(
+            FundConstants.ADAPTER_UPGRADER_ROLE, params.roles.upgrader, FundConstants.ADAPTER_UPGRADE_DELAY
+        );
         manager.grantRole(FundConstants.ACCOUNTING_ROLE, params.roles.accounting, 0);
         manager.grantRole(FundConstants.ALLOCATOR_ROLE, params.roles.allocator, 0);
         manager.grantRole(FundConstants.PROCESSOR_ROLE, params.roles.processor, 0);
