@@ -153,6 +153,8 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
         console2.log("FUND_CSP_ADAPTER_OPERATIONS_CODEHASH");
         console2.logBytes32(deployed.cspAdapterOperations.codehash);
         console2.log("FUND_CSP_ADAPTER_IMPLEMENTATION", deployed.cspFundAdapterImplementation);
+        console2.log("FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH");
+        console2.logBytes32(deployed.cspFundAdapterImplementation.codehash);
         console2.log("FUND_CSP_ADAPTER_PROXY", deployed.cspFundAdapterProxy);
         console2.log("FUND_CSP_VALUATOR", deployed.cspFundValuator);
         console2.log("FUND_IN_KIND_STRATEGY_ESCROW", deployed.inKindStrategyEscrow);

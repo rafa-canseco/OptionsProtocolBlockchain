@@ -42,6 +42,10 @@ contract B1N352DeployHarness is DeployTokenizedCspFundBaseSepolia {
     function envUint16(string memory key) external view returns (uint16) {
         return _envUint16(key);
     }
+
+    function requireExpectedImplementationCodehash(address proxy, string memory envKey) external view {
+        _requireExpectedImplementationCodehash(proxy, envKey, "B1N352: test implementation hash");
+    }
 }
 
 contract B1N352OperationsHarness is B1N352Operations {
@@ -66,6 +70,47 @@ contract B1N352OperationsHarness is B1N352Operations {
         view
     {
         _verifyDeployedPolicy(deployConfig, policyConfig, active);
+    }
+
+    function scheduleOperations(
+        AccessManager manager,
+        Operation[] memory operations,
+        uint256 callerKey,
+        bool phaseFinalized
+    ) external {
+        _scheduleOperations(manager, operations, callerKey, phaseFinalized);
+    }
+
+    function restartOperations(
+        AccessManager manager,
+        Operation[] memory operations,
+        address scheduledCaller,
+        uint256 restartCallerKey,
+        bool phaseFinalized
+    ) external {
+        _restartOperations(manager, operations, scheduledCaller, restartCallerKey, phaseFinalized);
+    }
+
+    function executeOperations(
+        AccessManager manager,
+        Operation[] memory operations,
+        uint256 callerKey,
+        bool phaseFinalized
+    ) external {
+        _executeOperations(manager, operations, callerKey, phaseFinalized);
+    }
+
+    function cancelOperations(
+        AccessManager manager,
+        Operation[] memory operations,
+        address scheduledCaller,
+        uint256 cancelerKey
+    ) external {
+        _cancelOperations(manager, operations, scheduledCaller, cancelerKey);
+    }
+
+    function isPolicyPhaseFinalized(PolicyConfig memory config) external view returns (bool) {
+        return _isPolicyPhaseFinalized(config);
     }
 }
 
@@ -178,9 +223,7 @@ contract B1N352DeploymentTest is Test {
     }
 
     function test_expectedV1BaselineRejectsStructurallyValidWrongImplementation() public {
-        address controllerImplementation = _implementation(addressBook.controller());
-        address settlerImplementation = _implementation(addressBook.batchSettler());
-        _setExpectedV1Baseline(controllerImplementation, settlerImplementation);
+        _setExpectedV1Baseline();
         deployHarness.requireExpectedV1Baseline(address(addressBook));
 
         vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_PROXY", vm.toString(address(new Controller())));
@@ -193,6 +236,27 @@ contract B1N352DeploymentTest is Test {
         vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_CODEHASH", vm.toString(wrongControllerImplementation.codehash));
         vm.expectRevert(bytes("B1N352: controller implementation"));
         deployHarness.requireExpectedV1Baseline(address(addressBook));
+
+        _setExpectedV1Baseline();
+        vm.setEnv("FUND_EXPECTED_V1_ORACLE_PROXY", vm.toString(address(new Oracle())));
+        vm.expectRevert(bytes("B1N352: oracle proxy"));
+        deployHarness.requireExpectedV1Baseline(address(addressBook));
+    }
+
+    function test_linkedAdapterRequiresCompleteImplementationCodehash() public {
+        B1N352Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(_deployConfig());
+        vm.setEnv(
+            "FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH", vm.toString(deployed.cspFundAdapterImplementation.codehash)
+        );
+        deployHarness.requireExpectedImplementationCodehash(
+            deployed.cspFundAdapterProxy, "FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH"
+        );
+
+        vm.setEnv("FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH", vm.toString(bytes32(uint256(1))));
+        vm.expectRevert(bytes("B1N352: test implementation hash"));
+        deployHarness.requireExpectedImplementationCodehash(
+            deployed.cspFundAdapterProxy, "FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH"
+        );
     }
 
     function test_envDowncastRevertsInsteadOfWrapping() public {
@@ -243,6 +307,59 @@ contract B1N352DeploymentTest is Test {
         assertEq(FundAccounting(deployed.fundAccountingProxy).reporterSetVersion(), 0);
         assertGt(manager.getSchedule(firstId), 0);
         assertGt(manager.getSchedule(secondId), 0);
+    }
+
+    function test_completedPolicyPhaseIsIdempotentAndCannotBeScheduledAgain() public {
+        uint256 phaseKey = 0xB1A352;
+        address phaseCaller = vm.addr(phaseKey);
+        B1N352Base.DeployConfig memory deployConfig = _deployConfig();
+        deployConfig.roles = _roleAccounts(phaseCaller);
+        B1N352Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(deployConfig);
+        FundAccessManager manager = FundAccessManager(deployed.accessManager);
+        B1N352Operations.PolicyConfig memory policy = _policyConfig(deployed);
+        B1N352Operations.Operation[] memory operations = operationsHarness.policyOperations(policy);
+
+        operationsHarness.scheduleOperations(manager, operations, phaseKey, false);
+        vm.warp(block.timestamp + FundConstants.CURATOR_DELAY);
+        operationsHarness.executeOperations(manager, operations, phaseKey, false);
+        assertTrue(operationsHarness.isPolicyPhaseFinalized(policy));
+
+        bytes32 firstId = manager.hashOperation(phaseCaller, operations[0].target, operations[0].data);
+        uint32 nonce = manager.getNonce(firstId);
+        operationsHarness.scheduleOperations(manager, operations, phaseKey, true);
+        assertEq(manager.getNonce(firstId), nonce);
+        assertEq(manager.getSchedule(firstId), 0);
+
+        vm.prank(phaseCaller);
+        StrategyManager(deployed.strategyManagerProxy).reduceStrategyCap(policy.adapter, 500e6, 2_500);
+        assertTrue(operationsHarness.isPolicyPhaseFinalized(policy));
+        operationsHarness.scheduleOperations(manager, operations, phaseKey, true);
+        assertEq(manager.getNonce(firstId), nonce);
+    }
+
+    function test_partialCancellationCanBeAtomicallyClearedAndExplicitlyRestarted() public {
+        uint256 phaseKey = 0xB1A353;
+        address phaseCaller = vm.addr(phaseKey);
+        B1N352Base.DeployConfig memory deployConfig = _deployConfig();
+        deployConfig.roles = _roleAccounts(phaseCaller);
+        B1N352Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(deployConfig);
+        FundAccessManager manager = FundAccessManager(deployed.accessManager);
+        B1N352Operations.Operation[] memory operations = operationsHarness.policyOperations(_policyConfig(deployed));
+
+        operationsHarness.scheduleOperations(manager, operations, phaseKey, false);
+        vm.prank(phaseCaller);
+        manager.cancel(phaseCaller, operations[0].target, operations[0].data);
+
+        vm.expectRevert(bytes("B1N352: partial phase schedule"));
+        operationsHarness.scheduleOperations(manager, operations, phaseKey, false);
+        vm.expectRevert(bytes("B1N352: restart caller differs"));
+        operationsHarness.restartOperations(manager, operations, phaseCaller, phaseKey + 1, false);
+        operationsHarness.restartOperations(manager, operations, phaseCaller, phaseKey, false);
+        for (uint256 i; i < operations.length; ++i) {
+            bytes32 operationId = manager.hashOperation(phaseCaller, operations[i].target, operations[i].data);
+            assertGt(manager.getSchedule(operationId), 0);
+            assertEq(manager.getNonce(operationId), 2);
+        }
     }
 
     function test_reconciliationRejectsAdditionalRegisteredAdapterAfterItsAccountingComponentIsDisabled() public {
@@ -476,14 +593,34 @@ contract B1N352DeploymentTest is Test {
         operationsHarness.verifyDeployedPolicy(deployConfig, policy, true);
     }
 
-    function _setExpectedV1Baseline(address controllerImplementation, address settlerImplementation) private {
+    function _setExpectedV1Baseline() private {
         vm.setEnv("FUND_EXPECTED_V1_ADDRESS_BOOK", vm.toString(address(addressBook)));
-        vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_PROXY", vm.toString(addressBook.controller()));
-        vm.setEnv("FUND_EXPECTED_V1_BATCH_SETTLER_PROXY", vm.toString(addressBook.batchSettler()));
-        vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_IMPLEMENTATION", vm.toString(controllerImplementation));
-        vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_CODEHASH", vm.toString(controllerImplementation.codehash));
-        vm.setEnv("FUND_EXPECTED_V1_BATCH_SETTLER_IMPLEMENTATION", vm.toString(settlerImplementation));
-        vm.setEnv("FUND_EXPECTED_V1_BATCH_SETTLER_CODEHASH", vm.toString(settlerImplementation.codehash));
+        _setExpectedProxyBaseline("FUND_EXPECTED_V1_ADDRESS_BOOK", address(addressBook), false);
+        _setExpectedProxyBaseline("FUND_EXPECTED_V1_CONTROLLER", addressBook.controller(), true);
+        _setExpectedProxyBaseline("FUND_EXPECTED_V1_MARGIN_POOL", addressBook.marginPool(), true);
+        _setExpectedProxyBaseline("FUND_EXPECTED_V1_OTOKEN_FACTORY", addressBook.oTokenFactory(), true);
+        _setExpectedProxyBaseline("FUND_EXPECTED_V1_ORACLE", addressBook.oracle(), true);
+        _setExpectedProxyBaseline("FUND_EXPECTED_V1_WHITELIST", addressBook.whitelist(), true);
+        _setExpectedProxyBaseline("FUND_EXPECTED_V1_BATCH_SETTLER", addressBook.batchSettler(), true);
+    }
+
+    function _setExpectedProxyBaseline(string memory prefix, address proxy, bool setProxy) private {
+        if (setProxy) vm.setEnv(string.concat(prefix, "_PROXY"), vm.toString(proxy));
+        address implementation = _implementation(proxy);
+        vm.setEnv(string.concat(prefix, "_IMPLEMENTATION"), vm.toString(implementation));
+        vm.setEnv(string.concat(prefix, "_CODEHASH"), vm.toString(implementation.codehash));
+    }
+
+    function _roleAccounts(address account) private pure returns (FundFactory.RoleAccounts memory roles) {
+        roles = FundFactory.RoleAccounts({
+            admin: account,
+            upgrader: account,
+            accounting: account,
+            allocator: account,
+            processor: account,
+            curator: account,
+            guardian: account
+        });
     }
 
     function _scheduleAndExecute(AccessManager manager, B1N352Operations.Operation[] memory operations, uint256 delay)

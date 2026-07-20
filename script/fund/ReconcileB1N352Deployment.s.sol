@@ -58,7 +58,7 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
         require(strategy.authority() == address(manager), "B1N352: strategy authority");
         require(adapter.authority() == address(manager), "B1N352: adapter authority");
 
-        _verifyImmutableArtifacts(deployConfig, vault, accounting, flow, adapter, manager);
+        _verifyImmutableArtifacts(deployConfig, vault, accounting, flow, manager);
 
         _verifyProxy("FUND_VAULT_IMPLEMENTATION", address(vault));
         _verifyProxy("FUND_SHARE_IMPLEMENTATION", address(share));
@@ -66,6 +66,9 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
         _verifyProxy("FUND_FLOW_MANAGER_IMPLEMENTATION", address(flow));
         _verifyProxy("FUND_STRATEGY_MANAGER_IMPLEMENTATION", address(strategy));
         _verifyProxy("FUND_CSP_ADAPTER_IMPLEMENTATION", address(adapter));
+        _requireExpectedImplementationCodehash(
+            address(adapter), "FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH", "B1N352: adapter implementation hash"
+        );
 
         address inKindEscrow = vm.envAddress("FUND_IN_KIND_STRATEGY_ESCROW");
         address emergencyEscrow = vm.envAddress("FUND_EMERGENCY_STRATEGY_ESCROW");
@@ -99,7 +102,6 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
         FundVault vault,
         FundAccounting accounting,
         FundFlowManager flow,
-        CspFundAdapter adapter,
         FundAccessManager manager
     ) private view {
         address navVerifier = vm.envAddress("FUND_NAV_REPORT_VERIFIER");
@@ -124,9 +126,6 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
         require(
             operations.codehash == vm.envBytes32("FUND_CSP_ADAPTER_OPERATIONS_CODEHASH"),
             "B1N352: adapter operations hash"
-        );
-        require(
-            _codeContainsAddress(_implementationOf(address(adapter)), operations), "B1N352: adapter operations binding"
         );
         require(
             address(manager).codehash == vm.envBytes32("FUND_ACCESS_MANAGER_CODEHASH"), "B1N352: access manager hash"
@@ -338,23 +337,6 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
         require(proxy.code.length != 0, "B1N352: proxy code");
         require(_implementationOf(proxy) == expectedImplementation, "B1N352: proxy implementation");
         require(expectedImplementation.code.length != 0, "B1N352: implementation code");
-    }
-
-    function _codeContainsAddress(address target, address expectedAddress) private view returns (bool) {
-        bytes memory code = target.code;
-        bytes20 expected = bytes20(expectedAddress);
-        if (code.length < 20) return false;
-        for (uint256 i; i <= code.length - 20; ++i) {
-            bool matches = true;
-            for (uint256 j; j < 20; ++j) {
-                if (code[i + j] != expected[j]) {
-                    matches = false;
-                    break;
-                }
-            }
-            if (matches) return true;
-        }
-        return false;
     }
 }
 

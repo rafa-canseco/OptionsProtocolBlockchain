@@ -3,6 +3,7 @@ pragma solidity 0.8.24;
 
 import {console2} from "forge-std/console2.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import {FundAccessManager} from "../../src/fund/FundAccessManager.sol";
 import {FundAccounting} from "../../src/fund/FundAccounting.sol";
 import {FundFlowManager} from "../../src/fund/FundFlowManager.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
@@ -186,7 +187,7 @@ abstract contract B1N352Operations is B1N352Base {
     {
         StrategyManager strategyManager = StrategyManager(strategyManager_);
         FundTypes.StrategyConfig memory config = strategyManager.strategyConfig(adapter);
-        require(config.interfaceVersion != 0 && !config.active, "B1N352: activation state");
+        require(config.interfaceVersion != 0, "B1N352: activation state");
         operation = Operation({
             target: strategyManager_,
             data: abi.encodeCall(strategyManager.resumeAllocation, (adapter)),
@@ -301,21 +302,100 @@ abstract contract B1N352Operations is B1N352Base {
         }
     }
 
-    function _scheduleOperations(AccessManager manager, Operation[] memory operations, uint256 callerKey) internal {
+    function _isAccessPhaseFinalized(
+        FundAccessManager manager,
+        address adapter,
+        address inKindEscrow,
+        address emergencyEscrow
+    ) internal view returns (bool) {
+        return manager.configuredSelectorCount(adapter) == 2
+            && manager.getTargetFunctionRole(adapter, FundAccessPolicy.UPGRADE_TO_AND_CALL_SELECTOR)
+                == FundConstants.ADAPTER_UPGRADER_ROLE
+            && manager.getTargetFunctionRole(adapter, ICspFundAdapter.setAdapterConfig.selector)
+                == FundConstants.CURATOR_ROLE && _isTargetAdminDelayConfigured(manager, adapter)
+            && manager.configuredSelectorCount(inKindEscrow) == 1
+            && manager.getTargetFunctionRole(inKindEscrow, IStrategyAssetEscrow.releaseToFund.selector)
+                == FundConstants.CURATOR_ROLE && _isTargetAdminDelayConfigured(manager, inKindEscrow)
+            && manager.configuredSelectorCount(emergencyEscrow) == 1
+            && manager.getTargetFunctionRole(emergencyEscrow, IStrategyAssetEscrow.releaseToFund.selector)
+                == FundConstants.CURATOR_ROLE && _isTargetAdminDelayConfigured(manager, emergencyEscrow);
+    }
+
+    function _isPolicyPhaseFinalized(PolicyConfig memory config) internal view returns (bool) {
+        FundAccounting accounting = FundAccounting(config.accounting);
+        if (
+            accounting.reporterSetVersion() != config.reporterSetVersion
+                || accounting.reporterThreshold() != config.reporterThreshold
+                || accounting.activeReporterCount() != config.reporters.length
+        ) return false;
+        for (uint256 i; i < config.reporters.length; ++i) {
+            if (accounting.activeReporterAt(i) != config.reporters[i] || !accounting.isReporter(config.reporters[i])) {
+                return false;
+            }
+        }
+
+        bytes32 cspComponentId = keccak256(abi.encodePacked("STRATEGY", config.adapter));
+        if (
+            accounting.activeComponentCount() != 2 || accounting.activeComponentAt(0) != FundConstants.IDLE_COMPONENT_ID
+                || accounting.activeComponentAt(1) != cspComponentId
+        ) return false;
+        FundAccounting.ComponentState memory idle = accounting.componentState(FundConstants.IDLE_COMPONENT_ID);
+        FundAccounting.ComponentState memory csp = accounting.componentState(cspComponentId);
+        if (
+            idle.valuator != address(0) || idle.interfaceVersion != 1 || !idle.active || csp.valuator != config.valuator
+                || csp.interfaceVersion != config.adapterInterfaceVersion || !csp.active
+        ) return false;
+
+        FundFlowManager flowManager = FundFlowManager(config.flowManager);
+        (uint16 maxExitFeeBps, uint16 maxWindowOutflowBps) = flowManager.exitPolicy();
+        (address inKindEscrow, address emergencyEscrow) = flowManager.strategyExitEscrows();
+        if (
+            maxExitFeeBps != config.maxExitFeeBps || maxWindowOutflowBps != config.maxWindowOutflowBps
+                || inKindEscrow != config.inKindEscrow || emergencyEscrow != config.emergencyEscrow
+        ) return false;
+
+        StrategyManager strategyManager = StrategyManager(config.strategyManager);
+        FundTypes.StrategyConfig memory strategy = strategyManager.strategyConfig(config.adapter);
+        return strategyManager.activeAdapterCount() == 1 && strategyManager.activeAdapterAt(0) == config.adapter
+            && strategyManager.minimumIdleBps() == config.minimumIdleBps
+            && strategy.maxAllocationBps <= config.maxAllocationBps && strategy.maxLossBps == config.maxLossBps
+            && strategy.cooldown == config.cooldown && strategy.interfaceVersion == config.adapterInterfaceVersion
+            && strategy.valuator == config.valuator && strategy.absoluteCap <= config.absoluteCap;
+    }
+
+    function _isActivationPhaseFinalized(address strategyManager, address adapter) internal view returns (bool) {
+        return StrategyManager(strategyManager).strategyConfig(adapter).active;
+    }
+
+    function _scheduleOperations(
+        AccessManager manager,
+        Operation[] memory operations,
+        uint256 callerKey,
+        bool phaseFinalized
+    ) internal {
+        require(operations.length != 0, "B1N352: empty phase");
         address caller = vm.addr(callerKey);
         bytes[] memory calls = new bytes[](operations.length);
         uint256 scheduledCount;
+        uint256 seenCount;
         for (uint256 i; i < operations.length; ++i) {
             bytes32 operationId = manager.hashOperation(caller, operations[i].target, operations[i].data);
             uint48 readyAt = manager.getSchedule(operationId);
+            if (manager.getNonce(operationId) != 0) ++seenCount;
             if (readyAt != 0) {
                 ++scheduledCount;
                 _logScheduledOperation(operations[i], operationId, manager.getNonce(operationId), readyAt);
             }
             calls[i] = abi.encodeCall(manager.schedule, (operations[i].target, operations[i].data, uint48(0)));
         }
+        if (phaseFinalized) {
+            require(scheduledCount == 0, "B1N352: finalized phase still scheduled");
+            console2.log("PHASE_ALREADY_FINALIZED");
+            return;
+        }
         require(scheduledCount == 0 || scheduledCount == operations.length, "B1N352: partial phase schedule");
         if (scheduledCount == operations.length) return;
+        require(seenCount == 0, "B1N352: explicit phase restart required");
 
         vm.startBroadcast(callerKey);
         bytes[] memory results = manager.multicall(calls);
@@ -327,15 +407,80 @@ abstract contract B1N352Operations is B1N352Base {
         }
     }
 
-    function _executeOperations(AccessManager manager, Operation[] memory operations, uint256 callerKey) internal {
+    function _restartOperations(
+        AccessManager manager,
+        Operation[] memory operations,
+        address scheduledCaller,
+        uint256 restartCallerKey,
+        bool phaseFinalized
+    ) internal {
+        require(operations.length != 0, "B1N352: empty phase");
+        require(scheduledCaller != address(0), "B1N352: zero phase scheduler");
+        require(vm.addr(restartCallerKey) == scheduledCaller, "B1N352: restart caller differs");
+        require(!phaseFinalized, "B1N352: phase already finalized");
+
+        uint256 liveCount;
+        uint256 seenCount;
+        for (uint256 i; i < operations.length; ++i) {
+            bytes32 operationId = manager.hashOperation(scheduledCaller, operations[i].target, operations[i].data);
+            if (manager.getNonce(operationId) != 0) ++seenCount;
+            if (manager.getSchedule(operationId) != 0) ++liveCount;
+        }
+        require(seenCount == operations.length, "B1N352: inconsistent phase nonce history");
+
+        bytes[] memory calls = new bytes[](liveCount + operations.length);
+        uint256 cursor;
+        for (uint256 i; i < operations.length; ++i) {
+            bytes32 operationId = manager.hashOperation(scheduledCaller, operations[i].target, operations[i].data);
+            if (manager.getSchedule(operationId) == 0) continue;
+            calls[cursor++] =
+                abi.encodeCall(manager.cancel, (scheduledCaller, operations[i].target, operations[i].data));
+        }
+        for (uint256 i; i < operations.length; ++i) {
+            calls[cursor++] = abi.encodeCall(manager.schedule, (operations[i].target, operations[i].data, uint48(0)));
+        }
+
+        vm.startBroadcast(restartCallerKey);
+        bytes[] memory results = manager.multicall(calls);
+        vm.stopBroadcast();
+
+        address restartCaller = vm.addr(restartCallerKey);
+        for (uint256 i; i < operations.length; ++i) {
+            (bytes32 operationId, uint32 nonce) = abi.decode(results[liveCount + i], (bytes32, uint32));
+            require(
+                operationId == manager.hashOperation(restartCaller, operations[i].target, operations[i].data),
+                "B1N352: restarted operation id"
+            );
+            _logScheduledOperation(operations[i], operationId, nonce, manager.getSchedule(operationId));
+        }
+        console2.log("PHASE_ATOMICALLY_RESTARTED");
+    }
+
+    function _executeOperations(
+        AccessManager manager,
+        Operation[] memory operations,
+        uint256 callerKey,
+        bool phaseFinalized
+    ) internal {
+        require(operations.length != 0, "B1N352: empty phase");
         address caller = vm.addr(callerKey);
         bytes[] memory calls = new bytes[](operations.length);
+        uint256 scheduledCount;
         for (uint256 i; i < operations.length; ++i) {
             bytes32 operationId = manager.hashOperation(caller, operations[i].target, operations[i].data);
             uint48 readyAt = manager.getSchedule(operationId);
-            require(readyAt != 0, "B1N352: phase operation not scheduled");
-            require(readyAt <= block.timestamp, "B1N352: phase operation not ready");
+            if (readyAt != 0) ++scheduledCount;
             calls[i] = abi.encodeCall(manager.execute, (operations[i].target, operations[i].data));
+        }
+        if (phaseFinalized) {
+            require(scheduledCount == 0, "B1N352: finalized phase still scheduled");
+            console2.log("PHASE_ALREADY_FINALIZED");
+            return;
+        }
+        require(scheduledCount == operations.length, "B1N352: phase operation not scheduled");
+        for (uint256 i; i < operations.length; ++i) {
+            bytes32 operationId = manager.hashOperation(caller, operations[i].target, operations[i].data);
+            require(manager.getSchedule(operationId) <= block.timestamp, "B1N352: phase operation not ready");
         }
 
         vm.startBroadcast(callerKey);
@@ -347,6 +492,57 @@ abstract contract B1N352Operations is B1N352Base {
             console2.logBytes32(operations[i].label);
             console2.log("EXECUTED_OPERATION_TARGET", operations[i].target);
         }
+    }
+
+    function _cancelOperations(
+        AccessManager manager,
+        Operation[] memory operations,
+        address scheduledCaller,
+        uint256 cancelerKey
+    ) internal {
+        require(operations.length != 0, "B1N352: empty phase");
+        require(scheduledCaller != address(0), "B1N352: zero phase scheduler");
+        uint256 scheduledCount;
+        for (uint256 i; i < operations.length; ++i) {
+            bytes32 operationId = manager.hashOperation(scheduledCaller, operations[i].target, operations[i].data);
+            if (manager.getSchedule(operationId) != 0) ++scheduledCount;
+        }
+        if (scheduledCount == 0) {
+            console2.log("PHASE_HAS_NO_LIVE_SCHEDULES");
+            return;
+        }
+
+        bytes[] memory calls = new bytes[](scheduledCount);
+        uint256 cursor;
+        for (uint256 i; i < operations.length; ++i) {
+            bytes32 operationId = manager.hashOperation(scheduledCaller, operations[i].target, operations[i].data);
+            if (manager.getSchedule(operationId) == 0) continue;
+            calls[cursor++] =
+                abi.encodeCall(manager.cancel, (scheduledCaller, operations[i].target, operations[i].data));
+        }
+
+        vm.startBroadcast(cancelerKey);
+        manager.multicall(calls);
+        vm.stopBroadcast();
+
+        for (uint256 i; i < operations.length; ++i) {
+            bytes32 operationId = manager.hashOperation(scheduledCaller, operations[i].target, operations[i].data);
+            require(manager.getSchedule(operationId) == 0, "B1N352: phase cancellation incomplete");
+        }
+        console2.log("PHASE_LIVE_SCHEDULES_CANCELED", scheduledCount);
+    }
+
+    function _phaseSchedulerKey() internal view returns (uint256 callerKey) {
+        callerKey = vm.envUint("PRIVATE_KEY");
+        require(vm.addr(callerKey) == vm.envAddress("FUND_PHASE_SCHEDULER"), "B1N352: phase scheduler key");
+    }
+
+    function _isTargetAdminDelayConfigured(FundAccessManager manager, address target) private view returns (bool) {
+        (uint32 currentDelay, uint32 pendingDelay, uint48 effect) = manager.getTargetAdminDelayFull(target);
+        if (currentDelay == FundConstants.CORE_UPGRADE_DELAY) {
+            return pendingDelay == 0 && effect == 0;
+        }
+        return pendingDelay == FundConstants.CORE_UPGRADE_DELAY && effect > block.timestamp;
     }
 
     function _logScheduledOperation(Operation memory operation, bytes32 operationId, uint32 nonce, uint48 readyAt)

@@ -7,7 +7,6 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {AddressBook} from "../../src/core/AddressBook.sol";
 import {BatchSettler} from "../../src/core/BatchSettler.sol";
-import {Controller} from "../../src/core/Controller.sol";
 import {Oracle} from "../../src/core/Oracle.sol";
 import {Whitelist} from "../../src/core/Whitelist.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
@@ -188,45 +187,102 @@ abstract contract B1N352Base is Script {
         return address(uint160(uint256(vm.load(proxy, ERC1967_IMPLEMENTATION_SLOT))));
     }
 
+    function _requireExpectedImplementationCodehash(
+        address proxy,
+        string memory expectedCodehashEnv,
+        string memory errorMessage
+    ) internal view {
+        require(_implementationOf(proxy).codehash == vm.envBytes32(expectedCodehashEnv), errorMessage);
+    }
+
     function _requireExpectedV1Baseline(address addressBook_) internal view {
         require(addressBook_ == vm.envAddress("FUND_EXPECTED_V1_ADDRESS_BOOK"), "B1N352: address book baseline");
         AddressBook book = AddressBook(addressBook_);
-        address controllerProxy = book.controller();
-        address settlerProxy = book.batchSettler();
-        require(controllerProxy == vm.envAddress("FUND_EXPECTED_V1_CONTROLLER_PROXY"), "B1N352: controller proxy");
-        require(settlerProxy == vm.envAddress("FUND_EXPECTED_V1_BATCH_SETTLER_PROXY"), "B1N352: settler proxy");
-        address controllerImplementation = _implementationOf(controllerProxy);
-        address settlerImplementation = _implementationOf(settlerProxy);
-        require(
-            controllerImplementation == vm.envAddress("FUND_EXPECTED_V1_CONTROLLER_IMPLEMENTATION"),
-            "B1N352: controller implementation"
+        _requireExpectedProxyBaseline(
+            addressBook_,
+            "FUND_EXPECTED_V1_ADDRESS_BOOK",
+            "FUND_EXPECTED_V1_ADDRESS_BOOK_IMPLEMENTATION",
+            "FUND_EXPECTED_V1_ADDRESS_BOOK_CODEHASH",
+            "address book"
         );
-        require(
-            controllerImplementation.codehash == vm.envBytes32("FUND_EXPECTED_V1_CONTROLLER_CODEHASH"),
-            "B1N352: controller codehash"
+        _requireExpectedProxyBaseline(
+            book.controller(),
+            "FUND_EXPECTED_V1_CONTROLLER_PROXY",
+            "FUND_EXPECTED_V1_CONTROLLER_IMPLEMENTATION",
+            "FUND_EXPECTED_V1_CONTROLLER_CODEHASH",
+            "controller"
         );
-        require(
-            settlerImplementation == vm.envAddress("FUND_EXPECTED_V1_BATCH_SETTLER_IMPLEMENTATION"),
-            "B1N352: settler implementation"
+        _requireExpectedProxyBaseline(
+            book.marginPool(),
+            "FUND_EXPECTED_V1_MARGIN_POOL_PROXY",
+            "FUND_EXPECTED_V1_MARGIN_POOL_IMPLEMENTATION",
+            "FUND_EXPECTED_V1_MARGIN_POOL_CODEHASH",
+            "margin pool"
         );
-        require(
-            settlerImplementation.codehash == vm.envBytes32("FUND_EXPECTED_V1_BATCH_SETTLER_CODEHASH"),
-            "B1N352: settler codehash"
+        _requireExpectedProxyBaseline(
+            book.oTokenFactory(),
+            "FUND_EXPECTED_V1_OTOKEN_FACTORY_PROXY",
+            "FUND_EXPECTED_V1_OTOKEN_FACTORY_IMPLEMENTATION",
+            "FUND_EXPECTED_V1_OTOKEN_FACTORY_CODEHASH",
+            "oToken factory"
+        );
+        _requireExpectedProxyBaseline(
+            book.oracle(),
+            "FUND_EXPECTED_V1_ORACLE_PROXY",
+            "FUND_EXPECTED_V1_ORACLE_IMPLEMENTATION",
+            "FUND_EXPECTED_V1_ORACLE_CODEHASH",
+            "oracle"
+        );
+        _requireExpectedProxyBaseline(
+            book.whitelist(),
+            "FUND_EXPECTED_V1_WHITELIST_PROXY",
+            "FUND_EXPECTED_V1_WHITELIST_IMPLEMENTATION",
+            "FUND_EXPECTED_V1_WHITELIST_CODEHASH",
+            "whitelist"
+        );
+        _requireExpectedProxyBaseline(
+            book.batchSettler(),
+            "FUND_EXPECTED_V1_BATCH_SETTLER_PROXY",
+            "FUND_EXPECTED_V1_BATCH_SETTLER_IMPLEMENTATION",
+            "FUND_EXPECTED_V1_BATCH_SETTLER_CODEHASH",
+            "settler"
         );
     }
 
     function _logV1Baseline(address addressBook_) internal view {
         AddressBook book = AddressBook(addressBook_);
-        address controllerImplementation = _implementationOf(book.controller());
-        address settlerImplementation = _implementationOf(book.batchSettler());
-        console2.log("V1_CONTROLLER_PROXY", book.controller());
-        console2.log("V1_CONTROLLER_IMPLEMENTATION", controllerImplementation);
-        console2.log("V1_CONTROLLER_IMPLEMENTATION_CODEHASH");
-        console2.logBytes32(controllerImplementation.codehash);
-        console2.log("V1_BATCH_SETTLER_PROXY", book.batchSettler());
-        console2.log("V1_BATCH_SETTLER_IMPLEMENTATION", settlerImplementation);
-        console2.log("V1_BATCH_SETTLER_IMPLEMENTATION_CODEHASH");
-        console2.logBytes32(settlerImplementation.codehash);
+        _logProxyBaseline("ADDRESS_BOOK", addressBook_);
+        _logProxyBaseline("CONTROLLER", book.controller());
+        _logProxyBaseline("MARGIN_POOL", book.marginPool());
+        _logProxyBaseline("OTOKEN_FACTORY", book.oTokenFactory());
+        _logProxyBaseline("ORACLE", book.oracle());
+        _logProxyBaseline("WHITELIST", book.whitelist());
+        _logProxyBaseline("BATCH_SETTLER", book.batchSettler());
+    }
+
+    function _requireExpectedProxyBaseline(
+        address proxy,
+        string memory proxyEnv,
+        string memory implementationEnv,
+        string memory codehashEnv,
+        string memory component
+    ) private view {
+        require(proxy == vm.envAddress(proxyEnv), string.concat("B1N352: ", component, " proxy"));
+        address implementation = _implementationOf(proxy);
+        require(
+            implementation == vm.envAddress(implementationEnv), string.concat("B1N352: ", component, " implementation")
+        );
+        require(
+            implementation.codehash == vm.envBytes32(codehashEnv), string.concat("B1N352: ", component, " codehash")
+        );
+    }
+
+    function _logProxyBaseline(string memory component, address proxy) private view {
+        address implementation = _implementationOf(proxy);
+        console2.log(string.concat("V1_", component, "_PROXY"), proxy);
+        console2.log(string.concat("V1_", component, "_IMPLEMENTATION"), implementation);
+        console2.log(string.concat("V1_", component, "_IMPLEMENTATION_CODEHASH"));
+        console2.logBytes32(implementation.codehash);
     }
 
     function _returnsAddress(address target, string memory signature) private view returns (address value) {

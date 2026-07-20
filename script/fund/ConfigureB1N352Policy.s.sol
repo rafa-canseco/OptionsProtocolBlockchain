@@ -8,7 +8,36 @@ contract ScheduleB1N352Policy is B1N352Operations {
     function run() external {
         _requireBaseSepolia();
         AccessManager manager = AccessManager(vm.envAddress("FUND_ACCESS_MANAGER"));
-        _scheduleOperations(manager, _policyOperations(_loadPolicyConfig()), vm.envUint("PRIVATE_KEY"));
+        PolicyConfig memory config = _loadPolicyConfig();
+        _scheduleOperations(manager, _policyOperations(config), _phaseSchedulerKey(), _isPolicyPhaseFinalized(config));
+    }
+}
+
+contract RestartB1N352Policy is B1N352Operations {
+    function run() external {
+        _requireBaseSepolia();
+        AccessManager manager = AccessManager(vm.envAddress("FUND_ACCESS_MANAGER"));
+        PolicyConfig memory config = _loadPolicyConfig();
+        _restartOperations(
+            manager,
+            _policyOperations(config),
+            vm.envAddress("FUND_PHASE_SCHEDULER"),
+            _phaseSchedulerKey(),
+            _isPolicyPhaseFinalized(config)
+        );
+    }
+}
+
+contract CancelB1N352Policy is B1N352Operations {
+    function run() external {
+        _requireBaseSepolia();
+        AccessManager manager = AccessManager(vm.envAddress("FUND_ACCESS_MANAGER"));
+        _cancelOperations(
+            manager,
+            _policyOperations(_loadPolicyConfig()),
+            vm.envAddress("FUND_PHASE_SCHEDULER"),
+            vm.envUint("PRIVATE_KEY")
+        );
     }
 }
 
@@ -16,6 +45,7 @@ contract ExecuteB1N352Policy is B1N352Operations {
     function run() external {
         _requireBaseSepolia();
         AccessManager manager = AccessManager(vm.envAddress("FUND_ACCESS_MANAGER"));
-        _executeOperations(manager, _policyOperations(_loadPolicyConfig()), vm.envUint("PRIVATE_KEY"));
+        PolicyConfig memory config = _loadPolicyConfig();
+        _executeOperations(manager, _policyOperations(config), _phaseSchedulerKey(), _isPolicyPhaseFinalized(config));
     }
 }
