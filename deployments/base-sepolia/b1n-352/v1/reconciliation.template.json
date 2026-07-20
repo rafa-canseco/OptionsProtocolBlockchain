@@ -14,7 +14,47 @@
   },
   "v1Boundary": {
     "custodiedRedemptionOnly": null,
+    "addressBook": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "unchanged": null
+    },
     "controller": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "unchanged": null
+    },
+    "marginPool": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "unchanged": null
+    },
+    "oTokenFactory": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "unchanged": null
+    },
+    "oracle": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "unchanged": null
+    },
+    "whitelist": {
       "proxy": null,
       "implementationBefore": null,
       "codehashBefore": null,
@@ -79,6 +119,7 @@
     "navReportVerifierAddressBindingAndCodehashMatch": null,
     "claimEscrowAddressBindingsAndCodehashMatch": null,
     "cspAdapterOperationsAddressBindingAndCodehashMatch": null,
+    "linkedCspAdapterImplementationCodehashMatch": null,
     "fundAccessManagerCodehashMatch": null
   },
   "state": {

@@ -17,11 +17,54 @@
     "compatibilityVersion": "FROM_APPROVED_CONFIG"
   },
   "v1Boundary": {
-    "addressBook": "TO_BE_FILLED",
-    "expectedAddressBook": "TO_BE_FILLED_FROM_APPROVAL",
+    "addressBook": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "unchanged": null
+    },
     "accountingAsset": "TO_BE_FILLED_USDC",
     "weth": "TO_BE_FILLED_WETH",
     "controller": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "unchanged": null
+    },
+    "marginPool": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "unchanged": null
+    },
+    "oTokenFactory": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "unchanged": null
+    },
+    "oracle": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "unchanged": null
+    },
+    "whitelist": {
       "proxy": "TO_BE_FILLED",
       "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
       "implementationBefore": "TO_BE_FILLED",
@@ -55,7 +98,11 @@
     "navReportVerifier": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
     "claimEscrow": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
     "cspAdapterOperations": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
-    "cspFundAdapter": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
+    "cspFundAdapter": {
+      "proxy": "TO_BE_FILLED",
+      "implementation": "TO_BE_FILLED",
+      "implementationCodehash": "TO_BE_FILLED_AFTER_LINKING_CSP_ADAPTER_OPERATIONS"
+    },
     "cspFundValuator": "TO_BE_FILLED",
     "inKindStrategyEscrow": "TO_BE_FILLED",
     "emergencyStrategyEscrow": "TO_BE_FILLED"

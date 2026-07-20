@@ -10,9 +10,9 @@ Before any command is run with `--broadcast`:
 
 1. B1N-346 must provide an approved, versioned policy artifact and go decision.
 2. `PreflightB1N352BaseSepolia` must confirm the selected V1 wiring, WETH/USDC product configuration, and `custodiedRedemptionOnly() == true`.
-3. The approved AddressBook, Controller proxy, BatchSettler proxy, implementation addresses, and implementation
-   codehashes must be supplied as expected values. Preflight and deployment fail before any broadcast if the live
-   baseline differs.
+3. The approved proxy, implementation, and implementation codehash for AddressBook, Controller, MarginPool,
+   OTokenFactory, Oracle, Whitelist, and BatchSettler must be supplied as expected values. Preflight and deployment
+   fail before any broadcast if any live V1 component differs.
 4. A separate user approval is required before adding `--broadcast`, onboarding the adapter, or activating StrategyManager.
 5. V1 onboarding additionally requires an approved smart-contract owner flow capable of checking the pinned baseline
    and invoking `setPhysicalDeliveryVault` atomically. The legacy direct-broadcast script is disabled and fails closed.
@@ -34,8 +34,9 @@ forge script script/fund/PreflightB1N352BaseSepolia.s.sol:PreflightB1N352BaseSep
   --rpc-url "$BASE_SEPOLIA_RPC_URL"
 ```
 
-Deployment and governance scripts are deliberately split into phases. Every multi-operation schedule or execution is
-one `FundAccessManager.multicall` transaction; scripts preflight the complete batch and refuse partial schedules:
+Deployment and governance scripts are deliberately split into phases. Every multi-operation schedule, cancellation,
+or execution is one `FundAccessManager.multicall` transaction; scripts preflight the complete batch and refuse partial
+schedules:
 
 1. `DeployTokenizedCspFundBaseSepolia`
 2. `ScheduleB1N352Access` / wait 72h / `ExecuteB1N352Access`
@@ -47,6 +48,14 @@ one `FundAccessManager.multicall` transaction; scripts preflight the complete ba
 6. Wait until the access execution timestamp plus `AccessManager.minSetback()` (five days), then run
    `ReconcileB1N352Deployment`.
 
+Each normal schedule and execute command is idempotent after the complete expected phase state is present. A normal
+schedule refuses any phase whose operation IDs have already been executed or canceled. If a guardian cancels one or
+more operations, use the matching `RestartB1N352*` command: one atomic multicall cancels every remaining live schedule
+and reschedules the complete phase with incremented nonces. Use `CancelB1N352Access`, `CancelB1N352Policy`, or
+`CancelB1N352Activation` only to abort a phase without restarting it. Set `FUND_PHASE_SCHEDULER` to the address that
+originally scheduled the phase. Normal schedule, execute, and restart commands require `PRIVATE_KEY` to derive that
+same address, which binds nonce history to one operator. A standalone cancel may instead use a guardian/admin key.
+
 With access scheduled at T+0 and executed at T+72h, its `setTargetAdminDelay` changes do not become effective until
 T+192h (approximately day 8). Policy execution around day 4 and activation around day 5 can still proceed under their
 own delays, but strict reconciliation intentionally fails until the adapter and both strategy escrows report the final
@@ -56,7 +65,8 @@ target admin delay.
 `ReconcileB1N352IntermediateDeployment` for explicit read-only inspection of a pre-onboarding or pre-activation state.
 The final gate also verifies the exact registered adapter, role-member and configured-selector sets, every role admin
 and guardian, open targets, full delays, factory bindings, and codehashes for the access manager, NAV verifier, claim
-escrow, and linked adapter operations library.
+escrow, linked adapter operations library, and the complete linked adapter implementation runtime bytecode. The last
+check covers every library link reference, not merely one embedded address occurrence.
 
 Running any script without `--broadcast` is a simulation. Do not add `--broadcast` until the separate authorization recorded in B1N-352.
 

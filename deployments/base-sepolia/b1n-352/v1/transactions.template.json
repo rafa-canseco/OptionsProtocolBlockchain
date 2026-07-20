@@ -14,14 +14,27 @@
       "label": "schedule-access-operations",
       "script": "ScheduleB1N352Access",
       "transactionShape": "single AccessManager.multicall; all operations scheduled atomically",
+      "idempotence": "no-op only when the complete access state is finalized; refuses prior nonce history",
+      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "not-authorized"
+    },
+    {
+      "phase": "access-recovery",
+      "label": "cancel-or-restart-access-operations",
+      "scripts": ["CancelB1N352Access", "RestartB1N352Access"],
+      "transactionShape": "Cancel aborts all remaining schedules atomically; Restart atomically cancels survivors and schedules the complete phase",
+      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "hashes": [],
+      "status": "not-authorized-emergency-only"
     },
     {
       "phase": "access",
       "label": "execute-access-operations",
       "script": "ExecuteB1N352Access",
       "transactionShape": "single AccessManager.multicall; all operations preflighted and executed atomically",
+      "idempotence": "no-op only when the complete access state is finalized and no live schedule remains",
+      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "not-authorized"
     },
@@ -30,14 +43,27 @@
       "label": "schedule-inactive-policy",
       "script": "ScheduleB1N352Policy",
       "transactionShape": "single AccessManager.multicall; all operations scheduled atomically",
+      "idempotence": "no-op only when all seven policy effects match; refuses prior nonce history",
+      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "blocked-by-B1N-346"
+    },
+    {
+      "phase": "policy-recovery",
+      "label": "cancel-or-restart-policy-operations",
+      "scripts": ["CancelB1N352Policy", "RestartB1N352Policy"],
+      "transactionShape": "Cancel aborts all remaining schedules atomically; Restart atomically cancels survivors and schedules the complete phase",
+      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "hashes": [],
+      "status": "blocked-by-B1N-346-and-separate-authorization"
     },
     {
       "phase": "policy",
       "label": "execute-inactive-policy",
       "script": "ExecuteB1N352Policy",
       "transactionShape": "single AccessManager.multicall; all operations preflighted and executed atomically",
+      "idempotence": "no-op only when all seven policy effects match and no live schedule remains",
+      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "blocked-by-B1N-346"
     },
@@ -55,8 +81,19 @@
       "script": "ScheduleB1N352Activation",
       "calldata": "StrategyManager.resumeAllocation(adapter)",
       "transactionShape": "single AccessManager.multicall",
+      "idempotence": "no-op when active; refuses prior nonce history when inactive",
+      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "not-authorized"
+    },
+    {
+      "phase": "activation-recovery",
+      "label": "cancel-or-restart-strategy-activation",
+      "scripts": ["CancelB1N352Activation", "RestartB1N352Activation"],
+      "transactionShape": "Cancel aborts the live schedule; Restart atomically cancels a survivor and creates a new schedule with an incremented nonce",
+      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "hashes": [],
+      "status": "not-authorized-emergency-only"
     },
     {
       "phase": "activation",
@@ -64,6 +101,8 @@
       "script": "ExecuteB1N352Activation",
       "calldata": "StrategyManager.resumeAllocation(adapter); does not rewrite caps or risk settings",
       "transactionShape": "single AccessManager.multicall",
+      "idempotence": "no-op when active and no live schedule remains",
+      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "not-authorized"
     },
