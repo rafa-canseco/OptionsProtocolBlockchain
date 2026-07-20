@@ -48,6 +48,7 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
 
         FundFactory factory = new FundFactory(deployer);
         deployed.fundFactory = address(factory);
+        deployed.fundAccessManagerDeployer = address(factory.accessManagerDeployer());
         factory.registerImplementationVersion(
             config.implementationVersion,
             FundFactory.ImplementationSet({
@@ -122,28 +123,39 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
         factory.transferOwnership(config.factoryOwner);
     }
 
-    function _logDeployment(DeploymentAddresses memory deployed) private pure {
+    function _logDeployment(DeploymentAddresses memory deployed) private view {
         console2.log("FUND_FACTORY", deployed.fundFactory);
+        console2.log("FUND_ACCESS_MANAGER_DEPLOYER", deployed.fundAccessManagerDeployer);
+        console2.log("FUND_ACCESS_MANAGER_DEPLOYER_CODEHASH");
+        console2.logBytes32(deployed.fundAccessManagerDeployer.codehash);
         console2.log("FUND_DEPLOYMENT_ID");
         console2.logBytes32(deployed.deploymentId);
         console2.log("FUND_VAULT_IMPLEMENTATION", deployed.fundVaultImplementation);
         console2.log("FUND_SHARE_IMPLEMENTATION", deployed.fundShareImplementation);
         console2.log("FUND_ACCOUNTING_IMPLEMENTATION", deployed.fundAccountingImplementation);
         console2.log("FUND_FLOW_MANAGER_IMPLEMENTATION", deployed.fundFlowManagerImplementation);
-        console2.log("STRATEGY_MANAGER_IMPLEMENTATION", deployed.strategyManagerImplementation);
-        console2.log("NAV_REPORT_VERIFIER", deployed.navReportVerifier);
+        console2.log("FUND_STRATEGY_MANAGER_IMPLEMENTATION", deployed.strategyManagerImplementation);
+        console2.log("FUND_NAV_REPORT_VERIFIER", deployed.navReportVerifier);
+        console2.log("FUND_NAV_REPORT_VERIFIER_CODEHASH");
+        console2.logBytes32(deployed.navReportVerifier.codehash);
         console2.log("FUND_VAULT_PROXY", deployed.fundVaultProxy);
         console2.log("FUND_SHARE_PROXY", deployed.fundShareProxy);
         console2.log("FUND_ACCOUNTING_PROXY", deployed.fundAccountingProxy);
         console2.log("FUND_FLOW_MANAGER_PROXY", deployed.fundFlowManagerProxy);
-        console2.log("STRATEGY_MANAGER_PROXY", deployed.strategyManagerProxy);
-        console2.log("CLAIM_ESCROW", deployed.claimEscrow);
-        console2.log("ACCESS_MANAGER", deployed.accessManager);
-        console2.log("CSP_ADAPTER_OPERATIONS", deployed.cspAdapterOperations);
-        console2.log("CSP_FUND_ADAPTER_IMPLEMENTATION", deployed.cspFundAdapterImplementation);
-        console2.log("CSP_FUND_ADAPTER_PROXY", deployed.cspFundAdapterProxy);
-        console2.log("CSP_FUND_VALUATOR", deployed.cspFundValuator);
-        console2.log("IN_KIND_STRATEGY_ESCROW", deployed.inKindStrategyEscrow);
-        console2.log("EMERGENCY_STRATEGY_ESCROW", deployed.emergencyStrategyEscrow);
+        console2.log("FUND_STRATEGY_MANAGER_PROXY", deployed.strategyManagerProxy);
+        console2.log("FUND_CLAIM_ESCROW", deployed.claimEscrow);
+        console2.log("FUND_CLAIM_ESCROW_CODEHASH");
+        console2.logBytes32(deployed.claimEscrow.codehash);
+        console2.log("FUND_ACCESS_MANAGER", deployed.accessManager);
+        console2.log("FUND_ACCESS_MANAGER_CODEHASH");
+        console2.logBytes32(deployed.accessManager.codehash);
+        console2.log("FUND_CSP_ADAPTER_OPERATIONS", deployed.cspAdapterOperations);
+        console2.log("FUND_CSP_ADAPTER_OPERATIONS_CODEHASH");
+        console2.logBytes32(deployed.cspAdapterOperations.codehash);
+        console2.log("FUND_CSP_ADAPTER_IMPLEMENTATION", deployed.cspFundAdapterImplementation);
+        console2.log("FUND_CSP_ADAPTER_PROXY", deployed.cspFundAdapterProxy);
+        console2.log("FUND_CSP_VALUATOR", deployed.cspFundValuator);
+        console2.log("FUND_IN_KIND_STRATEGY_ESCROW", deployed.inKindStrategyEscrow);
+        console2.log("FUND_EMERGENCY_STRATEGY_ESCROW", deployed.emergencyStrategyEscrow);
     }
 }

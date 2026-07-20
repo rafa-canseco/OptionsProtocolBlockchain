@@ -187,10 +187,9 @@ abstract contract B1N352Operations is B1N352Base {
         StrategyManager strategyManager = StrategyManager(strategyManager_);
         FundTypes.StrategyConfig memory config = strategyManager.strategyConfig(adapter);
         require(config.interfaceVersion != 0 && !config.active, "B1N352: activation state");
-        config.active = true;
         operation = Operation({
             target: strategyManager_,
-            data: abi.encodeCall(strategyManager.setStrategyConfig, (adapter, config)),
+            data: abi.encodeCall(strategyManager.resumeAllocation, (adapter)),
             label: keccak256("ACTIVATE_CSP_STRATEGY")
         });
     }
@@ -252,6 +251,8 @@ abstract contract B1N352Operations is B1N352Base {
 
     function _verifyStrategyPolicy(PolicyConfig memory policyConfig, bool expectedActive) private view {
         StrategyManager strategyManager = StrategyManager(policyConfig.strategyManager);
+        require(strategyManager.activeAdapterCount() == 1, "B1N352: registered adapter count");
+        require(strategyManager.activeAdapterAt(0) == policyConfig.adapter, "B1N352: registered adapter");
         require(strategyManager.minimumIdleBps() == policyConfig.minimumIdleBps, "B1N352: minimum idle");
         FundTypes.StrategyConfig memory expected = FundTypes.StrategyConfig({
             active: expectedActive,
@@ -301,28 +302,64 @@ abstract contract B1N352Operations is B1N352Base {
     }
 
     function _scheduleOperations(AccessManager manager, Operation[] memory operations, uint256 callerKey) internal {
-        vm.startBroadcast(callerKey);
+        address caller = vm.addr(callerKey);
+        bytes[] memory calls = new bytes[](operations.length);
+        uint256 scheduledCount;
         for (uint256 i; i < operations.length; ++i) {
-            (bytes32 operationId, uint32 nonce) = manager.schedule(operations[i].target, operations[i].data, 0);
-            console2.log("SCHEDULED_OPERATION_LABEL");
-            console2.logBytes32(operations[i].label);
-            console2.log("SCHEDULED_OPERATION_TARGET", operations[i].target);
-            console2.log("SCHEDULED_OPERATION_ID");
-            console2.logBytes32(operationId);
-            console2.log("SCHEDULED_OPERATION_NONCE", nonce);
+            bytes32 operationId = manager.hashOperation(caller, operations[i].target, operations[i].data);
+            uint48 readyAt = manager.getSchedule(operationId);
+            if (readyAt != 0) {
+                ++scheduledCount;
+                _logScheduledOperation(operations[i], operationId, manager.getNonce(operationId), readyAt);
+            }
+            calls[i] = abi.encodeCall(manager.schedule, (operations[i].target, operations[i].data, uint48(0)));
         }
+        require(scheduledCount == 0 || scheduledCount == operations.length, "B1N352: partial phase schedule");
+        if (scheduledCount == operations.length) return;
+
+        vm.startBroadcast(callerKey);
+        bytes[] memory results = manager.multicall(calls);
         vm.stopBroadcast();
+
+        for (uint256 i; i < operations.length; ++i) {
+            (bytes32 operationId, uint32 nonce) = abi.decode(results[i], (bytes32, uint32));
+            _logScheduledOperation(operations[i], operationId, nonce, manager.getSchedule(operationId));
+        }
     }
 
     function _executeOperations(AccessManager manager, Operation[] memory operations, uint256 callerKey) internal {
-        vm.startBroadcast(callerKey);
+        address caller = vm.addr(callerKey);
+        bytes[] memory calls = new bytes[](operations.length);
         for (uint256 i; i < operations.length; ++i) {
-            manager.execute(operations[i].target, operations[i].data);
+            bytes32 operationId = manager.hashOperation(caller, operations[i].target, operations[i].data);
+            uint48 readyAt = manager.getSchedule(operationId);
+            require(readyAt != 0, "B1N352: phase operation not scheduled");
+            require(readyAt <= block.timestamp, "B1N352: phase operation not ready");
+            calls[i] = abi.encodeCall(manager.execute, (operations[i].target, operations[i].data));
+        }
+
+        vm.startBroadcast(callerKey);
+        manager.multicall(calls);
+        vm.stopBroadcast();
+
+        for (uint256 i; i < operations.length; ++i) {
             console2.log("EXECUTED_OPERATION_LABEL");
             console2.logBytes32(operations[i].label);
             console2.log("EXECUTED_OPERATION_TARGET", operations[i].target);
         }
-        vm.stopBroadcast();
+    }
+
+    function _logScheduledOperation(Operation memory operation, bytes32 operationId, uint32 nonce, uint48 readyAt)
+        private
+        pure
+    {
+        console2.log("SCHEDULED_OPERATION_LABEL");
+        console2.logBytes32(operation.label);
+        console2.log("SCHEDULED_OPERATION_TARGET", operation.target);
+        console2.log("SCHEDULED_OPERATION_ID");
+        console2.logBytes32(operationId);
+        console2.log("SCHEDULED_OPERATION_NONCE", nonce);
+        console2.log("SCHEDULED_OPERATION_READY_AT", readyAt);
     }
 
     function _targetRoleOperation(

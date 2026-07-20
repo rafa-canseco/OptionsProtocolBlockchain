@@ -104,6 +104,10 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         return ($.strategyInKindEscrow, $.strategyEmergencyEscrow);
     }
 
+    function claimEscrow() external view returns (address) {
+        return _getFundFlowManagerStorage().claimEscrow;
+    }
+
     function strategyInKindBatch(bytes32 batchId)
         external
         view

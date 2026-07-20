@@ -53,6 +53,7 @@ abstract contract B1N352Base is Script {
 
     struct DeploymentAddresses {
         address fundFactory;
+        address fundAccessManagerDeployer;
         bytes32 deploymentId;
         address fundVaultImplementation;
         address fundShareImplementation;
@@ -188,9 +189,14 @@ abstract contract B1N352Base is Script {
     }
 
     function _requireExpectedV1Baseline(address addressBook_) internal view {
+        require(addressBook_ == vm.envAddress("FUND_EXPECTED_V1_ADDRESS_BOOK"), "B1N352: address book baseline");
         AddressBook book = AddressBook(addressBook_);
-        address controllerImplementation = _implementationOf(book.controller());
-        address settlerImplementation = _implementationOf(book.batchSettler());
+        address controllerProxy = book.controller();
+        address settlerProxy = book.batchSettler();
+        require(controllerProxy == vm.envAddress("FUND_EXPECTED_V1_CONTROLLER_PROXY"), "B1N352: controller proxy");
+        require(settlerProxy == vm.envAddress("FUND_EXPECTED_V1_BATCH_SETTLER_PROXY"), "B1N352: settler proxy");
+        address controllerImplementation = _implementationOf(controllerProxy);
+        address settlerImplementation = _implementationOf(settlerProxy);
         require(
             controllerImplementation == vm.envAddress("FUND_EXPECTED_V1_CONTROLLER_IMPLEMENTATION"),
             "B1N352: controller implementation"

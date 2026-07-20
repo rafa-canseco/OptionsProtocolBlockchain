@@ -16,10 +16,13 @@ import {MockChainlinkFeed} from "../../src/mocks/MockChainlinkFeed.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
 import {MockSwapRouter} from "../../src/mocks/MockSwapRouter.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
+import {FundAccessManager} from "../../src/fund/FundAccessManager.sol";
+import {FundAccounting} from "../../src/fund/FundAccounting.sol";
 import {FundVault} from "../../src/fund/FundVault.sol";
 import {FundFlowManager} from "../../src/fund/FundFlowManager.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
 import {StrategyAssetEscrow} from "../../src/fund/StrategyAssetEscrow.sol";
+import {CspFundAdapter} from "../../src/fund/CspFundAdapter.sol";
 import {FundConstants} from "../../src/fund/FundConstants.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
 import {ICspFundAdapter} from "../../src/fund/interfaces/ICspFundAdapter.sol";
@@ -92,9 +95,10 @@ contract B1N352DeploymentTest is Test {
     function test_localDryRunDeployConfigureOnboardAndActivate() public {
         B1N352Base.DeployConfig memory deployConfig = _deployConfig();
         B1N352Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(deployConfig);
-        AccessManager manager = AccessManager(deployed.accessManager);
+        FundAccessManager manager = FundAccessManager(deployed.accessManager);
 
         assertEq(FundFactory(deployed.fundFactory).owner(), address(this));
+        assertEq(address(FundFactory(deployed.fundFactory).accessManagerDeployer()), deployed.fundAccessManagerDeployer);
         assertEq(_implementation(deployed.fundVaultProxy), deployed.fundVaultImplementation);
         assertEq(_implementation(deployed.fundShareProxy), deployed.fundShareImplementation);
         assertEq(_implementation(deployed.fundAccountingProxy), deployed.fundAccountingImplementation);
@@ -102,6 +106,10 @@ contract B1N352DeploymentTest is Test {
         assertEq(_implementation(deployed.strategyManagerProxy), deployed.strategyManagerImplementation);
         assertEq(_implementation(deployed.cspFundAdapterProxy), deployed.cspFundAdapterImplementation);
         assertGt(deployed.cspAdapterOperations.code.length, 0);
+        assertEq(manager.roleMemberCount(manager.ADMIN_ROLE()), 1);
+        assertEq(manager.roleMemberAt(manager.ADMIN_ROLE(), 0), address(this));
+        assertEq(manager.roleMemberCount(FundConstants.REPORTER_ROLE), 0);
+        assertEq(manager.configuredSelectorCount(deployed.strategyManagerProxy), 10);
 
         FundVault vault = FundVault(deployed.fundVaultProxy);
         FundFlowManager flow = FundFlowManager(deployed.fundFlowManagerProxy);
@@ -136,6 +144,7 @@ contract B1N352DeploymentTest is Test {
         B1N352Operations.PolicyConfig memory policy = _policyConfig(deployed);
         _scheduleAndExecute(manager, operationsHarness.policyOperations(policy), FundConstants.CURATOR_DELAY);
         assertFalse(strategy.strategyConfig(address(adapter)).active);
+        operationsHarness.verifyDeployedPolicy(deployConfig, policy, false);
         (inKindEscrow, emergencyEscrow) = flow.strategyExitEscrows();
         assertEq(inKindEscrow, deployed.inKindStrategyEscrow);
         assertEq(emergencyEscrow, deployed.emergencyStrategyEscrow);
@@ -145,8 +154,16 @@ contract B1N352DeploymentTest is Test {
 
         B1N352Operations.Operation[] memory activationOperations = new B1N352Operations.Operation[](1);
         activationOperations[0] = operationsHarness.activationOperation(address(strategy), address(adapter));
-        _scheduleAndExecute(manager, activationOperations, FundConstants.CURATOR_DELAY);
-        assertTrue(strategy.strategyConfig(address(adapter)).active);
+        _schedule(manager, activationOperations);
+        strategy.reduceStrategyCap(address(adapter), 500e6, 2_500);
+        vm.warp(block.timestamp + FundConstants.CURATOR_DELAY);
+        _execute(manager, activationOperations);
+        FundTypes.StrategyConfig memory activatedConfig = strategy.strategyConfig(address(adapter));
+        assertTrue(activatedConfig.active);
+        assertEq(activatedConfig.absoluteCap, 500e6);
+        assertEq(activatedConfig.maxAllocationBps, 2_500);
+        policy.absoluteCap = 500e6;
+        policy.maxAllocationBps = 2_500;
 
         operationsHarness.verifyDeployedPolicy(deployConfig, policy, true);
         _assertPolicyMismatchesRejected(deployConfig, policy);
@@ -166,6 +183,11 @@ contract B1N352DeploymentTest is Test {
         _setExpectedV1Baseline(controllerImplementation, settlerImplementation);
         deployHarness.requireExpectedV1Baseline(address(addressBook));
 
+        vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_PROXY", vm.toString(address(new Controller())));
+        vm.expectRevert(bytes("B1N352: controller proxy"));
+        deployHarness.requireExpectedV1Baseline(address(addressBook));
+        vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_PROXY", vm.toString(addressBook.controller()));
+
         address wrongControllerImplementation = address(new Controller());
         vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_IMPLEMENTATION", vm.toString(wrongControllerImplementation));
         vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_CODEHASH", vm.toString(wrongControllerImplementation.codehash));
@@ -180,6 +202,115 @@ contract B1N352DeploymentTest is Test {
         vm.setEnv("B1N352_TEST_UINT16", "65536");
         vm.expectRevert(abi.encodeWithSelector(SafeCast.SafeCastOverflowedUintDowncast.selector, 16, 65_536));
         deployHarness.envUint16("B1N352_TEST_UINT16");
+    }
+
+    function test_fundAccessManagerEnumeratesExactCurrentAuthority() public {
+        FundAccessManager manager = new FundAccessManager(address(this));
+        address member = address(0xA11CE);
+        address target = address(0xB0B);
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = bytes4(keccak256("configuredFunction()"));
+
+        manager.grantRole(FundConstants.ACCOUNTING_ROLE, member, 0);
+        assertEq(manager.roleMemberCount(FundConstants.ACCOUNTING_ROLE), 1);
+        assertEq(manager.roleMemberAt(FundConstants.ACCOUNTING_ROLE, 0), member);
+        manager.revokeRole(FundConstants.ACCOUNTING_ROLE, member);
+        assertEq(manager.roleMemberCount(FundConstants.ACCOUNTING_ROLE), 0);
+
+        manager.setTargetFunctionRole(target, selectors, FundConstants.ACCOUNTING_ROLE);
+        assertEq(manager.configuredSelectorCount(target), 1);
+        manager.setTargetFunctionRole(target, selectors, manager.ADMIN_ROLE());
+        assertEq(manager.configuredSelectorCount(target), 0);
+    }
+
+    function test_phaseExecutionIsAtomicAndPreservesSchedulesOnFailure() public {
+        B1N352Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(_deployConfig());
+        FundAccessManager manager = FundAccessManager(deployed.accessManager);
+        B1N352Operations.PolicyConfig memory policy = _policyConfig(deployed);
+        B1N352Operations.Operation[] memory allOperations = operationsHarness.policyOperations(policy);
+        B1N352Operations.Operation[] memory operations = new B1N352Operations.Operation[](2);
+        operations[0] = allOperations[0];
+        operations[1] = allOperations[1];
+        operations[1].data = abi.encodeCall(FundAccounting.setComponent, (bytes32(0), address(0), uint64(1), true));
+
+        _schedule(manager, operations);
+        vm.warp(block.timestamp + FundConstants.CURATOR_DELAY);
+        bytes32 firstId = manager.hashOperation(address(this), operations[0].target, operations[0].data);
+        bytes32 secondId = manager.hashOperation(address(this), operations[1].target, operations[1].data);
+        vm.expectRevert();
+        _execute(manager, operations);
+
+        assertEq(FundAccounting(deployed.fundAccountingProxy).reporterSetVersion(), 0);
+        assertGt(manager.getSchedule(firstId), 0);
+        assertGt(manager.getSchedule(secondId), 0);
+    }
+
+    function test_reconciliationRejectsAdditionalRegisteredAdapterAfterItsAccountingComponentIsDisabled() public {
+        B1N352Base.DeployConfig memory deployConfig = _deployConfig();
+        B1N352Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(deployConfig);
+        FundAccessManager manager = FundAccessManager(deployed.accessManager);
+        B1N352Operations.PolicyConfig memory policy = _policyConfig(deployed);
+        _scheduleAndExecute(manager, operationsHarness.policyOperations(policy), FundConstants.CURATOR_DELAY);
+
+        CspFundAdapter.InitializeParams memory params = CspFundAdapter.InitializeParams({
+            fund: deployed.fundVaultProxy,
+            strategyManager: deployed.strategyManagerProxy,
+            addressBook: address(addressBook),
+            accountingAsset: address(usdc),
+            weth: address(weth),
+            swapRouter: address(swapRouter),
+            swapFeeTier: deployConfig.adapterSwapFeeTier,
+            authority: address(manager),
+            riskConfig: deployConfig.adapterRiskConfig
+        });
+        address extraAdapter = address(
+            new ERC1967Proxy(address(new CspFundAdapter()), abi.encodeCall(CspFundAdapter.initialize, (params)))
+        );
+        bytes32 extraComponentId = keccak256(abi.encodePacked("STRATEGY", extraAdapter));
+
+        B1N352Operations.Operation[] memory registerOperations = new B1N352Operations.Operation[](2);
+        registerOperations[0] = B1N352Operations.Operation({
+            target: deployed.fundAccountingProxy,
+            data: abi.encodeCall(
+                FundAccounting.setComponent, (extraComponentId, deployed.cspFundValuator, uint64(1), true)
+            ),
+            label: keccak256("REGISTER_EXTRA_COMPONENT")
+        });
+        registerOperations[1] = B1N352Operations.Operation({
+            target: deployed.strategyManagerProxy,
+            data: abi.encodeCall(
+                StrategyManager.setStrategyConfig,
+                (
+                    extraAdapter,
+                    FundTypes.StrategyConfig({
+                        active: true,
+                        maxAllocationBps: policy.maxAllocationBps,
+                        maxLossBps: policy.maxLossBps,
+                        cooldown: policy.cooldown,
+                        interfaceVersion: policy.adapterInterfaceVersion,
+                        valuator: deployed.cspFundValuator,
+                        absoluteCap: policy.absoluteCap
+                    })
+                )
+            ),
+            label: keccak256("REGISTER_EXTRA_STRATEGY")
+        });
+        _scheduleAndExecute(manager, registerOperations, FundConstants.CURATOR_DELAY);
+
+        B1N352Operations.Operation[] memory disableComponentOperations = new B1N352Operations.Operation[](1);
+        disableComponentOperations[0] = B1N352Operations.Operation({
+            target: deployed.fundAccountingProxy,
+            data: abi.encodeCall(
+                FundAccounting.setComponent, (extraComponentId, deployed.cspFundValuator, uint64(1), false)
+            ),
+            label: keccak256("DISABLE_EXTRA_COMPONENT")
+        });
+        _scheduleAndExecute(manager, disableComponentOperations, FundConstants.CURATOR_DELAY);
+
+        assertEq(FundAccounting(deployed.fundAccountingProxy).activeComponentCount(), 2);
+        assertEq(StrategyManager(deployed.strategyManagerProxy).activeAdapterCount(), 2);
+        vm.expectRevert(bytes("B1N352: registered adapter count"));
+        operationsHarness.verifyDeployedPolicy(deployConfig, policy, false);
     }
 
     function _deployV1() private {
@@ -346,6 +477,9 @@ contract B1N352DeploymentTest is Test {
     }
 
     function _setExpectedV1Baseline(address controllerImplementation, address settlerImplementation) private {
+        vm.setEnv("FUND_EXPECTED_V1_ADDRESS_BOOK", vm.toString(address(addressBook)));
+        vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_PROXY", vm.toString(addressBook.controller()));
+        vm.setEnv("FUND_EXPECTED_V1_BATCH_SETTLER_PROXY", vm.toString(addressBook.batchSettler()));
         vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_IMPLEMENTATION", vm.toString(controllerImplementation));
         vm.setEnv("FUND_EXPECTED_V1_CONTROLLER_CODEHASH", vm.toString(controllerImplementation.codehash));
         vm.setEnv("FUND_EXPECTED_V1_BATCH_SETTLER_IMPLEMENTATION", vm.toString(settlerImplementation));
@@ -355,13 +489,25 @@ contract B1N352DeploymentTest is Test {
     function _scheduleAndExecute(AccessManager manager, B1N352Operations.Operation[] memory operations, uint256 delay)
         private
     {
-        for (uint256 i; i < operations.length; ++i) {
-            manager.schedule(operations[i].target, operations[i].data, 0);
-        }
+        _schedule(manager, operations);
         vm.warp(block.timestamp + delay);
+        _execute(manager, operations);
+    }
+
+    function _schedule(AccessManager manager, B1N352Operations.Operation[] memory operations) private {
+        bytes[] memory calls = new bytes[](operations.length);
         for (uint256 i; i < operations.length; ++i) {
-            manager.execute(operations[i].target, operations[i].data);
+            calls[i] = abi.encodeCall(manager.schedule, (operations[i].target, operations[i].data, uint48(0)));
         }
+        manager.multicall(calls);
+    }
+
+    function _execute(AccessManager manager, B1N352Operations.Operation[] memory operations) private {
+        bytes[] memory calls = new bytes[](operations.length);
+        for (uint256 i; i < operations.length; ++i) {
+            calls[i] = abi.encodeCall(manager.execute, (operations[i].target, operations[i].data));
+        }
+        manager.multicall(calls);
     }
 
     function _assertLegacyPerUserStateAbsent(address vault) private view {

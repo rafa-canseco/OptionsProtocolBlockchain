@@ -9,6 +9,7 @@ import {NavReportVerifier} from "../../src/fund/NavReportVerifier.sol";
 import {FundFlowManager} from "../../src/fund/FundFlowManager.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
+import {FundAccessManagerDeployer} from "../../src/fund/FundAccessManagerDeployer.sol";
 import {ClaimEscrow} from "../../src/fund/ClaimEscrow.sol";
 import {CspFundAdapter} from "../../src/fund/CspFundAdapter.sol";
 import {CspFundValuator} from "../../src/fund/CspFundValuator.sol";
@@ -27,6 +28,7 @@ contract RuntimeBudgetTest is Test {
         assertLt(address(new FundFlowManager()).code.length, EIP170_RUNTIME_LIMIT);
         assertLt(address(new StrategyManager()).code.length, EIP170_RUNTIME_LIMIT);
         assertLt(address(new FundFactory(address(this))).code.length, EIP170_RUNTIME_LIMIT);
+        assertLt(address(new FundAccessManagerDeployer()).code.length, EIP170_RUNTIME_LIMIT);
         MockERC20 asset = new MockERC20("Budget Asset", "BUD", 6);
         assertLt(address(new ClaimEscrow(asset, address(this))).code.length, EIP170_RUNTIME_LIMIT);
         assertLt(address(new CspFundAdapter()).code.length, EIP170_RUNTIME_LIMIT);
