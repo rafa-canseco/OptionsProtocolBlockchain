@@ -29,6 +29,7 @@ interface IFundFlowManager {
     function isOperator(address controller, address operator) external view returns (bool);
     function windowOutflow(uint64 reportNonce) external view returns (uint256 eligibleSupply, uint256 processedShares);
     function strategyExitEscrows() external view returns (address inKindEscrow, address emergencyEscrow);
+    function claimEscrow() external view returns (address);
     function strategyInKindBatch(bytes32 batchId)
         external
         view

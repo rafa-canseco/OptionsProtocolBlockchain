@@ -241,13 +241,20 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             (bool factoryIsAdmin,) = manager.hasRole(manager.ADMIN_ROLE(), address(factory));
             (bool fundAdmin, uint32 adminDelay) = manager.hasRole(manager.ADMIN_ROLE(), address(this));
             (bool upgrader, uint32 upgraderDelay) = manager.hasRole(FundConstants.UPGRADER_ROLE, address(this));
+            (bool adapterUpgrader, uint32 adapterUpgraderDelay) =
+                manager.hasRole(FundConstants.ADAPTER_UPGRADER_ROLE, address(this));
             assertFalse(factoryIsAdmin);
             assertTrue(fundAdmin);
             assertEq(adminDelay, FundConstants.CORE_UPGRADE_DELAY);
             assertTrue(upgrader);
             assertEq(upgraderDelay, FundConstants.CORE_UPGRADE_DELAY);
+            assertTrue(adapterUpgrader);
+            assertEq(adapterUpgraderDelay, FundConstants.ADAPTER_UPGRADE_DELAY);
             assertEq(manager.getRoleGrantDelay(manager.ADMIN_ROLE()), FundConstants.CORE_UPGRADE_DELAY);
             assertEq(manager.getRoleGrantDelay(FundConstants.UPGRADER_ROLE), FundConstants.CORE_UPGRADE_DELAY);
+            assertEq(
+                manager.getRoleGrantDelay(FundConstants.ADAPTER_UPGRADER_ROLE), FundConstants.ADAPTER_UPGRADE_DELAY
+            );
             assertEq(manager.getRoleGrantDelay(FundConstants.CURATOR_ROLE), FundConstants.CURATOR_DELAY);
             assertEq(manager.getTargetAdminDelay(address(share)), FundConstants.CORE_UPGRADE_DELAY);
             assertEq(manager.getTargetAdminDelay(address(vault)), FundConstants.CORE_UPGRADE_DELAY);
@@ -919,6 +926,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(asset.balanceOf(inKindEscrow), 0);
             assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 0);
             assertFalse(strategy.strategyConfig(address(adapter)).active);
+            assertEq(strategy.allocationPauseNonce(address(adapter)), 1);
             assertEq(strategy.positionNonce(address(adapter)), 2);
             FundAccounting.ComponentState memory afterExit = accounting.componentState(componentId);
             assertEq(afterExit.nonce, 2);

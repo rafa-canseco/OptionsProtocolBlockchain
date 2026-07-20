@@ -1,0 +1,131 @@
+{
+  "schemaVersion": "1.0.0",
+  "deploymentStatus": "NOT_BROADCAST",
+  "transactions": [
+    {
+      "phase": "deploy",
+      "label": "fresh-fund-stack",
+      "script": "DeployTokenizedCspFundBaseSepolia",
+      "approvedInputsSha256": "TO_BE_FILLED_FROM_SEPARATELY_RECORDED_APPROVAL",
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "access",
+      "label": "schedule-access-operations",
+      "script": "ScheduleB1N352Access",
+      "transactionShape": "single AccessManager.multicall; all operations scheduled atomically",
+      "idempotence": "no-op only when the complete access state is finalized; refuses prior nonce history",
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "access-recovery",
+      "label": "cancel-or-restart-access-operations",
+      "scripts": ["CancelB1N352Access", "RestartB1N352Access"],
+      "transactionShape": "Cancel aborts all remaining schedules atomically; Restart atomically cancels survivors and schedules the complete phase",
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "hashes": [],
+      "status": "not-authorized-emergency-only"
+    },
+    {
+      "phase": "access",
+      "label": "execute-access-operations",
+      "script": "ExecuteB1N352Access",
+      "transactionShape": "single AccessManager.multicall; all operations preflighted and executed atomically",
+      "idempotence": "no-op only when the complete access state is finalized and no live schedule remains",
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "policy",
+      "label": "schedule-inactive-policy",
+      "script": "ScheduleB1N352Policy",
+      "transactionShape": "single AccessManager.multicall; all operations scheduled atomically",
+      "idempotence": "no-op only when all seven policy effects match; refuses prior nonce history",
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "hashes": [],
+      "status": "blocked-by-B1N-346"
+    },
+    {
+      "phase": "policy-recovery",
+      "label": "cancel-or-restart-policy-operations",
+      "scripts": ["CancelB1N352Policy", "RestartB1N352Policy"],
+      "transactionShape": "Cancel aborts all remaining schedules atomically; Restart atomically cancels survivors and schedules the complete phase",
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "hashes": [],
+      "status": "blocked-by-B1N-346-and-separate-authorization"
+    },
+    {
+      "phase": "policy",
+      "label": "execute-inactive-policy",
+      "script": "ExecuteB1N352Policy",
+      "transactionShape": "single AccessManager.multicall; all operations preflighted and executed atomically",
+      "idempotence": "no-op only when all seven policy effects match and no live schedule remains",
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "hashes": [],
+      "status": "blocked-by-B1N-346"
+    },
+    {
+      "phase": "v1-onboarding",
+      "label": "prepare-atomic-setPhysicalDeliveryVault",
+      "script": "PrepareB1N352AtomicOnboarding",
+      "requirement": "approved smart-contract owner flow that pins and checks the V1 baseline in the same transaction as the mutation",
+      "hashes": [],
+      "status": "blocked-until-atomic-owner-flow-approved"
+    },
+    {
+      "phase": "activation",
+      "label": "schedule-strategy-activation",
+      "script": "ScheduleB1N352Activation",
+      "calldata": "StrategyManager.resumeAllocation(adapter, scheduledPauseNonce)",
+      "transactionShape": "single AccessManager.multicall",
+      "idempotence": "no-op when active; refuses prior nonce history when inactive",
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "scheduledAllocationPauseNonce": null,
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "activation-recovery",
+      "label": "cancel-or-restart-strategy-activation",
+      "scripts": ["CancelB1N352Activation", "RestartB1N352Activation"],
+      "transactionShape": "Cancel targets the recorded pause nonce; Restart atomically cancels the stale operation and schedules the current pause nonce",
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "requiredEnv": ["FUND_SCHEDULED_ALLOCATION_PAUSE_NONCE"],
+      "hashes": [],
+      "status": "not-authorized-emergency-only"
+    },
+    {
+      "phase": "activation",
+      "label": "execute-strategy-activation",
+      "script": "ExecuteB1N352Activation",
+      "calldata": "StrategyManager.resumeAllocation(adapter, scheduledPauseNonce); does not rewrite caps or risk settings",
+      "transactionShape": "single AccessManager.multicall",
+      "idempotence": "no-op when active and no live schedule remains",
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "requiredEnv": ["FUND_SCHEDULED_ALLOCATION_PAUSE_NONCE"],
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "reconciliation",
+      "label": "wait-for-target-admin-delay-effect",
+      "condition": "execute-access-operations timestamp + AccessManager.minSetback()",
+      "expectedEarliestOffsetSeconds": 691200,
+      "hashes": [],
+      "status": "not-authorized"
+    },
+    {
+      "phase": "reconciliation",
+      "label": "strict-read-only-reconciliation",
+      "script": "ReconcileB1N352Deployment",
+      "expectedAdapterOnboarded": true,
+      "expectedStrategyActive": true,
+      "hashes": [],
+      "status": "not-authorized"
+    }
+  ]
+}

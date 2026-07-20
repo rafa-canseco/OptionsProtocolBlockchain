@@ -5,15 +5,14 @@ const cli = fileURLToPath(
   new URL("../node_modules/@openzeppelin/upgrades-core/dist/cli/cli.js", import.meta.url),
 );
 const source = "test/fund/harness/StorageLayoutHarnesses.sol";
-const reference = `${source}:FundVaultStorageHarnessV1`;
-
 const cases = [
-  ["FundVaultStorageHarnessV2", true],
-  ["FundVaultStorageHarnessBadType", false],
-  ["FundVaultStorageHarnessRemovedNamespace", false],
+  ["FundVaultStorageHarnessV1", "FundVaultStorageHarnessV2", true],
+  ["FundVaultStorageHarnessV1", "FundVaultStorageHarnessBadType", false],
+  ["FundVaultStorageHarnessV1", "FundVaultStorageHarnessRemovedNamespace", false],
+  ["StrategyManagerStorageHarnessV1", "StrategyManagerStorageHarnessV2", true],
 ];
 
-for (const [contractName, shouldPass] of cases) {
+for (const [referenceName, contractName, shouldPass] of cases) {
   const result = spawnSync(
     process.execPath,
     [
@@ -23,7 +22,7 @@ for (const [contractName, shouldPass] of cases) {
       "--contract",
       `${source}:${contractName}`,
       "--reference",
-      reference,
+      `${source}:${referenceName}`,
       "--requireReference",
     ],
     { encoding: "utf8" },

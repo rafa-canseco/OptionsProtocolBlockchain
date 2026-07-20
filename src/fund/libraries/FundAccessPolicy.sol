@@ -6,6 +6,7 @@ import {IFundAccounting} from "../interfaces/IFundAccounting.sol";
 import {IFundFlowManager} from "../interfaces/IFundFlowManager.sol";
 import {IStrategyManager} from "../interfaces/IStrategyManager.sol";
 import {ICspFundAdapter} from "../interfaces/ICspFundAdapter.sol";
+import {IStrategyAssetEscrow} from "../interfaces/IStrategyAssetEscrow.sol";
 import {FundConstants} from "../FundConstants.sol";
 
 library FundAccessPolicy {
@@ -79,8 +80,16 @@ library FundAccessPolicy {
 
     function cspAdapterRules() internal pure returns (Rule[] memory rules) {
         rules = new Rule[](2);
-        rules[0] = Rule(UPGRADE_TO_AND_CALL_SELECTOR, FundConstants.UPGRADER_ROLE, FundConstants.ADAPTER_UPGRADE_DELAY);
+        rules[0] = Rule(
+            UPGRADE_TO_AND_CALL_SELECTOR, FundConstants.ADAPTER_UPGRADER_ROLE, FundConstants.ADAPTER_UPGRADE_DELAY
+        );
         rules[1] =
             Rule(ICspFundAdapter.setAdapterConfig.selector, FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
+    }
+
+    function strategyAssetEscrowRules() internal pure returns (Rule[] memory rules) {
+        rules = new Rule[](1);
+        rules[0] =
+            Rule(IStrategyAssetEscrow.releaseToFund.selector, FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
     }
 }

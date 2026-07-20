@@ -3,7 +3,6 @@ pragma solidity 0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {FundVault} from "./FundVault.sol";
 import {FundShare} from "./FundShare.sol";
@@ -11,6 +10,8 @@ import {FundAccounting} from "./FundAccounting.sol";
 import {FundFlowManager} from "./FundFlowManager.sol";
 import {StrategyManager} from "./StrategyManager.sol";
 import {ClaimEscrow} from "./ClaimEscrow.sol";
+import {FundAccessManager} from "./FundAccessManager.sol";
+import {FundAccessManagerDeployer} from "./FundAccessManagerDeployer.sol";
 import {FundConstants} from "./FundConstants.sol";
 import {FundTypes} from "./FundTypes.sol";
 import {FundAccessPolicy} from "./libraries/FundAccessPolicy.sol";
@@ -71,6 +72,7 @@ contract FundFactory is Ownable {
 
     mapping(uint64 version => ImplementationSet implementations) public implementationSets;
     mapping(bytes32 deploymentId => FundDeployment deployment) private _deployments;
+    FundAccessManagerDeployer public immutable accessManagerDeployer;
 
     event ImplementationVersionRegistered(uint64 indexed version, uint64 compatibilityVersion);
     event ImplementationVersionStatusChanged(uint64 indexed version, bool active);
@@ -88,7 +90,9 @@ contract FundFactory is Ownable {
         uint64 implementationVersion
     );
 
-    constructor(address initialOwner) Ownable(initialOwner) {}
+    constructor(address initialOwner) Ownable(initialOwner) {
+        accessManagerDeployer = new FundAccessManagerDeployer();
+    }
 
     function registerImplementationVersion(uint64 version, ImplementationSet calldata implementationSet)
         external
@@ -131,7 +135,7 @@ contract FundFactory is Ownable {
             revert InvalidImplementationSet(params.implementationVersion);
         }
 
-        AccessManager manager = new AccessManager(address(this));
+        FundAccessManager manager = accessManagerDeployer.deploy();
         address vaultProxy =
             address(new ERC1967Proxy{salt: keccak256(abi.encode(deploymentId, "VAULT"))}(implementationSet.vault, ""));
         address shareProxy =
@@ -198,6 +202,7 @@ contract FundFactory is Ownable {
         manager.setRoleGuardian(FundConstants.CURATOR_ROLE, FundConstants.GUARDIAN_ROLE);
         manager.setGrantDelay(manager.ADMIN_ROLE(), FundConstants.CORE_UPGRADE_DELAY);
         manager.setGrantDelay(FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
+        manager.setGrantDelay(FundConstants.ADAPTER_UPGRADER_ROLE, FundConstants.ADAPTER_UPGRADE_DELAY);
         manager.setGrantDelay(FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
         manager.setTargetAdminDelay(shareProxy, FundConstants.CORE_UPGRADE_DELAY);
         manager.setTargetAdminDelay(vaultProxy, FundConstants.CORE_UPGRADE_DELAY);
@@ -206,6 +211,9 @@ contract FundFactory is Ownable {
         manager.setTargetAdminDelay(strategyProxy, FundConstants.CORE_UPGRADE_DELAY);
 
         manager.grantRole(FundConstants.UPGRADER_ROLE, params.roles.upgrader, FundConstants.CORE_UPGRADE_DELAY);
+        manager.grantRole(
+            FundConstants.ADAPTER_UPGRADER_ROLE, params.roles.upgrader, FundConstants.ADAPTER_UPGRADE_DELAY
+        );
         manager.grantRole(FundConstants.ACCOUNTING_ROLE, params.roles.accounting, 0);
         manager.grantRole(FundConstants.ALLOCATOR_ROLE, params.roles.allocator, 0);
         manager.grantRole(FundConstants.PROCESSOR_ROLE, params.roles.processor, 0);
@@ -241,13 +249,13 @@ contract FundFactory is Ownable {
         );
     }
 
-    function _configureRules(AccessManager manager, address target, FundAccessPolicy.Rule[] memory rules) private {
+    function _configureRules(FundAccessManager manager, address target, FundAccessPolicy.Rule[] memory rules) private {
         for (uint256 i; i < rules.length; ++i) {
             _setSingleRule(manager, target, rules[i].selector, rules[i].role);
         }
     }
 
-    function _setSingleRule(AccessManager manager, address target, bytes4 selector, uint64 role) private {
+    function _setSingleRule(FundAccessManager manager, address target, bytes4 selector, uint64 role) private {
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = selector;
         manager.setTargetFunctionRole(target, selectors, role);

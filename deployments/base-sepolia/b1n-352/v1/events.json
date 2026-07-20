@@ -1,0 +1,1535 @@
+[
+  {
+    "contract": "CspFundAdapter",
+    "name": "AccountingAssetsReturned",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "CspFundAdapter",
+    "name": "AdapterConfigUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "riskConfig",
+        "type": "struct ICspFundAdapter.RiskConfig",
+        "indexed": false
+      },
+      {
+        "name": "swapRouter",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "swapFeeTier",
+        "type": "uint24",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "CspFundAdapter",
+    "name": "AssignedWethSwapped",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "wethIn",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "usdcOut",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "CspFundAdapter",
+    "name": "AuthorityUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "authority",
+        "type": "address",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "CspFundAdapter",
+    "name": "Initialized",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "CspFundAdapter",
+    "name": "PositionOpened",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "positionId",
+        "type": "uint256",
+        "indexed": true
+      },
+      {
+        "name": "protocolVaultId",
+        "type": "uint256",
+        "indexed": true
+      },
+      {
+        "name": "oToken",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "marketMaker",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "optionAmount",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "collateral",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "premiumEarned",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "lifecycleHash",
+        "type": "bytes32",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "CspFundAdapter",
+    "name": "PositionTransitioned",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "positionId",
+        "type": "uint256",
+        "indexed": true
+      },
+      {
+        "name": "protocolVaultId",
+        "type": "uint256",
+        "indexed": true
+      },
+      {
+        "name": "lifecycle",
+        "type": "enum ICspFundAdapter.Lifecycle",
+        "indexed": false
+      },
+      {
+        "name": "collateralDelta",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "payment",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "wethDelta",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "lifecycleHash",
+        "type": "bytes32",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "CspFundAdapter",
+    "name": "RawAssetsRecovered",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "escrow",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "assets",
+        "type": "address[]",
+        "indexed": false
+      },
+      {
+        "name": "amounts",
+        "type": "uint256[]",
+        "indexed": false
+      },
+      {
+        "name": "emergency",
+        "type": "bool",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "CspFundAdapter",
+    "name": "UnaccountedAssetIsolated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "CspFundAdapter",
+    "name": "Upgraded",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "OperationCanceled",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "nonce",
+        "type": "uint32",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "OperationExecuted",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "nonce",
+        "type": "uint32",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "OperationScheduled",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "nonce",
+        "type": "uint32",
+        "indexed": true
+      },
+      {
+        "name": "schedule",
+        "type": "uint48",
+        "indexed": false
+      },
+      {
+        "name": "caller",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "data",
+        "type": "bytes",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleAdminChanged",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "admin",
+        "type": "uint64",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleGrantDelayChanged",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "delay",
+        "type": "uint32",
+        "indexed": false
+      },
+      {
+        "name": "since",
+        "type": "uint48",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleGranted",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "delay",
+        "type": "uint32",
+        "indexed": false
+      },
+      {
+        "name": "since",
+        "type": "uint48",
+        "indexed": false
+      },
+      {
+        "name": "newMember",
+        "type": "bool",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleGuardianChanged",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "guardian",
+        "type": "uint64",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleLabel",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "label",
+        "type": "string",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleRevoked",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "TargetAdminDelayUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "delay",
+        "type": "uint32",
+        "indexed": false
+      },
+      {
+        "name": "since",
+        "type": "uint48",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "TargetClosed",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "closed",
+        "type": "bool",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "TargetFunctionRoleUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "indexed": false
+      },
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccounting",
+    "name": "AuthorityUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "authority",
+        "type": "address",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccounting",
+    "name": "ComponentStateUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "nonce",
+        "type": "uint64",
+        "indexed": false
+      },
+      {
+        "name": "positionStateHash",
+        "type": "bytes32",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccounting",
+    "name": "ComponentUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "valuator",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "interfaceVersion",
+        "type": "uint64",
+        "indexed": false
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccounting",
+    "name": "FeeConfigUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "managementFeeWad",
+        "type": "uint64",
+        "indexed": false
+      },
+      {
+        "name": "performanceFeeBps",
+        "type": "uint16",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccounting",
+    "name": "Initialized",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccounting",
+    "name": "NavSubmitted",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "reportNonce",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "reportHash",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "netAssets",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "feeShares",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccounting",
+    "name": "ReporterSetUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "threshold",
+        "type": "uint16",
+        "indexed": false
+      },
+      {
+        "name": "reporters",
+        "type": "address[]",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccounting",
+    "name": "Upgraded",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundFactory",
+    "name": "FundCreated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "deploymentId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "vault",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "share",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "accounting",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "navVerifier",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "flowManager",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "strategyManager",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "claimEscrow",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "accessManager",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "implementationVersion",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundFactory",
+    "name": "ImplementationVersionRegistered",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "compatibilityVersion",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundFactory",
+    "name": "ImplementationVersionStatusChanged",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundFactory",
+    "name": "OwnershipTransferred",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "previousOwner",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "AuthorityUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "authority",
+        "type": "address",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "ClaimConsumed",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "assets",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "Initialized",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "PendingCancelled",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "RedeemBatchProcessed",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "controllers",
+        "type": "uint16",
+        "indexed": false
+      },
+      {
+        "name": "roundComplete",
+        "type": "bool",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "RedeemBatchReleased",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "RedeemBatchSealed",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "pendingShares",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "RedeemBatchStarted",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "processingNav",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "reservedAssets",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "marginalExitCost",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "StrategyExitEscrowsUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "inKindEscrow",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "emergencyEscrow",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "StrategyInKindBatchAuthorized",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "escrow",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "fractionWad",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "validUntil",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "StrategyInKindBatchConsumed",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundFlowManager",
+    "name": "Upgraded",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundShare",
+    "name": "Approval",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "owner",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "spender",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundShare",
+    "name": "AuthorityUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "authority",
+        "type": "address",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundShare",
+    "name": "EIP712DomainChanged",
+    "anonymous": false,
+    "inputs": []
+  },
+  {
+    "contract": "FundShare",
+    "name": "Initialized",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundShare",
+    "name": "Transfer",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "from",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundShare",
+    "name": "Upgraded",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundShare",
+    "name": "VaultUpdate",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "vault",
+        "type": "address",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundVault",
+    "name": "AuthorityUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "authority",
+        "type": "address",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundVault",
+    "name": "ClaimReserved",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "assets",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundVault",
+    "name": "Deposit",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "owner",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "assets",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundVault",
+    "name": "Initialized",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundVault",
+    "name": "NavCommitted",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "reportNonce",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "netAssets",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "validAfterBlock",
+        "type": "uint64",
+        "indexed": false
+      },
+      {
+        "name": "validUntilBlock",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundVault",
+    "name": "NavInvalidated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "positionsHash",
+        "type": "bytes32",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundVault",
+    "name": "NavWindowRestored",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "reportNonce",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "validUntilBlock",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundVault",
+    "name": "OperatorSet",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "operator",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "approved",
+        "type": "bool",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundVault",
+    "name": "RedeemRequest",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "owner",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "requestId",
+        "type": "uint256",
+        "indexed": true
+      },
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundVault",
+    "name": "Upgraded",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundVault",
+    "name": "Withdraw",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "receiver",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "owner",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "assets",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyAssetEscrow",
+    "name": "AssetReleasedToFund",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyAssetEscrow",
+    "name": "AuthorityUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "authority",
+        "type": "address",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
+    "name": "AllocationPaused",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
+    "name": "AllocationResumeInvalidated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "pauseNonce",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
+    "name": "AllocationResumed",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
+    "name": "AuthorityUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "authority",
+        "type": "address",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
+    "name": "Initialized",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
+    "name": "StrategyAllocated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "positionNonce",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
+    "name": "StrategyConfigured",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "valuator",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
+    "name": "StrategyDeallocated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "targetValue",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "assetsOut",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "positionNonce",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
+    "name": "StrategyDeallocatedInKind",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "escrow",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "fractionWad",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "positionNonce",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
+    "name": "StrategyEmergencyExited",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "escrow",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "positionNonce",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
+    "name": "Upgraded",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  }
+]

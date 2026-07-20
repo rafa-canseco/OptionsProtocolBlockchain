@@ -1,0 +1,1505 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "UPGRADE_INTERFACE_VERSION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "authority",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "authorizeStrategyInKindBatch",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "adapter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "fractionWad",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "validUntil",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "batch",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct FundTypes.RedemptionBatch",
+        "components": [
+          {
+            "name": "totalPendingShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "processedShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "reservedAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "marginalExitCost",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "processingNav",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "eligibleSupply",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "roundPendingShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "roundTargetShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "roundCumulativeShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "roundAllocatedShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "roundAssetBudget",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "roundAllocatedAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "processingPositionsHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "processingBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "processingReportNonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "processingValidUntilBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "processingCursor",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "mode",
+            "type": "uint8",
+            "internalType": "enum FundTypes.RequestMode"
+          },
+          {
+            "name": "isSealed",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "processing",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "unwindCommitted",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "isReleased",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "batchController",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "batchParticipantCount",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "cancelPending",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimEscrow",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "claimableAssets",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "claimableRedeemRequest",
+    "inputs": [
+      {
+        "name": "requestId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "compatibilityVersion",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "consumeClaim",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "assets",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "consumeClaimAssets",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "assets",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "shares",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "consumeStrategyInKindBatch",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "adapter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "fractionWad",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "escrow",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "exitPolicy",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "maxExitFeeBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "maxWindowOutflowBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "fund",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hasActiveProcessing",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "inputs": [
+      {
+        "name": "fund_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "claimEscrow_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "authority_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "compatibilityVersion_",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "isCancellationAvailable",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isConsumingScheduledOp",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isOperator",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "operator",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "nextProcessBatchId",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "openBatchId",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pendingMinimumAssets",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pendingRedeemRequest",
+    "inputs": [
+      {
+        "name": "requestId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "processRedeemBatch",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "maxControllers",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "processedControllers",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "roundComplete",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "proxiableUUID",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "recordRedeemRequest",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shareSpender",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "owner",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "minAssetsOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "requestId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "releaseRedeemBatch",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "sealRedeemBatch",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setAuthority",
+    "inputs": [
+      {
+        "name": "newAuthority",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setExitPolicy",
+    "inputs": [
+      {
+        "name": "maxExitFeeBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "maxWindowOutflowBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setOperator",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "operator",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "approved",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setStrategyExitEscrows",
+    "inputs": [
+      {
+        "name": "inKindEscrow",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "emergencyEscrow",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "startRedeemBatch",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "marginalExitCost",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "strategyExitEscrows",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "inKindEscrow",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "emergencyEscrow",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "strategyInKindBatch",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "adapter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "escrow",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "validUntil",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "consumed",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "fractionWad",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "totalClaimableShares",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "totalPendingShares",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "totalReservedAssets",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "upgradeToAndCall",
+    "inputs": [
+      {
+        "name": "newImplementation",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "windowOutflow",
+    "inputs": [
+      {
+        "name": "reportNonce",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "eligibleSupply",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "processedShares",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "AuthorityUpdated",
+    "inputs": [
+      {
+        "name": "authority",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ClaimConsumed",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "assets",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Initialized",
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PendingCancelled",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedeemBatchProcessed",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "controllers",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      },
+      {
+        "name": "roundComplete",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedeemBatchReleased",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedeemBatchSealed",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "pendingShares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedeemBatchStarted",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "processingNav",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "reservedAssets",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "marginalExitCost",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "StrategyExitEscrowsUpdated",
+    "inputs": [
+      {
+        "name": "inKindEscrow",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "emergencyEscrow",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "StrategyInKindBatchAuthorized",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "escrow",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "fractionWad",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "validUntil",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "StrategyInKindBatchConsumed",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Upgraded",
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AccessManagedInvalidAuthority",
+    "inputs": [
+      {
+        "name": "authority",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AccessManagedRequiredDelay",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "delay",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AccessManagedUnauthorized",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AddressEmptyCode",
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "BatchCapacityExceeded",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "BatchNotProcessable",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "BatchNotReleasable",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ClaimExceedsAvailable",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ERC1967InvalidImplementation",
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ERC1967NonPayable",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FailedCall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FeeExceedsNav",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidBps",
+    "inputs": [
+      {
+        "name": "bps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidExitPolicy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidInitialization",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidMarginalExitCost",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidProcessingPage",
+    "inputs": [
+      {
+        "name": "requested",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "maximum",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidSupply",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MinimumAssetsNotMet",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "minimum",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotInitializing",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PendingRequestInSealedBatch",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "batchId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RequestNotCancelable",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RequestOwnerMismatch",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expectedOwner",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "actualOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "StrategyExitBatchInvalid",
+    "inputs": [
+      {
+        "name": "batchId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UUPSUnauthorizedCallContext",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UUPSUnsupportedProxiableUUID",
+    "inputs": [
+      {
+        "name": "slot",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnauthorizedOperator",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ZeroNavWithExistingSupply",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroPayout",
+    "inputs": []
+  }
+]

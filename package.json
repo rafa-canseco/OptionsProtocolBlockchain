@@ -3,6 +3,11 @@
   "version": "0.8.0",
   "private": true,
   "scripts": {
+    "b1n352:inputs:template": "node scripts/prepare-b1n-352-inputs.mjs template deployments/base-sepolia/b1n-352/v1/deployment-inputs.approved.template.json",
+    "b1n352:inputs:check": "node scripts/prepare-b1n-352-inputs.mjs check",
+    "b1n352:inputs:derive": "node scripts/prepare-b1n-352-inputs.mjs derive",
+    "b1n352:inputs:env": "node scripts/prepare-b1n-352-inputs.mjs env",
+    "b1n352:inputs:test": "node --test scripts/test-b1n-352-inputs.mjs",
     "deps:check": "node scripts/check-contract-deps.mjs",
     "storage:check": "node scripts/check-fund-storage.mjs"
   },
