@@ -360,7 +360,7 @@ abstract contract B1N352Base is Script {
         value = abi.decode(result, (bool));
     }
 
-    function _approvedInputs() internal view returns (string memory) {
+    function _approvedInputs() internal view virtual returns (string memory) {
         return vm.readFile(vm.envString("FUND_APPROVED_INPUTS_PATH"));
     }
 

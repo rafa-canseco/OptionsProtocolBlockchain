@@ -73,6 +73,10 @@ contract B1N352ApprovedInputsHarness is B1N352Base {
     function approvedUint16(string memory key) external view returns (uint16) {
         return _approvedUint16(key);
     }
+
+    function _approvedInputs() internal view override returns (string memory) {
+        return vm.readFile("test/fixtures/b1n352-approved-inputs.json");
+    }
 }
 
 contract B1N352OperationsHarness is B1N352Operations {
@@ -311,13 +315,11 @@ contract B1N352DeploymentTest is Test {
     }
 
     function test_approvedValuesAreReadFromBoundJsonNotDuplicateEnvironment() public {
-        string memory path = "test/fixtures/b1n352-approved-inputs.json";
-        vm.setEnv("FUND_APPROVED_INPUTS_PATH", path);
         vm.setEnv("TEST_ADDRESS", vm.toString(address(0xBAD)));
         vm.setEnv("TEST_UINT", "1");
 
         B1N352ApprovedInputsHarness approvedInputsHarness = new B1N352ApprovedInputsHarness();
-        assertEq(approvedInputsHarness.approvedAddress("TEST_ADDRESS"), address(0xB1A3));
+        assertEq(approvedInputsHarness.approvedAddress("TEST_ADDRESS"), address(0x3520));
         assertEq(approvedInputsHarness.approvedUint16("TEST_UINT"), 65_535);
     }
 
