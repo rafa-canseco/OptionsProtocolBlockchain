@@ -30,6 +30,19 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
         address deployer = vm.addr(deployerKey);
         vm.startBroadcast(deployerKey);
         deployed = _deploy(config, deployer);
+        require(
+            deployed.cspAdapterOperations == _approvedAddress("FUND_CSP_ADAPTER_OPERATIONS"),
+            "B1N352: adapter operations address"
+        );
+        require(
+            deployed.cspAdapterOperations.codehash == _approvedBytes32("FUND_CSP_ADAPTER_OPERATIONS_CODEHASH"),
+            "B1N352: adapter operations hash"
+        );
+        require(
+            deployed.cspFundAdapterImplementation.codehash
+                == _approvedBytes32("FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH"),
+            "B1N352: linked adapter implementation hash"
+        );
         vm.stopBroadcast();
 
         _logDeployment(deployed);
@@ -150,10 +163,10 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
         console2.log("FUND_ACCESS_MANAGER_CODEHASH");
         console2.logBytes32(deployed.accessManager.codehash);
         console2.log("FUND_CSP_ADAPTER_OPERATIONS", deployed.cspAdapterOperations);
-        console2.log("FUND_CSP_ADAPTER_OPERATIONS_CODEHASH");
+        console2.log("ACTUAL_FUND_CSP_ADAPTER_OPERATIONS_CODEHASH");
         console2.logBytes32(deployed.cspAdapterOperations.codehash);
         console2.log("FUND_CSP_ADAPTER_IMPLEMENTATION", deployed.cspFundAdapterImplementation);
-        console2.log("FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH");
+        console2.log("ACTUAL_FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH");
         console2.logBytes32(deployed.cspFundAdapterImplementation.codehash);
         console2.log("FUND_CSP_ADAPTER_PROXY", deployed.cspFundAdapterProxy);
         console2.log("FUND_CSP_VALUATOR", deployed.cspFundValuator);

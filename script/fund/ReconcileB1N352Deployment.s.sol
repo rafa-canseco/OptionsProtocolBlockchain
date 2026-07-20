@@ -121,10 +121,10 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
         require(address(ClaimEscrow(claimEscrow).ASSET()) == deployConfig.accountingAsset, "B1N352: claim asset");
         require(ClaimEscrow(claimEscrow).FUND_VAULT() == address(vault), "B1N352: claim fund");
 
-        address operations = vm.envAddress("FUND_CSP_ADAPTER_OPERATIONS");
+        address operations = _approvedAddress("FUND_CSP_ADAPTER_OPERATIONS");
         require(operations.code.length != 0, "B1N352: adapter operations code");
         require(
-            operations.codehash == vm.envBytes32("FUND_CSP_ADAPTER_OPERATIONS_CODEHASH"),
+            operations.codehash == _approvedBytes32("FUND_CSP_ADAPTER_OPERATIONS_CODEHASH"),
             "B1N352: adapter operations hash"
         );
         require(
@@ -179,7 +179,7 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             manager.ADMIN_ROLE(),
             manager.ADMIN_ROLE(),
             FundConstants.CORE_UPGRADE_DELAY,
-            vm.envAddress("FUND_ADMIN"),
+            _approvedAddress("FUND_ADMIN"),
             FundConstants.CORE_UPGRADE_DELAY,
             1
         );
@@ -189,7 +189,7 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             manager.ADMIN_ROLE(),
             manager.ADMIN_ROLE(),
             FundConstants.CORE_UPGRADE_DELAY,
-            vm.envAddress("FUND_UPGRADER"),
+            _approvedAddress("FUND_UPGRADER"),
             FundConstants.CORE_UPGRADE_DELAY,
             1
         );
@@ -199,7 +199,7 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             manager.ADMIN_ROLE(),
             manager.ADMIN_ROLE(),
             0,
-            vm.envAddress("FUND_ACCOUNTING_OPERATOR"),
+            _approvedAddress("FUND_ACCOUNTING_OPERATOR"),
             0,
             1
         );
@@ -209,7 +209,7 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             manager.ADMIN_ROLE(),
             manager.ADMIN_ROLE(),
             0,
-            vm.envAddress("FUND_ALLOCATOR"),
+            _approvedAddress("FUND_ALLOCATOR"),
             0,
             1
         );
@@ -219,7 +219,7 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             manager.ADMIN_ROLE(),
             manager.ADMIN_ROLE(),
             0,
-            vm.envAddress("FUND_PROCESSOR"),
+            _approvedAddress("FUND_PROCESSOR"),
             0,
             1
         );
@@ -229,7 +229,7 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             manager.ADMIN_ROLE(),
             FundConstants.GUARDIAN_ROLE,
             FundConstants.CURATOR_DELAY,
-            vm.envAddress("FUND_CURATOR"),
+            _approvedAddress("FUND_CURATOR"),
             FundConstants.CURATOR_DELAY,
             1
         );
@@ -239,7 +239,7 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             manager.ADMIN_ROLE(),
             manager.ADMIN_ROLE(),
             0,
-            vm.envAddress("FUND_GUARDIAN"),
+            _approvedAddress("FUND_GUARDIAN"),
             0,
             1
         );
@@ -252,7 +252,7 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             manager.ADMIN_ROLE(),
             manager.ADMIN_ROLE(),
             FundConstants.ADAPTER_UPGRADE_DELAY,
-            vm.envAddress("FUND_UPGRADER"),
+            _approvedAddress("FUND_UPGRADER"),
             FundConstants.ADAPTER_UPGRADE_DELAY,
             1
         );

@@ -11,6 +11,7 @@ import {
     FundFlowManagerStorageHarnessV1,
     FundFlowManagerStorageHarnessV2,
     StrategyManagerStorageHarnessV1,
+    StrategyManagerStorageHarnessV2,
     CspFundAdapterStorageHarnessV1
 } from "./harness/StorageLayoutHarnesses.sol";
 
@@ -35,6 +36,7 @@ contract StorageLayoutSpecTest is Test {
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV1"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV2"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV1"), options);
+        Upgrades.validateImplementation(string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV2"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "CspFundAdapterStorageHarnessV1"), options);
     }
 
@@ -44,6 +46,8 @@ contract StorageLayoutSpecTest is Test {
         Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "FundVaultStorageHarnessV2"), options);
         options.referenceContract = string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV1");
         Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV2"), options);
+        options.referenceContract = string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV1");
+        Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV2"), options);
     }
 
     function test_compatibleUupsUpgradePreservesNamespacedState() public {
@@ -61,6 +65,20 @@ contract StorageLayoutSpecTest is Test {
         assertEq(upgraded.committedNav(), 42);
         upgraded.setAppendedField(99);
         assertEq(upgraded.appendedField(), 99);
+
+        address strategyProxy = Upgrades.deployUUPSProxy(
+            string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV1"),
+            abi.encodeCall(StrategyManagerStorageHarnessV1.initialize, (address(this)))
+        );
+        StrategyManagerStorageHarnessV1(strategyProxy).setFund(address(0xB1A352));
+        options.referenceContract = string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV1");
+        Upgrades.upgradeProxy(
+            strategyProxy, string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV2"), "", options
+        );
+        StrategyManagerStorageHarnessV2 upgradedStrategy = StrategyManagerStorageHarnessV2(strategyProxy);
+        assertEq(upgradedStrategy.fund(), address(0xB1A352));
+        upgradedStrategy.setAllocationPauseNonce(address(0xA11CE), 7);
+        assertEq(upgradedStrategy.allocationPauseNonce(address(0xA11CE)), 7);
     }
 
     function test_namespaceLocationsMatchErc7201Derivations() public {

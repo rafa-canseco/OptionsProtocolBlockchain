@@ -21,7 +21,7 @@ contract RestartB1N352Policy is B1N352Operations {
         _restartOperations(
             manager,
             _policyOperations(config),
-            vm.envAddress("FUND_PHASE_SCHEDULER"),
+            _approvedAddress("FUND_PHASE_SCHEDULER"),
             _phaseSchedulerKey(),
             _isPolicyPhaseFinalized(config)
         );
@@ -35,7 +35,7 @@ contract CancelB1N352Policy is B1N352Operations {
         _cancelOperations(
             manager,
             _policyOperations(_loadPolicyConfig()),
-            vm.envAddress("FUND_PHASE_SCHEDULER"),
+            _approvedAddress("FUND_PHASE_SCHEDULER"),
             vm.envUint("PRIVATE_KEY")
         );
     }

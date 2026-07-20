@@ -77,61 +77,70 @@ abstract contract B1N352Base is Script {
 
     function _requireBaseSepolia() internal view {
         require(block.chainid == BASE_SEPOLIA_CHAIN_ID, "B1N352: wrong chain");
+        _requireApprovedInputsDigest();
+    }
+
+    function _requireApprovedInputsDigest() internal view {
+        string memory approvedInputs = _approvedInputs();
+        require(
+            sha256(bytes(approvedInputs)) == vm.envBytes32("FUND_APPROVED_INPUTS_SHA256"),
+            "B1N352: approved inputs digest"
+        );
     }
 
     function _loadDeployConfig() internal view returns (DeployConfig memory config) {
-        config.factoryOwner = vm.envAddress("FUND_FACTORY_OWNER");
-        config.addressBook = vm.envAddress("FUND_V1_ADDRESS_BOOK");
-        config.accountingAsset = vm.envAddress("FUND_ACCOUNTING_ASSET");
-        config.weth = vm.envAddress("FUND_WETH");
-        config.adapterSwapRouter = vm.envAddress("FUND_ADAPTER_SWAP_ROUTER");
-        config.adapterSwapFeeTier = _envUint24("FUND_ADAPTER_SWAP_FEE_TIER");
-        config.implementationVersion = _envUint64("FUND_IMPLEMENTATION_VERSION");
-        config.compatibilityVersion = _envUint64("FUND_COMPATIBILITY_VERSION");
-        config.fundSalt = vm.envBytes32("FUND_DEPLOYMENT_SALT");
-        config.fundName = vm.envString("FUND_NAME");
-        config.fundSymbol = vm.envString("FUND_SYMBOL");
-        config.minimumIdleBps = _envUint16("FUND_MINIMUM_IDLE_BPS");
-        config.navActivationDelay = _envUint64("FUND_NAV_ACTIVATION_DELAY_BLOCKS");
-        config.maxSnapshotAge = _envUint64("FUND_MAX_SNAPSHOT_AGE_BLOCKS");
-        config.maxNavWindowLength = _envUint64("FUND_MAX_NAV_WINDOW_LENGTH_BLOCKS");
+        config.factoryOwner = _approvedAddress("FUND_FACTORY_OWNER");
+        config.addressBook = _approvedAddress("FUND_V1_ADDRESS_BOOK");
+        config.accountingAsset = _approvedAddress("FUND_ACCOUNTING_ASSET");
+        config.weth = _approvedAddress("FUND_WETH");
+        config.adapterSwapRouter = _approvedAddress("FUND_ADAPTER_SWAP_ROUTER");
+        config.adapterSwapFeeTier = _approvedUint24("FUND_ADAPTER_SWAP_FEE_TIER");
+        config.implementationVersion = _approvedUint64("FUND_IMPLEMENTATION_VERSION");
+        config.compatibilityVersion = _approvedUint64("FUND_COMPATIBILITY_VERSION");
+        config.fundSalt = _approvedBytes32("FUND_DEPLOYMENT_SALT");
+        config.fundName = _approvedString("FUND_NAME");
+        config.fundSymbol = _approvedString("FUND_SYMBOL");
+        config.minimumIdleBps = _approvedUint16("FUND_MINIMUM_IDLE_BPS");
+        config.navActivationDelay = _approvedUint64("FUND_NAV_ACTIVATION_DELAY_BLOCKS");
+        config.maxSnapshotAge = _approvedUint64("FUND_MAX_SNAPSHOT_AGE_BLOCKS");
+        config.maxNavWindowLength = _approvedUint64("FUND_MAX_NAV_WINDOW_LENGTH_BLOCKS");
         config.feeConfig = FundTypes.FeeConfig({
-            managementFeeWad: _envUint64("FUND_MANAGEMENT_FEE_WAD"),
-            performanceFeeBps: _envUint16("FUND_PERFORMANCE_FEE_BPS"),
-            maxManagementFeeBps: _envUint16("FUND_MAX_MANAGEMENT_FEE_BPS"),
-            maxPerformanceFeeBps: _envUint16("FUND_MAX_PERFORMANCE_FEE_BPS"),
-            maxAccrualInterval: _envUint32("FUND_MAX_ACCRUAL_INTERVAL_SECONDS"),
-            crystallizationPeriod: _envUint32("FUND_CRYSTALLIZATION_PERIOD_SECONDS"),
-            feeRecipient: vm.envAddress("FUND_FEE_RECIPIENT")
+            managementFeeWad: _approvedUint64("FUND_MANAGEMENT_FEE_WAD"),
+            performanceFeeBps: _approvedUint16("FUND_PERFORMANCE_FEE_BPS"),
+            maxManagementFeeBps: _approvedUint16("FUND_MAX_MANAGEMENT_FEE_BPS"),
+            maxPerformanceFeeBps: _approvedUint16("FUND_MAX_PERFORMANCE_FEE_BPS"),
+            maxAccrualInterval: _approvedUint32("FUND_MAX_ACCRUAL_INTERVAL_SECONDS"),
+            crystallizationPeriod: _approvedUint32("FUND_CRYSTALLIZATION_PERIOD_SECONDS"),
+            feeRecipient: _approvedAddress("FUND_FEE_RECIPIENT")
         });
         config.roles = FundFactory.RoleAccounts({
-            admin: vm.envAddress("FUND_ADMIN"),
-            upgrader: vm.envAddress("FUND_UPGRADER"),
-            accounting: vm.envAddress("FUND_ACCOUNTING_OPERATOR"),
-            allocator: vm.envAddress("FUND_ALLOCATOR"),
-            processor: vm.envAddress("FUND_PROCESSOR"),
-            curator: vm.envAddress("FUND_CURATOR"),
-            guardian: vm.envAddress("FUND_GUARDIAN")
+            admin: _approvedAddress("FUND_ADMIN"),
+            upgrader: _approvedAddress("FUND_UPGRADER"),
+            accounting: _approvedAddress("FUND_ACCOUNTING_OPERATOR"),
+            allocator: _approvedAddress("FUND_ALLOCATOR"),
+            processor: _approvedAddress("FUND_PROCESSOR"),
+            curator: _approvedAddress("FUND_CURATOR"),
+            guardian: _approvedAddress("FUND_GUARDIAN")
         });
         config.adapterRiskConfig = ICspFundAdapter.RiskConfig({
-            minExpiryDelay: _envUint64("FUND_CSP_MIN_EXPIRY_DELAY_SECONDS"),
-            maxExpiryDelay: _envUint64("FUND_CSP_MAX_EXPIRY_DELAY_SECONDS"),
-            settlementDefaultDelay: _envUint64("FUND_CSP_SETTLEMENT_DEFAULT_DELAY_SECONDS"),
-            minPremiumBps: _envUint16("FUND_CSP_MIN_PREMIUM_BPS"),
-            maxSwapSlippageBps: _envUint16("FUND_CSP_MAX_SWAP_SLIPPAGE_BPS"),
-            maxOpenPositions: _envUint16("FUND_CSP_MAX_OPEN_POSITIONS"),
-            minStrike: vm.envUint("FUND_CSP_MIN_STRIKE"),
-            maxStrike: vm.envUint("FUND_CSP_MAX_STRIKE"),
-            maxCollateralPerPosition: vm.envUint("FUND_CSP_MAX_COLLATERAL_PER_POSITION"),
-            maxWethPerSwap: vm.envUint("FUND_CSP_MAX_WETH_PER_SWAP")
+            minExpiryDelay: _approvedUint64("FUND_CSP_MIN_EXPIRY_DELAY_SECONDS"),
+            maxExpiryDelay: _approvedUint64("FUND_CSP_MAX_EXPIRY_DELAY_SECONDS"),
+            settlementDefaultDelay: _approvedUint64("FUND_CSP_SETTLEMENT_DEFAULT_DELAY_SECONDS"),
+            minPremiumBps: _approvedUint16("FUND_CSP_MIN_PREMIUM_BPS"),
+            maxSwapSlippageBps: _approvedUint16("FUND_CSP_MAX_SWAP_SLIPPAGE_BPS"),
+            maxOpenPositions: _approvedUint16("FUND_CSP_MAX_OPEN_POSITIONS"),
+            minStrike: _approvedUint("FUND_CSP_MIN_STRIKE"),
+            maxStrike: _approvedUint("FUND_CSP_MAX_STRIKE"),
+            maxCollateralPerPosition: _approvedUint("FUND_CSP_MAX_COLLATERAL_PER_POSITION"),
+            maxWethPerSwap: _approvedUint("FUND_CSP_MAX_WETH_PER_SWAP")
         });
-        config.spotFeed = vm.envAddress("FUND_CSP_SPOT_FEED");
-        config.spotFeedDecimals = _envUint8("FUND_CSP_SPOT_FEED_DECIMALS");
-        config.maxSpotStaleness = _envUint64("FUND_CSP_MAX_SPOT_STALENESS_SECONDS");
-        config.maxObservationWindow = _envUint64("FUND_CSP_MAX_OBSERVATION_WINDOW_BLOCKS");
-        config.observationQuorum = _envUint8("FUND_CSP_OBSERVATION_QUORUM");
-        config.liabilityBufferBps = _envUint16("FUND_CSP_LIABILITY_BUFFER_BPS");
-        config.approvedObservers = vm.envAddress("FUND_CSP_APPROVED_OBSERVERS", ",");
+        config.spotFeed = _approvedAddress("FUND_CSP_SPOT_FEED");
+        config.spotFeedDecimals = _approvedUint8("FUND_CSP_SPOT_FEED_DECIMALS");
+        config.maxSpotStaleness = _approvedUint64("FUND_CSP_MAX_SPOT_STALENESS_SECONDS");
+        config.maxObservationWindow = _approvedUint64("FUND_CSP_MAX_OBSERVATION_WINDOW_BLOCKS");
+        config.observationQuorum = _approvedUint8("FUND_CSP_OBSERVATION_QUORUM");
+        config.liabilityBufferBps = _approvedUint16("FUND_CSP_LIABILITY_BUFFER_BPS");
+        config.approvedObservers = _approvedAddressArray("FUND_CSP_APPROVED_OBSERVERS");
     }
 
     function _validateExternalConfig(DeployConfig memory config) internal view {
@@ -192,11 +201,11 @@ abstract contract B1N352Base is Script {
         string memory expectedCodehashEnv,
         string memory errorMessage
     ) internal view {
-        require(_implementationOf(proxy).codehash == vm.envBytes32(expectedCodehashEnv), errorMessage);
+        require(_implementationOf(proxy).codehash == _approvedBytes32(expectedCodehashEnv), errorMessage);
     }
 
     function _requireExpectedV1Baseline(address addressBook_) internal view {
-        require(addressBook_ == vm.envAddress("FUND_EXPECTED_V1_ADDRESS_BOOK"), "B1N352: address book baseline");
+        require(addressBook_ == _approvedAddress("FUND_EXPECTED_V1_ADDRESS_BOOK"), "B1N352: address book baseline");
         AddressBook book = AddressBook(addressBook_);
         _requireExpectedProxyBaseline(
             addressBook_,
@@ -247,6 +256,33 @@ abstract contract B1N352Base is Script {
             "FUND_EXPECTED_V1_BATCH_SETTLER_CODEHASH",
             "settler"
         );
+        _requireExpectedOwnership(
+            addressBook_,
+            "FUND_EXPECTED_V1_ADDRESS_BOOK_OWNER",
+            "FUND_EXPECTED_V1_ADDRESS_BOOK_PENDING_OWNER",
+            "address book"
+        );
+        _requireExpectedOwnership(
+            book.controller(),
+            "FUND_EXPECTED_V1_CONTROLLER_OWNER",
+            "FUND_EXPECTED_V1_CONTROLLER_PENDING_OWNER",
+            "controller"
+        );
+        _requireExpectedOwnership(
+            book.oracle(), "FUND_EXPECTED_V1_ORACLE_OWNER", "FUND_EXPECTED_V1_ORACLE_PENDING_OWNER", "oracle"
+        );
+        _requireExpectedOwnership(
+            book.whitelist(),
+            "FUND_EXPECTED_V1_WHITELIST_OWNER",
+            "FUND_EXPECTED_V1_WHITELIST_PENDING_OWNER",
+            "whitelist"
+        );
+        _requireExpectedOwnership(
+            book.batchSettler(),
+            "FUND_EXPECTED_V1_BATCH_SETTLER_OWNER",
+            "FUND_EXPECTED_V1_BATCH_SETTLER_PENDING_OWNER",
+            "settler"
+        );
     }
 
     function _logV1Baseline(address addressBook_) internal view {
@@ -258,6 +294,11 @@ abstract contract B1N352Base is Script {
         _logProxyBaseline("ORACLE", book.oracle());
         _logProxyBaseline("WHITELIST", book.whitelist());
         _logProxyBaseline("BATCH_SETTLER", book.batchSettler());
+        _logOwnership("ADDRESS_BOOK", addressBook_);
+        _logOwnership("CONTROLLER", book.controller());
+        _logOwnership("ORACLE", book.oracle());
+        _logOwnership("WHITELIST", book.whitelist());
+        _logOwnership("BATCH_SETTLER", book.batchSettler());
     }
 
     function _requireExpectedProxyBaseline(
@@ -267,13 +308,14 @@ abstract contract B1N352Base is Script {
         string memory codehashEnv,
         string memory component
     ) private view {
-        require(proxy == vm.envAddress(proxyEnv), string.concat("B1N352: ", component, " proxy"));
+        require(proxy == _approvedAddress(proxyEnv), string.concat("B1N352: ", component, " proxy"));
         address implementation = _implementationOf(proxy);
         require(
-            implementation == vm.envAddress(implementationEnv), string.concat("B1N352: ", component, " implementation")
+            implementation == _approvedAddress(implementationEnv),
+            string.concat("B1N352: ", component, " implementation")
         );
         require(
-            implementation.codehash == vm.envBytes32(codehashEnv), string.concat("B1N352: ", component, " codehash")
+            implementation.codehash == _approvedBytes32(codehashEnv), string.concat("B1N352: ", component, " codehash")
         );
     }
 
@@ -283,6 +325,27 @@ abstract contract B1N352Base is Script {
         console2.log(string.concat("V1_", component, "_IMPLEMENTATION"), implementation);
         console2.log(string.concat("V1_", component, "_IMPLEMENTATION_CODEHASH"));
         console2.logBytes32(implementation.codehash);
+    }
+
+    function _requireExpectedOwnership(
+        address target,
+        string memory ownerEnv,
+        string memory pendingOwnerEnv,
+        string memory component
+    ) private view {
+        require(
+            _returnsAddress(target, "owner()") == _approvedAddress(ownerEnv),
+            string.concat("B1N352: ", component, " owner")
+        );
+        require(
+            _returnsAddress(target, "pendingOwner()") == _approvedAddress(pendingOwnerEnv),
+            string.concat("B1N352: ", component, " pending owner")
+        );
+    }
+
+    function _logOwnership(string memory component, address target) private view {
+        console2.log(string.concat("V1_", component, "_OWNER"), _returnsAddress(target, "owner()"));
+        console2.log(string.concat("V1_", component, "_PENDING_OWNER"), _returnsAddress(target, "pendingOwner()"));
     }
 
     function _returnsAddress(address target, string memory signature) private view returns (address value) {
@@ -295,6 +358,54 @@ abstract contract B1N352Base is Script {
         (bool success, bytes memory result) = target.staticcall(abi.encodeWithSignature(signature));
         require(success && result.length >= 32, "B1N352: bool read");
         value = abi.decode(result, (bool));
+    }
+
+    function _approvedInputs() internal view returns (string memory) {
+        return vm.readFile(vm.envString("FUND_APPROVED_INPUTS_PATH"));
+    }
+
+    function _approvedJsonKey(string memory key) private pure returns (string memory) {
+        return string.concat(".environment.", key);
+    }
+
+    function _approvedAddress(string memory key) internal view virtual returns (address) {
+        return vm.parseJsonAddress(_approvedInputs(), _approvedJsonKey(key));
+    }
+
+    function _approvedAddressArray(string memory key) internal view returns (address[] memory) {
+        return vm.parseJsonAddressArray(_approvedInputs(), _approvedJsonKey(key));
+    }
+
+    function _approvedBytes32(string memory key) internal view virtual returns (bytes32) {
+        return vm.parseJsonBytes32(_approvedInputs(), _approvedJsonKey(key));
+    }
+
+    function _approvedString(string memory key) internal view returns (string memory) {
+        return vm.parseJsonString(_approvedInputs(), _approvedJsonKey(key));
+    }
+
+    function _approvedUint(string memory key) internal view returns (uint256) {
+        return vm.parseJsonUint(_approvedInputs(), _approvedJsonKey(key));
+    }
+
+    function _approvedUint8(string memory key) internal view returns (uint8) {
+        return _approvedUint(key).toUint8();
+    }
+
+    function _approvedUint16(string memory key) internal view returns (uint16) {
+        return _approvedUint(key).toUint16();
+    }
+
+    function _approvedUint24(string memory key) internal view returns (uint24) {
+        return _approvedUint(key).toUint24();
+    }
+
+    function _approvedUint32(string memory key) internal view returns (uint32) {
+        return _approvedUint(key).toUint32();
+    }
+
+    function _approvedUint64(string memory key) internal view returns (uint64) {
+        return _approvedUint(key).toUint64();
     }
 
     function _envUint8(string memory key) internal view returns (uint8) {

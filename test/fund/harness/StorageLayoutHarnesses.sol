@@ -142,7 +142,33 @@ contract FundFlowManagerStorageHarnessV2 is StorageHarnessBase, FundFlowManagerS
     }
 }
 
-contract StrategyManagerStorageHarnessV1 is StorageHarnessBase, StrategyManagerStorage {
+abstract contract StrategyManagerStorageV1Definition {
+    /// @custom:storage-location erc7201:b1nary.storage.StrategyManager
+    struct StrategyManagerStorageLayout {
+        address fund;
+        uint64 compatibilityVersion;
+        uint16 minimumIdleBps;
+        bytes32 positionsHash;
+        address[] activeAdapters;
+        mapping(address adapter => FundTypes.StrategyConfig config) strategies;
+        mapping(address adapter => uint64 nonce) positionNonces;
+        mapping(address asset => bool allowed) allowedAssets;
+        mapping(address asset => uint256 amount) totalAllocated;
+        mapping(address adapter => mapping(address asset => uint256 amount)) adapterAllocated;
+        mapping(address adapter => uint48 timestamp) lastOperationAt;
+    }
+
+    bytes32 internal constant STRATEGY_MANAGER_STORAGE_LOCATION =
+        0x25887ea3e5e75cc13395c4a56dac59490fcb6528f03e6c5e7b324f5c7afd6b00;
+
+    function _getStrategyManagerStorage() internal pure returns (StrategyManagerStorageLayout storage $) {
+        assembly {
+            $.slot := STRATEGY_MANAGER_STORAGE_LOCATION
+        }
+    }
+}
+
+contract StrategyManagerStorageHarnessV1 is StorageHarnessBase, StrategyManagerStorageV1Definition {
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -158,6 +184,38 @@ contract StrategyManagerStorageHarnessV1 is StorageHarnessBase, StrategyManagerS
 
     function setFund(address value) external onlyOwner {
         _getStrategyManagerStorage().fund = value;
+    }
+
+    function fund() external view returns (address) {
+        return _getStrategyManagerStorage().fund;
+    }
+}
+
+/// @custom:oz-upgrades-from StrategyManagerStorageHarnessV1
+contract StrategyManagerStorageHarnessV2 is StorageHarnessBase, StrategyManagerStorage {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address owner) external initializer {
+        __StorageHarnessBase_init(owner);
+    }
+
+    function storageLocation() external pure returns (bytes32) {
+        return STRATEGY_MANAGER_STORAGE_LOCATION;
+    }
+
+    function fund() external view returns (address) {
+        return _getStrategyManagerStorage().fund;
+    }
+
+    function setAllocationPauseNonce(address adapter, uint64 value) external onlyOwner {
+        _getStrategyManagerStorage().allocationPauseNonces[adapter] = value;
+    }
+
+    function allocationPauseNonce(address adapter) external view returns (uint64) {
+        return _getStrategyManagerStorage().allocationPauseNonces[adapter];
     }
 }
 

@@ -926,6 +926,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(asset.balanceOf(inKindEscrow), 0);
             assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 0);
             assertFalse(strategy.strategyConfig(address(adapter)).active);
+            assertEq(strategy.allocationPauseNonce(address(adapter)), 1);
             assertEq(strategy.positionNonce(address(adapter)), 2);
             FundAccounting.ComponentState memory afterExit = accounting.componentState(componentId);
             assertEq(afterExit.nonce, 2);

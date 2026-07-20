@@ -31,7 +31,7 @@ contract RestartB1N352Access is B1N352Operations {
         _restartOperations(
             manager,
             _accessOperations(address(manager), adapter, inKindEscrow, emergencyEscrow),
-            vm.envAddress("FUND_PHASE_SCHEDULER"),
+            _approvedAddress("FUND_PHASE_SCHEDULER"),
             _phaseSchedulerKey(),
             _isAccessPhaseFinalized(manager, adapter, inKindEscrow, emergencyEscrow)
         );
@@ -50,7 +50,7 @@ contract CancelB1N352Access is B1N352Operations {
                 vm.envAddress("FUND_IN_KIND_STRATEGY_ESCROW"),
                 vm.envAddress("FUND_EMERGENCY_STRATEGY_ESCROW")
             ),
-            vm.envAddress("FUND_PHASE_SCHEDULER"),
+            _approvedAddress("FUND_PHASE_SCHEDULER"),
             vm.envUint("PRIVATE_KEY")
         );
     }

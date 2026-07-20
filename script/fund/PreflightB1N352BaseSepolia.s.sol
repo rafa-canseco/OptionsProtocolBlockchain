@@ -9,8 +9,8 @@ import {B1N352Base} from "./B1N352Base.sol";
 contract PreflightB1N352BaseSepolia is B1N352Base {
     function run() external view {
         _requireBaseSepolia();
-        address addressBook_ = vm.envAddress("FUND_V1_ADDRESS_BOOK");
-        _validateV1(addressBook_, vm.envAddress("FUND_ACCOUNTING_ASSET"), vm.envAddress("FUND_WETH"));
+        address addressBook_ = _approvedAddress("FUND_V1_ADDRESS_BOOK");
+        _validateV1(addressBook_, _approvedAddress("FUND_ACCOUNTING_ASSET"), _approvedAddress("FUND_WETH"));
         _requireExpectedV1Baseline(addressBook_);
         _logV1Baseline(addressBook_);
 

@@ -54,6 +54,7 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
     event StrategyEmergencyExited(address indexed adapter, address indexed escrow, uint64 positionNonce);
     event AllocationPaused(address indexed adapter);
     event AllocationResumed(address indexed adapter);
+    event AllocationResumeInvalidated(address indexed adapter, uint64 pauseNonce);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -97,6 +98,10 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
 
     function positionNonce(address adapter) external view returns (uint64) {
         return _getStrategyManagerStorage().positionNonces[adapter];
+    }
+
+    function allocationPauseNonce(address adapter) external view returns (uint64) {
+        return _getStrategyManagerStorage().allocationPauseNonces[adapter];
     }
 
     function activeAdapterCount() external view returns (uint256) {
@@ -238,11 +243,13 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
         $.adapterAllocated[adapter][accountingAsset] = 0;
         $.totalAllocated[accountingAsset] -= allocated;
         $.strategies[adapter].active = false;
+        uint64 pauseNonce = ++$.allocationPauseNonces[adapter];
         $.lastOperationAt[adapter] = uint48(block.timestamp);
         (uint64 nonce, bytes32 stateHash) = _recordPosition($, adapter);
         vault.recordStrategyPositions($.positionsHash);
         _syncAccounting(vault.accounting(), adapter, nonce, stateHash);
         vault.endModuleExecution(lockId);
+        emit AllocationResumeInvalidated(adapter, pauseNonce);
         emit StrategyEmergencyExited(adapter, escrow, nonce);
     }
 
@@ -296,12 +303,18 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
         StrategyManagerStorageLayout storage $ = _getStrategyManagerStorage();
         if ($.strategies[adapter].interfaceVersion == 0) revert AdapterNotActive(adapter);
         $.strategies[adapter].active = false;
+        uint64 pauseNonce = ++$.allocationPauseNonces[adapter];
+        emit AllocationResumeInvalidated(adapter, pauseNonce);
         emit AllocationPaused(adapter);
     }
 
-    function resumeAllocation(address adapter) external restricted {
+    function resumeAllocation(address adapter, uint64 expectedPauseNonce) external restricted {
         StrategyManagerStorageLayout storage $ = _getStrategyManagerStorage();
         if ($.strategies[adapter].interfaceVersion == 0) revert AdapterNotActive(adapter);
+        uint64 actualPauseNonce = $.allocationPauseNonces[adapter];
+        if (expectedPauseNonce != actualPauseNonce) {
+            revert StaleAllocationResume(adapter, expectedPauseNonce, actualPauseNonce);
+        }
         $.strategies[adapter].active = true;
         emit AllocationResumed(adapter);
     }

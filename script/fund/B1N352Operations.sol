@@ -98,17 +98,17 @@ abstract contract B1N352Operations is B1N352Base {
         config.valuator = vm.envAddress("FUND_CSP_VALUATOR");
         config.inKindEscrow = vm.envAddress("FUND_IN_KIND_STRATEGY_ESCROW");
         config.emergencyEscrow = vm.envAddress("FUND_EMERGENCY_STRATEGY_ESCROW");
-        config.reporters = vm.envAddress("FUND_NAV_REPORTERS", ",");
-        config.reporterThreshold = _envUint16("FUND_NAV_REPORTER_THRESHOLD");
-        config.reporterSetVersion = _envUint64("FUND_NAV_REPORTER_SET_VERSION");
-        config.maxExitFeeBps = _envUint16("FUND_MAX_EXIT_FEE_BPS");
-        config.maxWindowOutflowBps = _envUint16("FUND_MAX_WINDOW_OUTFLOW_BPS");
-        config.minimumIdleBps = _envUint16("FUND_MINIMUM_IDLE_BPS");
-        config.maxAllocationBps = _envUint16("FUND_STRATEGY_MAX_ALLOCATION_BPS");
-        config.maxLossBps = _envUint16("FUND_STRATEGY_MAX_LOSS_BPS");
-        config.cooldown = _envUint32("FUND_STRATEGY_COOLDOWN_SECONDS");
-        config.adapterInterfaceVersion = _envUint64("FUND_CSP_ADAPTER_INTERFACE_VERSION");
-        config.absoluteCap = vm.envUint("FUND_STRATEGY_ABSOLUTE_CAP");
+        config.reporters = _approvedAddressArray("FUND_NAV_REPORTERS");
+        config.reporterThreshold = _approvedUint16("FUND_NAV_REPORTER_THRESHOLD");
+        config.reporterSetVersion = _approvedUint64("FUND_NAV_REPORTER_SET_VERSION");
+        config.maxExitFeeBps = _approvedUint16("FUND_MAX_EXIT_FEE_BPS");
+        config.maxWindowOutflowBps = _approvedUint16("FUND_MAX_WINDOW_OUTFLOW_BPS");
+        config.minimumIdleBps = _approvedUint16("FUND_MINIMUM_IDLE_BPS");
+        config.maxAllocationBps = _approvedUint16("FUND_STRATEGY_MAX_ALLOCATION_BPS");
+        config.maxLossBps = _approvedUint16("FUND_STRATEGY_MAX_LOSS_BPS");
+        config.cooldown = _approvedUint32("FUND_STRATEGY_COOLDOWN_SECONDS");
+        config.adapterInterfaceVersion = _approvedUint64("FUND_CSP_ADAPTER_INTERFACE_VERSION");
+        config.absoluteCap = _approvedUint("FUND_STRATEGY_ABSOLUTE_CAP");
     }
 
     function _policyOperations(PolicyConfig memory config) internal pure returns (Operation[] memory operations) {
@@ -188,9 +188,19 @@ abstract contract B1N352Operations is B1N352Base {
         StrategyManager strategyManager = StrategyManager(strategyManager_);
         FundTypes.StrategyConfig memory config = strategyManager.strategyConfig(adapter);
         require(config.interfaceVersion != 0, "B1N352: activation state");
+        operation =
+            _activationOperationAtPauseNonce(strategyManager_, adapter, strategyManager.allocationPauseNonce(adapter));
+    }
+
+    function _activationOperationAtPauseNonce(address strategyManager_, address adapter, uint64 pauseNonce)
+        internal
+        pure
+        returns (Operation memory operation)
+    {
+        StrategyManager strategyManager = StrategyManager(strategyManager_);
         operation = Operation({
             target: strategyManager_,
-            data: abi.encodeCall(strategyManager.resumeAllocation, (adapter)),
+            data: abi.encodeCall(strategyManager.resumeAllocation, (adapter, pauseNonce)),
             label: keccak256("ACTIVATE_CSP_STRATEGY")
         });
     }
@@ -456,6 +466,46 @@ abstract contract B1N352Operations is B1N352Base {
         console2.log("PHASE_ATOMICALLY_RESTARTED");
     }
 
+    function _replaceOperation(
+        AccessManager manager,
+        Operation memory priorOperation,
+        Operation memory replacementOperation,
+        address scheduledCaller,
+        uint256 restartCallerKey,
+        bool phaseFinalized
+    ) internal {
+        require(scheduledCaller != address(0), "B1N352: zero phase scheduler");
+        require(vm.addr(restartCallerKey) == scheduledCaller, "B1N352: restart caller differs");
+        require(!phaseFinalized, "B1N352: phase already finalized");
+
+        bytes32 priorId = manager.hashOperation(scheduledCaller, priorOperation.target, priorOperation.data);
+        bytes32 replacementId =
+            manager.hashOperation(scheduledCaller, replacementOperation.target, replacementOperation.data);
+        require(priorId != replacementId, "B1N352: replacement operation unchanged");
+        require(manager.getNonce(priorId) != 0, "B1N352: prior operation unseen");
+        require(manager.getNonce(replacementId) == 0, "B1N352: replacement operation already seen");
+
+        bool priorIsLive = manager.getSchedule(priorId) != 0;
+        bytes[] memory calls = new bytes[](priorIsLive ? 2 : 1);
+        uint256 scheduleResultIndex;
+        if (priorIsLive) {
+            calls[0] = abi.encodeCall(manager.cancel, (scheduledCaller, priorOperation.target, priorOperation.data));
+            scheduleResultIndex = 1;
+        }
+        calls[scheduleResultIndex] =
+            abi.encodeCall(manager.schedule, (replacementOperation.target, replacementOperation.data, uint48(0)));
+
+        vm.startBroadcast(restartCallerKey);
+        bytes[] memory results = manager.multicall(calls);
+        vm.stopBroadcast();
+
+        (bytes32 scheduledId, uint32 nonce) = abi.decode(results[scheduleResultIndex], (bytes32, uint32));
+        require(scheduledId == replacementId, "B1N352: replacement operation id");
+        require(manager.getSchedule(priorId) == 0, "B1N352: prior operation still scheduled");
+        _logScheduledOperation(replacementOperation, scheduledId, nonce, manager.getSchedule(scheduledId));
+        console2.log("PHASE_OPERATION_ATOMICALLY_REPLACED");
+    }
+
     function _executeOperations(
         AccessManager manager,
         Operation[] memory operations,
@@ -534,7 +584,7 @@ abstract contract B1N352Operations is B1N352Base {
 
     function _phaseSchedulerKey() internal view returns (uint256 callerKey) {
         callerKey = vm.envUint("PRIVATE_KEY");
-        require(vm.addr(callerKey) == vm.envAddress("FUND_PHASE_SCHEDULER"), "B1N352: phase scheduler key");
+        require(vm.addr(callerKey) == _approvedAddress("FUND_PHASE_SCHEDULER"), "B1N352: phase scheduler key");
     }
 
     function _isTargetAdminDelayConfigured(FundAccessManager manager, address target) private view returns (bool) {
