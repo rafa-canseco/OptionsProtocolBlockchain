@@ -101,6 +101,25 @@
   },
   {
     "type": "function",
+    "name": "configuredSelectorCount",
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "consumeScheduledOp",
     "inputs": [
       {
@@ -252,6 +271,35 @@
   },
   {
     "type": "function",
+    "name": "getRoleGrantDelayFull",
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "currentDelay",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "pendingDelay",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "effect",
+        "type": "uint48",
+        "internalType": "uint48"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getRoleGuardian",
     "inputs": [
       {
@@ -303,6 +351,35 @@
         "name": "",
         "type": "uint32",
         "internalType": "uint32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getTargetAdminDelayFull",
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "currentDelay",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "pendingDelay",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "effect",
+        "type": "uint48",
+        "internalType": "uint48"
       }
     ],
     "stateMutability": "view"
@@ -516,6 +593,49 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "roleMemberAt",
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "roleMemberCount",
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",

@@ -1,17 +1,19 @@
 {
   "schemaVersion": "1.0.0",
   "roles": [
-    {"id": 0, "name": "ADMIN", "grantDelaySeconds": 259200, "memberExecutionDelaySeconds": 259200},
-    {"id": 1, "name": "UPGRADER", "grantDelaySeconds": 259200, "memberExecutionDelaySeconds": 259200},
-    {"id": 2, "name": "ACCOUNTING", "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
-    {"id": 3, "name": "ALLOCATOR", "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
-    {"id": 4, "name": "PROCESSOR", "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
-    {"id": 5, "name": "CURATOR", "grantDelaySeconds": 86400, "memberExecutionDelaySeconds": 86400, "guardianRole": 6},
-    {"id": 6, "name": "GUARDIAN", "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
-    {"id": 7, "name": "REPORTER_RESERVED", "grantDelaySeconds": null, "memberExecutionDelaySeconds": null},
-    {"id": 8, "name": "ADAPTER_UPGRADER", "grantDelaySeconds": 172800, "memberExecutionDelaySeconds": 172800}
+    {"id": 0, "name": "ADMIN", "adminRole": 0, "guardianRole": 0, "exactMemberCount": 1, "grantDelaySeconds": 259200, "memberExecutionDelaySeconds": 259200},
+    {"id": 1, "name": "UPGRADER", "adminRole": 0, "guardianRole": 0, "exactMemberCount": 1, "grantDelaySeconds": 259200, "memberExecutionDelaySeconds": 259200},
+    {"id": 2, "name": "ACCOUNTING", "adminRole": 0, "guardianRole": 0, "exactMemberCount": 1, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
+    {"id": 3, "name": "ALLOCATOR", "adminRole": 0, "guardianRole": 0, "exactMemberCount": 1, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
+    {"id": 4, "name": "PROCESSOR", "adminRole": 0, "guardianRole": 0, "exactMemberCount": 1, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
+    {"id": 5, "name": "CURATOR", "adminRole": 0, "guardianRole": 6, "exactMemberCount": 1, "grantDelaySeconds": 86400, "memberExecutionDelaySeconds": 86400},
+    {"id": 6, "name": "GUARDIAN", "adminRole": 0, "guardianRole": 0, "exactMemberCount": 1, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
+    {"id": 7, "name": "REPORTER_RESERVED", "adminRole": 0, "guardianRole": 0, "exactMemberCount": 0, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": null},
+    {"id": 8, "name": "ADAPTER_UPGRADER", "adminRole": 0, "guardianRole": 0, "exactMemberCount": 1, "grantDelaySeconds": 172800, "memberExecutionDelaySeconds": 172800}
   ],
+  "manager": {"contract": "FundAccessManager", "closed": false, "enumeratesExactCurrentMembers": true},
   "targetAdminDelaySeconds": 259200,
+  "allGovernedTargetsClosed": false,
   "selectors": [
     {"targets": ["FundVault", "FundShare", "FundAccounting", "FundFlowManager", "StrategyManager"], "signature": "upgradeToAndCall(address,bytes)", "selector": "0x4f1ef286", "role": 1},
     {"targets": ["CspFundAdapter"], "signature": "upgradeToAndCall(address,bytes)", "selector": "0x4f1ef286", "role": 8},

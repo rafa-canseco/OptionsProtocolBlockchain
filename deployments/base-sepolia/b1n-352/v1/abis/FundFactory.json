@@ -12,6 +12,19 @@
   },
   {
     "type": "function",
+    "name": "accessManagerDeployer",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract FundAccessManagerDeployer"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "computeDeploymentId",
     "inputs": [
       {

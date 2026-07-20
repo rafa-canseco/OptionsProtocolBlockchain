@@ -44,13 +44,19 @@
     "escrowsReleaseOnlyToFund": null
   },
   "accessManager": {
+    "implementation": "FundAccessManager",
     "accessExecutionTimestamp": null,
     "minimumSetbackSeconds": 432000,
     "targetAdminDelayEffectiveAfter": null,
     "roleAccountsMatchManifest": null,
+    "exactRoleMemberSetsMatchManifest": null,
+    "allRoleAdminsMatchMatrix": null,
+    "allRoleGuardiansMatchMatrix": null,
     "memberExecutionDelaysMatchMatrix": null,
     "grantDelaysMatchMatrix": null,
     "selectorRolesMatchMatrix": null,
+    "exactConfiguredSelectorSetsMatchMatrix": null,
+    "allGovernedTargetsOpen": null,
     "targetAdminDelaysMatchMatrix": null,
     "curatorGuardianRoleMatchesMatrix": null
   },
@@ -61,10 +67,19 @@
     "navAndFeePolicyMatch": null,
     "exitPolicyAndStrategyEscrowsMatch": null,
     "minimumIdleAndStrategyLimitsMatch": null,
+    "exactRegisteredAdapterSetMatch": null,
     "adapterRiskRouterAndFeeTierMatch": null,
     "valuatorFeedObserversQuorumAndBufferMatch": null,
     "strategyConfiguredInactiveBeforeOnboarding": null,
     "strategyActiveAfterAuthorizedActivation": null
+  },
+  "immutableArtifacts": {
+    "factoryDeploymentRecordMatches": null,
+    "fundAccessManagerDeployerBindingAndCodehashMatch": null,
+    "navReportVerifierAddressBindingAndCodehashMatch": null,
+    "claimEscrowAddressBindingsAndCodehashMatch": null,
+    "cspAdapterOperationsAddressBindingAndCodehashMatch": null,
+    "fundAccessManagerCodehashMatch": null
   },
   "state": {
     "nav": {

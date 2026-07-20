@@ -14,7 +14,8 @@ contracts=(
   FundFlowManager
   StrategyManager
   ClaimEscrow
-  AccessManager
+  FundAccessManager
+  FundAccessManagerDeployer
   NavReportVerifier
   FundFactory
   CspFundAdapter
@@ -23,6 +24,7 @@ contracts=(
 )
 
 mkdir -p "$output_dir"
+rm -f "$output_dir/AccessManager.json"
 
 for contract_name in "${contracts[@]}"; do
   artifact="$repo_root/out/$contract_name.sol/$contract_name.json"

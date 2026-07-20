@@ -16,7 +16,7 @@ Verify and record the Blockscout URL for:
 
 - FundVault, FundShare, FundAccounting, FundFlowManager, StrategyManager implementations.
 - All five ERC1967Proxy instances plus the CspFundAdapter proxy.
-- NavReportVerifier, FundFactory, ClaimEscrow, AccessManager.
+- NavReportVerifier, FundFactory, FundAccessManagerDeployer, ClaimEscrow, FundAccessManager.
 - CspFundAdapterOperations, CspFundAdapter implementation, CspFundValuator.
 - Both StrategyAssetEscrow instances.
 

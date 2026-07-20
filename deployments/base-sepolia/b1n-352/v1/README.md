@@ -10,9 +10,12 @@ Before any command is run with `--broadcast`:
 
 1. B1N-346 must provide an approved, versioned policy artifact and go decision.
 2. `PreflightB1N352BaseSepolia` must confirm the selected V1 wiring, WETH/USDC product configuration, and `custodiedRedemptionOnly() == true`.
-3. The approved Controller and BatchSettler implementation addresses and codehashes must be supplied as expected
-   values. Preflight, deployment, and onboarding all fail before any broadcast if the live baseline differs.
+3. The approved AddressBook, Controller proxy, BatchSettler proxy, implementation addresses, and implementation
+   codehashes must be supplied as expected values. Preflight and deployment fail before any broadcast if the live
+   baseline differs.
 4. A separate user approval is required before adding `--broadcast`, onboarding the adapter, or activating StrategyManager.
+5. V1 onboarding additionally requires an approved smart-contract owner flow capable of checking the pinned baseline
+   and invoking `setPhysicalDeliveryVault` atomically. The legacy direct-broadcast script is disabled and fails closed.
 
 ## Local checks
 
@@ -31,13 +34,16 @@ forge script script/fund/PreflightB1N352BaseSepolia.s.sol:PreflightB1N352BaseSep
   --rpc-url "$BASE_SEPOLIA_RPC_URL"
 ```
 
-Deployment and governance scripts are deliberately split into resumable phases:
+Deployment and governance scripts are deliberately split into phases. Every multi-operation schedule or execution is
+one `FundAccessManager.multicall` transaction; scripts preflight the complete batch and refuse partial schedules:
 
 1. `DeployTokenizedCspFundBaseSepolia`
 2. `ScheduleB1N352Access` / wait 72h / `ExecuteB1N352Access`
 3. `ScheduleB1N352Policy` / wait 24h / `ExecuteB1N352Policy` — strategy remains inactive
-4. `OnboardB1N352Adapter` — the only permitted V1 mutation
-5. `ScheduleB1N352Activation` / wait 24h / `ExecuteB1N352Activation`
+4. `PrepareB1N352AtomicOnboarding` — read-only baseline and calldata preparation; the approved owner flow performs
+   the sole V1 mutation atomically. `OnboardB1N352Adapter` is intentionally disabled.
+5. `ScheduleB1N352Activation` / wait 24h / `ExecuteB1N352Activation`. Activation calls only
+   `resumeAllocation(adapter)`, so it cannot restore caps reduced by the guardian while waiting.
 6. Wait until the access execution timestamp plus `AccessManager.minSetback()` (five days), then run
    `ReconcileB1N352Deployment`.
 
@@ -45,6 +51,12 @@ With access scheduled at T+0 and executed at T+72h, its `setTargetAdminDelay` ch
 T+192h (approximately day 8). Policy execution around day 4 and activation around day 5 can still proceed under their
 own delays, but strict reconciliation intentionally fails until the adapter and both strategy escrows report the final
 target admin delay.
+
+`ReconcileB1N352Deployment` is the final gate and always requires the adapter onboarded and the strategy active. Use
+`ReconcileB1N352IntermediateDeployment` for explicit read-only inspection of a pre-onboarding or pre-activation state.
+The final gate also verifies the exact registered adapter, role-member and configured-selector sets, every role admin
+and guardian, open targets, full delays, factory bindings, and codehashes for the access manager, NAV verifier, claim
+escrow, and linked adapter operations library.
 
 Running any script without `--broadcast` is a simulation. Do not add `--broadcast` until the separate authorization recorded in B1N-352.
 

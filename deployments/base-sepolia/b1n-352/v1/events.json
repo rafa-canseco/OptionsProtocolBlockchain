@@ -1,259 +1,5 @@
 [
   {
-    "contract": "AccessManager",
-    "name": "OperationCanceled",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "indexed": true
-      },
-      {
-        "name": "nonce",
-        "type": "uint32",
-        "indexed": true
-      }
-    ]
-  },
-  {
-    "contract": "AccessManager",
-    "name": "OperationExecuted",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "indexed": true
-      },
-      {
-        "name": "nonce",
-        "type": "uint32",
-        "indexed": true
-      }
-    ]
-  },
-  {
-    "contract": "AccessManager",
-    "name": "OperationScheduled",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "indexed": true
-      },
-      {
-        "name": "nonce",
-        "type": "uint32",
-        "indexed": true
-      },
-      {
-        "name": "schedule",
-        "type": "uint48",
-        "indexed": false
-      },
-      {
-        "name": "caller",
-        "type": "address",
-        "indexed": false
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "indexed": false
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "indexed": false
-      }
-    ]
-  },
-  {
-    "contract": "AccessManager",
-    "name": "RoleAdminChanged",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "roleId",
-        "type": "uint64",
-        "indexed": true
-      },
-      {
-        "name": "admin",
-        "type": "uint64",
-        "indexed": true
-      }
-    ]
-  },
-  {
-    "contract": "AccessManager",
-    "name": "RoleGrantDelayChanged",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "roleId",
-        "type": "uint64",
-        "indexed": true
-      },
-      {
-        "name": "delay",
-        "type": "uint32",
-        "indexed": false
-      },
-      {
-        "name": "since",
-        "type": "uint48",
-        "indexed": false
-      }
-    ]
-  },
-  {
-    "contract": "AccessManager",
-    "name": "RoleGranted",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "roleId",
-        "type": "uint64",
-        "indexed": true
-      },
-      {
-        "name": "account",
-        "type": "address",
-        "indexed": true
-      },
-      {
-        "name": "delay",
-        "type": "uint32",
-        "indexed": false
-      },
-      {
-        "name": "since",
-        "type": "uint48",
-        "indexed": false
-      },
-      {
-        "name": "newMember",
-        "type": "bool",
-        "indexed": false
-      }
-    ]
-  },
-  {
-    "contract": "AccessManager",
-    "name": "RoleGuardianChanged",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "roleId",
-        "type": "uint64",
-        "indexed": true
-      },
-      {
-        "name": "guardian",
-        "type": "uint64",
-        "indexed": true
-      }
-    ]
-  },
-  {
-    "contract": "AccessManager",
-    "name": "RoleLabel",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "roleId",
-        "type": "uint64",
-        "indexed": true
-      },
-      {
-        "name": "label",
-        "type": "string",
-        "indexed": false
-      }
-    ]
-  },
-  {
-    "contract": "AccessManager",
-    "name": "RoleRevoked",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "roleId",
-        "type": "uint64",
-        "indexed": true
-      },
-      {
-        "name": "account",
-        "type": "address",
-        "indexed": true
-      }
-    ]
-  },
-  {
-    "contract": "AccessManager",
-    "name": "TargetAdminDelayUpdated",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "target",
-        "type": "address",
-        "indexed": true
-      },
-      {
-        "name": "delay",
-        "type": "uint32",
-        "indexed": false
-      },
-      {
-        "name": "since",
-        "type": "uint48",
-        "indexed": false
-      }
-    ]
-  },
-  {
-    "contract": "AccessManager",
-    "name": "TargetClosed",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "target",
-        "type": "address",
-        "indexed": true
-      },
-      {
-        "name": "closed",
-        "type": "bool",
-        "indexed": false
-      }
-    ]
-  },
-  {
-    "contract": "AccessManager",
-    "name": "TargetFunctionRoleUpdated",
-    "anonymous": false,
-    "inputs": [
-      {
-        "name": "target",
-        "type": "address",
-        "indexed": true
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "indexed": false
-      },
-      {
-        "name": "roleId",
-        "type": "uint64",
-        "indexed": true
-      }
-    ]
-  },
-  {
     "contract": "CspFundAdapter",
     "name": "AccountingAssetsReturned",
     "anonymous": false,
@@ -469,6 +215,260 @@
       {
         "name": "implementation",
         "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "OperationCanceled",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "nonce",
+        "type": "uint32",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "OperationExecuted",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "nonce",
+        "type": "uint32",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "OperationScheduled",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "nonce",
+        "type": "uint32",
+        "indexed": true
+      },
+      {
+        "name": "schedule",
+        "type": "uint48",
+        "indexed": false
+      },
+      {
+        "name": "caller",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "data",
+        "type": "bytes",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleAdminChanged",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "admin",
+        "type": "uint64",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleGrantDelayChanged",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "delay",
+        "type": "uint32",
+        "indexed": false
+      },
+      {
+        "name": "since",
+        "type": "uint48",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleGranted",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "delay",
+        "type": "uint32",
+        "indexed": false
+      },
+      {
+        "name": "since",
+        "type": "uint48",
+        "indexed": false
+      },
+      {
+        "name": "newMember",
+        "type": "bool",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleGuardianChanged",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "guardian",
+        "type": "uint64",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleLabel",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "label",
+        "type": "string",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "RoleRevoked",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "roleId",
+        "type": "uint64",
+        "indexed": true
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "TargetAdminDelayUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "delay",
+        "type": "uint32",
+        "indexed": false
+      },
+      {
+        "name": "since",
+        "type": "uint48",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "TargetClosed",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "closed",
+        "type": "bool",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "FundAccessManager",
+    "name": "TargetFunctionRoleUpdated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "indexed": false
+      },
+      {
+        "name": "roleId",
+        "type": "uint64",
         "indexed": true
       }
     ]
