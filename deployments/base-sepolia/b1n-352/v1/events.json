@@ -1339,6 +1339,23 @@
   },
   {
     "contract": "StrategyManager",
+    "name": "AllocationResumeInvalidated",
+    "anonymous": false,
+    "inputs": [
+      {
+        "name": "adapter",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "pauseNonce",
+        "type": "uint64",
+        "indexed": false
+      }
+    ]
+  },
+  {
+    "contract": "StrategyManager",
     "name": "AllocationResumed",
     "anonymous": false,
     "inputs": [

@@ -9,6 +9,7 @@
   },
   "gates": {
     "b1n346ApprovedPolicyArtifact": null,
+    "approvedInputsDigestMatchesSeparatelyRecordedApproval": null,
     "custodialPreflightPassed": null,
     "broadcastSeparatelyApproved": null
   },
@@ -20,6 +21,8 @@
       "codehashBefore": null,
       "implementationAfter": null,
       "codehashAfter": null,
+      "ownerMatchesApprovedInputs": null,
+      "pendingOwnerMatchesApprovedInputs": null,
       "unchanged": null
     },
     "controller": {
@@ -28,6 +31,8 @@
       "codehashBefore": null,
       "implementationAfter": null,
       "codehashAfter": null,
+      "ownerMatchesApprovedInputs": null,
+      "pendingOwnerMatchesApprovedInputs": null,
       "unchanged": null
     },
     "marginPool": {
@@ -36,6 +41,7 @@
       "codehashBefore": null,
       "implementationAfter": null,
       "codehashAfter": null,
+      "authorityInheritedFromAddressBook": null,
       "unchanged": null
     },
     "oTokenFactory": {
@@ -44,6 +50,7 @@
       "codehashBefore": null,
       "implementationAfter": null,
       "codehashAfter": null,
+      "authorityInheritedFromAddressBook": null,
       "unchanged": null
     },
     "oracle": {
@@ -52,6 +59,8 @@
       "codehashBefore": null,
       "implementationAfter": null,
       "codehashAfter": null,
+      "ownerMatchesApprovedInputs": null,
+      "pendingOwnerMatchesApprovedInputs": null,
       "unchanged": null
     },
     "whitelist": {
@@ -60,6 +69,8 @@
       "codehashBefore": null,
       "implementationAfter": null,
       "codehashAfter": null,
+      "ownerMatchesApprovedInputs": null,
+      "pendingOwnerMatchesApprovedInputs": null,
       "unchanged": null
     },
     "batchSettler": {
@@ -68,6 +79,8 @@
       "codehashBefore": null,
       "implementationAfter": null,
       "codehashAfter": null,
+      "ownerMatchesApprovedInputs": null,
+      "pendingOwnerMatchesApprovedInputs": null,
       "unchanged": null,
       "adapterOnboardedBefore": null,
       "adapterOnboardedAfter": null
@@ -119,6 +132,7 @@
     "navReportVerifierAddressBindingAndCodehashMatch": null,
     "claimEscrowAddressBindingsAndCodehashMatch": null,
     "cspAdapterOperationsAddressBindingAndCodehashMatch": null,
+    "linkedCspAdapterCodehashDerivedFromApprovedBuildAndBothLinkReferences": null,
     "linkedCspAdapterImplementationCodehashMatch": null,
     "fundAccessManagerCodehashMatch": null
   },

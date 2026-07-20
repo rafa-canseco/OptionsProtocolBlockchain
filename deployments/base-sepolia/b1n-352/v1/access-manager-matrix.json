@@ -39,7 +39,7 @@
     {"targets": ["StrategyManager"], "signature": "setMinimumIdleBps(uint16)", "selector": "0x90bbeb21", "role": 5},
     {"targets": ["StrategyManager"], "signature": "reduceStrategyCap(address,uint256,uint16)", "selector": "0x5dbc6e72", "role": 6},
     {"targets": ["StrategyManager"], "signature": "pauseAllocation(address)", "selector": "0xc1fe30a9", "role": 6},
-    {"targets": ["StrategyManager"], "signature": "resumeAllocation(address)", "selector": "0x822c919c", "role": 5},
+    {"targets": ["StrategyManager"], "signature": "resumeAllocation(address,uint64)", "selector": "0xa2808b0b", "role": 5},
     {"targets": ["StrategyManager"], "signature": "deallocateInKind(bytes32,address,uint256,bytes)", "selector": "0x89437c83", "role": 4},
     {"targets": ["StrategyManager"], "signature": "emergencyExit(address,bytes)", "selector": "0xb5eb7360", "role": 6},
     {"targets": ["CspFundAdapter"], "signature": "setAdapterConfig(RiskConfig,address,uint24)", "selector": "0x435fe7c0", "role": 5},

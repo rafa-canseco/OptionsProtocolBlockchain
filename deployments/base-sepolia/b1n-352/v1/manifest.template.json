@@ -9,6 +9,7 @@
   },
   "source": {
     "gitCommit": "TO_BE_FILLED_AFTER_AUTHORIZED_BROADCAST",
+    "approvedInputsSha256": "TO_BE_FILLED_FROM_SEPARATELY_RECORDED_APPROVAL",
     "branch": "feat/b1n-352-base-sepolia-fund-deploy",
     "solc": "0.8.24",
     "optimizerRuns": 200,
@@ -24,6 +25,8 @@
       "implementationCodehashBefore": "TO_BE_FILLED",
       "implementationAfter": "TO_BE_FILLED",
       "implementationCodehashAfter": "TO_BE_FILLED",
+      "owner": "TO_BE_FILLED_FROM_APPROVAL",
+      "pendingOwner": "TO_BE_FILLED_FROM_APPROVAL",
       "unchanged": null
     },
     "accountingAsset": "TO_BE_FILLED_USDC",
@@ -35,6 +38,8 @@
       "implementationCodehashBefore": "TO_BE_FILLED",
       "implementationAfter": "TO_BE_FILLED",
       "implementationCodehashAfter": "TO_BE_FILLED",
+      "owner": "TO_BE_FILLED_FROM_APPROVAL",
+      "pendingOwner": "TO_BE_FILLED_FROM_APPROVAL",
       "unchanged": null
     },
     "marginPool": {
@@ -44,6 +49,7 @@
       "implementationCodehashBefore": "TO_BE_FILLED",
       "implementationAfter": "TO_BE_FILLED",
       "implementationCodehashAfter": "TO_BE_FILLED",
+      "authorityInheritedFrom": "addressBook",
       "unchanged": null
     },
     "oTokenFactory": {
@@ -53,6 +59,7 @@
       "implementationCodehashBefore": "TO_BE_FILLED",
       "implementationAfter": "TO_BE_FILLED",
       "implementationCodehashAfter": "TO_BE_FILLED",
+      "authorityInheritedFrom": "addressBook",
       "unchanged": null
     },
     "oracle": {
@@ -62,6 +69,8 @@
       "implementationCodehashBefore": "TO_BE_FILLED",
       "implementationAfter": "TO_BE_FILLED",
       "implementationCodehashAfter": "TO_BE_FILLED",
+      "owner": "TO_BE_FILLED_FROM_APPROVAL",
+      "pendingOwner": "TO_BE_FILLED_FROM_APPROVAL",
       "unchanged": null
     },
     "whitelist": {
@@ -71,6 +80,8 @@
       "implementationCodehashBefore": "TO_BE_FILLED",
       "implementationAfter": "TO_BE_FILLED",
       "implementationCodehashAfter": "TO_BE_FILLED",
+      "owner": "TO_BE_FILLED_FROM_APPROVAL",
+      "pendingOwner": "TO_BE_FILLED_FROM_APPROVAL",
       "unchanged": null
     },
     "batchSettler": {
@@ -80,6 +91,8 @@
       "implementationCodehashBefore": "TO_BE_FILLED",
       "implementationAfter": "TO_BE_FILLED",
       "implementationCodehashAfter": "TO_BE_FILLED",
+      "owner": "TO_BE_FILLED_FROM_APPROVAL",
+      "pendingOwner": "TO_BE_FILLED_FROM_APPROVAL",
       "unchanged": null
     },
     "custodiedRedemptionOnly": null,
@@ -97,11 +110,14 @@
     "strategyManager": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
     "navReportVerifier": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
     "claimEscrow": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
-    "cspAdapterOperations": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
+    "cspAdapterOperations": {
+      "address": "TO_BE_FILLED_FROM_APPROVED_DRY_RUN",
+      "codehash": "TO_BE_DERIVED_FROM_APPROVED_BUILD"
+    },
     "cspFundAdapter": {
       "proxy": "TO_BE_FILLED",
       "implementation": "TO_BE_FILLED",
-      "implementationCodehash": "TO_BE_FILLED_AFTER_LINKING_CSP_ADAPTER_OPERATIONS"
+      "implementationCodehash": "TO_BE_DERIVED_BEFORE_BROADCAST_FROM_APPROVED_BUILD_AND_LIBRARY_ADDRESS"
     },
     "cspFundValuator": "TO_BE_FILLED",
     "inKindStrategyEscrow": "TO_BE_FILLED",

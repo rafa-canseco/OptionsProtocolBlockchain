@@ -6,6 +6,7 @@
       "phase": "deploy",
       "label": "fresh-fund-stack",
       "script": "DeployTokenizedCspFundBaseSepolia",
+      "approvedInputsSha256": "TO_BE_FILLED_FROM_SEPARATELY_RECORDED_APPROVAL",
       "hashes": [],
       "status": "not-authorized"
     },
@@ -15,7 +16,7 @@
       "script": "ScheduleB1N352Access",
       "transactionShape": "single AccessManager.multicall; all operations scheduled atomically",
       "idempotence": "no-op only when the complete access state is finalized; refuses prior nonce history",
-      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "not-authorized"
     },
@@ -24,7 +25,7 @@
       "label": "cancel-or-restart-access-operations",
       "scripts": ["CancelB1N352Access", "RestartB1N352Access"],
       "transactionShape": "Cancel aborts all remaining schedules atomically; Restart atomically cancels survivors and schedules the complete phase",
-      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "not-authorized-emergency-only"
     },
@@ -34,7 +35,7 @@
       "script": "ExecuteB1N352Access",
       "transactionShape": "single AccessManager.multicall; all operations preflighted and executed atomically",
       "idempotence": "no-op only when the complete access state is finalized and no live schedule remains",
-      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "not-authorized"
     },
@@ -44,7 +45,7 @@
       "script": "ScheduleB1N352Policy",
       "transactionShape": "single AccessManager.multicall; all operations scheduled atomically",
       "idempotence": "no-op only when all seven policy effects match; refuses prior nonce history",
-      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "blocked-by-B1N-346"
     },
@@ -53,7 +54,7 @@
       "label": "cancel-or-restart-policy-operations",
       "scripts": ["CancelB1N352Policy", "RestartB1N352Policy"],
       "transactionShape": "Cancel aborts all remaining schedules atomically; Restart atomically cancels survivors and schedules the complete phase",
-      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "blocked-by-B1N-346-and-separate-authorization"
     },
@@ -63,7 +64,7 @@
       "script": "ExecuteB1N352Policy",
       "transactionShape": "single AccessManager.multicall; all operations preflighted and executed atomically",
       "idempotence": "no-op only when all seven policy effects match and no live schedule remains",
-      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
       "hashes": [],
       "status": "blocked-by-B1N-346"
     },
@@ -79,10 +80,11 @@
       "phase": "activation",
       "label": "schedule-strategy-activation",
       "script": "ScheduleB1N352Activation",
-      "calldata": "StrategyManager.resumeAllocation(adapter)",
+      "calldata": "StrategyManager.resumeAllocation(adapter, scheduledPauseNonce)",
       "transactionShape": "single AccessManager.multicall",
       "idempotence": "no-op when active; refuses prior nonce history when inactive",
-      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "scheduledAllocationPauseNonce": null,
       "hashes": [],
       "status": "not-authorized"
     },
@@ -90,8 +92,9 @@
       "phase": "activation-recovery",
       "label": "cancel-or-restart-strategy-activation",
       "scripts": ["CancelB1N352Activation", "RestartB1N352Activation"],
-      "transactionShape": "Cancel aborts the live schedule; Restart atomically cancels a survivor and creates a new schedule with an incremented nonce",
-      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "transactionShape": "Cancel targets the recorded pause nonce; Restart atomically cancels the stale operation and schedules the current pause nonce",
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "requiredEnv": ["FUND_SCHEDULED_ALLOCATION_PAUSE_NONCE"],
       "hashes": [],
       "status": "not-authorized-emergency-only"
     },
@@ -99,10 +102,11 @@
       "phase": "activation",
       "label": "execute-strategy-activation",
       "script": "ExecuteB1N352Activation",
-      "calldata": "StrategyManager.resumeAllocation(adapter); does not rewrite caps or risk settings",
+      "calldata": "StrategyManager.resumeAllocation(adapter, scheduledPauseNonce); does not rewrite caps or risk settings",
       "transactionShape": "single AccessManager.multicall",
       "idempotence": "no-op when active and no live schedule remains",
-      "requiredEnv": ["FUND_PHASE_SCHEDULER"],
+      "requiredApprovedInputs": ["FUND_PHASE_SCHEDULER"],
+      "requiredEnv": ["FUND_SCHEDULED_ALLOCATION_PAUSE_NONCE"],
       "hashes": [],
       "status": "not-authorized"
     },
