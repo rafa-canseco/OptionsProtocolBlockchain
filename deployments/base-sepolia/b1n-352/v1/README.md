@@ -1,12 +1,20 @@
 # B1N-352 Base Sepolia deployment handoff
 
-Status: **local artifacts only; no Base Sepolia deployment has been authorized or executed**.
+Status: **the Base Sepolia-only Controller upgrade is approved and fully rehearsed; no transaction has been
+transmitted yet. The Fund deployment remains gated by its digest-bound validation inputs and signer checks**.
 
 This directory is the versioned handoff root for the first tokenized ETH/USDC CSP Fund deployment. Do not replace `null` manifest fields with assumed addresses. Populate them only from Foundry broadcast receipts and read-only reconciliation.
 
 ## Authorization gates
 
 Before any command is run with `--broadcast`:
+
+0. The Base Sepolia-only Controller exception is pinned in `controller-upgrade.approved.json`. Rehearse it at
+   block `44454953`, then run `UpgradeB1N352ControllerBaseSepolia` with the exact file digest. The script installs the
+   already verified B1N-336 Controller implementation and enables `custodiedRedemptionOnly` in the same
+   `upgradeToAndCall`. It preserves the Controller proxy and does not apply to mainnet. Run
+   `ReconcileB1N352ControllerBaseSepolia` immediately after confirmation. `PrepareB1N352ControllerRollback` is
+   read-only; rollback requires a separate incident approval and is valid only before Fund exposure is opened.
 
 1. B1N-346 must provide an approved, versioned policy artifact and go decision.
 2. `PreflightB1N352BaseSepolia` must confirm the selected V1 wiring, WETH/USDC product configuration, and `custodiedRedemptionOnly() == true`.

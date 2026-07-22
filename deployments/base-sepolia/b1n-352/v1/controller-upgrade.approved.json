@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-352",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532,
+    "baselineBlock": 44454953
+  },
+  "approval": {
+    "status": "APPROVED_FOR_BASE_SEPOLIA_VALIDATION",
+    "approvedBy": "Rafa Canseco",
+    "approvedAt": "2026-07-21",
+    "scope": "Upgrade only the existing Base Sepolia Controller proxy and atomically enable custodial redemption. Mainnet is excluded."
+  },
+  "source": {
+    "controllerSourceCommit": "0bea25ec5235371ece38af80b00c6d1e66f9dcf5",
+    "controllerSourceSha256": "b8e7a6236f81c6ca693ac736d8da0472419c0b5ab0c303d620f2f17ba1b72498",
+    "solc": "0.8.24",
+    "optimizerRuns": 200,
+    "viaIr": true
+  },
+  "baseline": {
+    "proxy": "0xB64a532B71E711B5F45B906D9Fc09c184EC54CA0",
+    "implementation": "0x147fb733dce6686e4e39aa55c0b87d22c90e3a2f",
+    "implementationCodehash": "0xd899acfd13155fe5395f3de05ba14c89d182dffe8b87ba531612deba69614d20",
+    "owner": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "pendingOwner": "0x0000000000000000000000000000000000000000",
+    "addressBook": "0x9e8cd9a79d667f4154e123604bF62d35a3d9673C",
+    "partialPauser": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "systemPartiallyPaused": false,
+    "systemFullyPaused": false
+  },
+  "candidate": {
+    "implementation": "0x5cfB9ca0437D4a5b3735bba0d9E2490a05F532bc",
+    "implementationCodehash": "0xd112e28c04dac654210602e73e2278e9f6ec8b847ac7f0cdac251787f51f42bf",
+    "proxiableUUID": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+    "verifiedOnBlockscout": true,
+    "existingDeployment": "B1N-336 isolated Base Sepolia CSP stack"
+  },
+  "execution": {
+    "method": "upgradeToAndCall(address,bytes)",
+    "initializerCalldata": "0x74d823ce0000000000000000000000000000000000000000000000000000000000000001",
+    "expectedCustodiedRedemptionOnly": true,
+    "rollbackImplementation": "0x147fb733dce6686e4e39aa55c0b87d22c90e3a2f",
+    "rollbackRequiresSeparateApproval": true
+  }
+}
