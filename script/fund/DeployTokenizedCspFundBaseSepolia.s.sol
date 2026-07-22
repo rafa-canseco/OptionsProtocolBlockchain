@@ -39,6 +39,10 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
             "B1N352: adapter operations hash"
         );
         require(
+            deployed.cspFundAdapterImplementation == _approvedAddress("FUND_CSP_ADAPTER_IMPLEMENTATION"),
+            "B1N352: adapter implementation address"
+        );
+        require(
             deployed.cspFundAdapterImplementation.codehash
                 == _approvedBytes32("FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH"),
             "B1N352: linked adapter implementation hash"

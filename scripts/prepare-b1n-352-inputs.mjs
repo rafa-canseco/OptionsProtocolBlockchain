@@ -70,6 +70,7 @@ export const REQUIRED_ENVIRONMENT_KEYS = [
   "FUND_STRATEGY_ABSOLUTE_CAP",
   "FUND_CSP_ADAPTER_OPERATIONS",
   "FUND_CSP_ADAPTER_OPERATIONS_CODEHASH",
+  "FUND_CSP_ADAPTER_IMPLEMENTATION",
   "FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH",
   "FUND_EXPECTED_V1_ADDRESS_BOOK",
   "FUND_EXPECTED_V1_ADDRESS_BOOK_IMPLEMENTATION",
@@ -158,9 +159,14 @@ export function linkOperationsRuntime(artifact, operationsAddress) {
   return runtime.toLowerCase();
 }
 
-export function linkAdapterRuntime(artifact, operationsAddress) {
+export function linkAdapterRuntime(artifact, operationsAddress, implementationAddress) {
   let runtime = deployedBytecode(artifact, "adapter");
   const address = normalizeHex(operationsAddress, 20, "FUND_CSP_ADAPTER_OPERATIONS");
+  const implementation = normalizeHex(
+    implementationAddress,
+    20,
+    "FUND_CSP_ADAPTER_IMPLEMENTATION"
+  );
   const allReferences = [];
   const operationsReferences = [];
   for (const [source, contracts] of Object.entries(artifact.deployedBytecode.linkReferences ?? {})) {
@@ -175,14 +181,13 @@ export function linkAdapterRuntime(artifact, operationsAddress) {
   if (allReferences.length === 2 && operationsReferences.length === 2) {
     runtime = patchReferences(runtime, operationsReferences, address, 20, "adapter library link");
   } else if (allReferences.length === 0) {
-    const references = immutableReferences(artifact);
-    if (references.length !== 2) {
-      fail("pre-linked adapter must contain exactly two library address immutables");
-    }
-    runtime = patchReferences(runtime, references, address.padStart(64, "0"), 32, "adapter immutable");
+    // The compiler has already embedded the approved library address.
   } else {
     fail("adapter must contain exactly two CspFundAdapterOperations runtime link references");
   }
+  const references = immutableReferences(artifact);
+  if (references.length !== 2) fail("adapter must contain exactly two UUPS self-address immutables");
+  runtime = patchReferences(runtime, references, implementation.padStart(64, "0"), 32, "adapter immutable");
   if (!/^[0-9a-f]+$/i.test(runtime)) fail("adapter runtime remains partially unlinked");
   return runtime.toLowerCase();
 }
@@ -265,7 +270,11 @@ export function deriveApprovedHashes(document, root = process.cwd()) {
   validateBuild(adapter, "adapter", document.source, environment.FUND_CSP_ADAPTER_OPERATIONS);
   validateBuild(operations, "operations", document.source, environment.FUND_CSP_ADAPTER_OPERATIONS);
   const operationsRuntime = linkOperationsRuntime(operations, environment.FUND_CSP_ADAPTER_OPERATIONS);
-  const linkedAdapterRuntime = linkAdapterRuntime(adapter, environment.FUND_CSP_ADAPTER_OPERATIONS);
+  const linkedAdapterRuntime = linkAdapterRuntime(
+    adapter,
+    environment.FUND_CSP_ADAPTER_OPERATIONS,
+    environment.FUND_CSP_ADAPTER_IMPLEMENTATION
+  );
   return {
     FUND_CSP_ADAPTER_OPERATIONS_CODEHASH: keccak(operationsRuntime),
     FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH: keccak(linkedAdapterRuntime)
