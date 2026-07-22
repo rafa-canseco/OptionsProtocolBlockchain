@@ -5,7 +5,9 @@ import {spawnSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
 
 const ADAPTER_ARTIFACT = "out/CspFundAdapter.sol/CspFundAdapter.json";
+const ADAPTER_SOURCE = "src/fund/CspFundAdapter.sol";
 const OPERATIONS_ARTIFACT = "out/CspFundAdapterOperations.sol/CspFundAdapterOperations.json";
+const OPERATIONS_SOURCE = "src/fund/libraries/CspFundAdapterOperations.sol";
 const OPERATIONS_LIBRARY = "CspFundAdapterOperations";
 
 export const REQUIRED_ENVIRONMENT_KEYS = [
@@ -133,6 +135,29 @@ function deployedBytecode(artifact, label) {
   return object.replace(/^0x/, "");
 }
 
+function patchReferences(runtime, references, replacement, expectedLength, label) {
+  for (const reference of references) {
+    if (reference.length !== expectedLength) fail(`${label} reference must be ${expectedLength} bytes`);
+    const start = reference.start * 2;
+    runtime = `${runtime.slice(0, start)}${replacement}${runtime.slice(start + expectedLength * 2)}`;
+  }
+  return runtime;
+}
+
+function immutableReferences(artifact) {
+  return Object.values(artifact?.deployedBytecode?.immutableReferences ?? {}).flat();
+}
+
+export function linkOperationsRuntime(artifact, operationsAddress) {
+  let runtime = deployedBytecode(artifact, "operations");
+  const address = normalizeHex(operationsAddress, 20, "FUND_CSP_ADAPTER_OPERATIONS");
+  const references = immutableReferences(artifact);
+  if (references.length !== 1) fail("operations must contain exactly one library self-address immutable");
+  runtime = patchReferences(runtime, references, address.padStart(64, "0"), 32, "operations immutable");
+  if (!/^[0-9a-f]+$/i.test(runtime)) fail("operations runtime remains partially linked");
+  return runtime.toLowerCase();
+}
+
 export function linkAdapterRuntime(artifact, operationsAddress) {
   let runtime = deployedBytecode(artifact, "adapter");
   const address = normalizeHex(operationsAddress, 20, "FUND_CSP_ADAPTER_OPERATIONS");
@@ -147,19 +172,22 @@ export function linkAdapterRuntime(artifact, operationsAddress) {
       }
     }
   }
-  if (allReferences.length !== 2 || operationsReferences.length !== 2) {
+  if (allReferences.length === 2 && operationsReferences.length === 2) {
+    runtime = patchReferences(runtime, operationsReferences, address, 20, "adapter library link");
+  } else if (allReferences.length === 0) {
+    const references = immutableReferences(artifact);
+    if (references.length !== 2) {
+      fail("pre-linked adapter must contain exactly two library address immutables");
+    }
+    runtime = patchReferences(runtime, references, address.padStart(64, "0"), 32, "adapter immutable");
+  } else {
     fail("adapter must contain exactly two CspFundAdapterOperations runtime link references");
-  }
-  for (const reference of operationsReferences) {
-    if (reference.length !== 20) fail("adapter library link reference must be 20 bytes");
-    const start = reference.start * 2;
-    runtime = `${runtime.slice(0, start)}${address}${runtime.slice(start + 40)}`;
   }
   if (!/^[0-9a-f]+$/i.test(runtime)) fail("adapter runtime remains partially unlinked");
   return runtime.toLowerCase();
 }
 
-function validateBuild(artifact, label, approvedSource) {
+function validateBuild(artifact, label, approvedSource, operationsAddress) {
   const metadata = typeof artifact.metadata === "string" ? JSON.parse(artifact.metadata) : artifact.metadata;
   const version = metadata?.compiler?.version ?? "";
   const settings = metadata?.settings ?? {};
@@ -168,6 +196,28 @@ function validateBuild(artifact, label, approvedSource) {
     fail(`${label} optimizer does not match approved source`);
   }
   if (settings.viaIR !== approvedSource.viaIr) fail(`${label} viaIR does not match approved source`);
+  const libraryKey = `${OPERATIONS_SOURCE}:${OPERATIONS_LIBRARY}`;
+  const configuredLibrary = settings.libraries?.[libraryKey]
+    ?? settings.libraries?.[OPERATIONS_SOURCE]?.[OPERATIONS_LIBRARY];
+  if (
+    normalizeHex(configuredLibrary, 20, `${label} compiler library`).toLowerCase()
+      !== normalizeHex(operationsAddress, 20, "FUND_CSP_ADAPTER_OPERATIONS").toLowerCase()
+  ) {
+    fail(`${label} compiler library does not match approved address`);
+  }
+}
+
+function buildApproved(document) {
+  const operationsAddress = document?.environment?.FUND_CSP_ADAPTER_OPERATIONS;
+  normalizeHex(operationsAddress, 20, "FUND_CSP_ADAPTER_OPERATIONS");
+  run("forge", [
+    "build",
+    ADAPTER_SOURCE,
+    OPERATIONS_SOURCE,
+    "--offline",
+    "--libraries",
+    `${OPERATIONS_SOURCE}:${OPERATIONS_LIBRARY}:${operationsAddress}`
+  ]);
 }
 
 export function validateDocument(document, {requireApproval = true} = {}) {
@@ -212,10 +262,9 @@ export function deriveApprovedHashes(document, root = process.cwd()) {
   const environment = validateDocument(document, {requireApproval: false});
   const adapter = JSON.parse(readFileSync(resolve(root, ADAPTER_ARTIFACT), "utf8"));
   const operations = JSON.parse(readFileSync(resolve(root, OPERATIONS_ARTIFACT), "utf8"));
-  validateBuild(adapter, "adapter", document.source);
-  validateBuild(operations, "operations", document.source);
-  const operationsRuntime = deployedBytecode(operations, "operations");
-  if (!/^[0-9a-f]+$/i.test(operationsRuntime)) fail("operations runtime is not fully linked");
+  validateBuild(adapter, "adapter", document.source, environment.FUND_CSP_ADAPTER_OPERATIONS);
+  validateBuild(operations, "operations", document.source, environment.FUND_CSP_ADAPTER_OPERATIONS);
+  const operationsRuntime = linkOperationsRuntime(operations, environment.FUND_CSP_ADAPTER_OPERATIONS);
   const linkedAdapterRuntime = linkAdapterRuntime(adapter, environment.FUND_CSP_ADAPTER_OPERATIONS);
   return {
     FUND_CSP_ADAPTER_OPERATIONS_CODEHASH: keccak(operationsRuntime),
@@ -233,14 +282,21 @@ function loadAndDigest(inputPath, expectedDigest) {
 function check(inputPath, expectedDigest) {
   const loaded = loadAndDigest(inputPath, expectedDigest);
   const environment = validateDocument(loaded.document);
-  const sourcePaths = ["src", "script/fund", "foundry.toml", "remappings.txt"];
+  const sourcePaths = [
+    "src",
+    "script/fund",
+    "scripts/prepare-b1n-352-inputs.mjs",
+    "scripts/test-b1n-352-inputs.mjs",
+    "foundry.toml",
+    "remappings.txt"
+  ];
   const sourceDiff = spawnSync(
     "git",
     ["diff", "--quiet", loaded.document.source.gitCommit, "--", ...sourcePaths],
     {encoding: "utf8"}
   );
   if (sourceDiff.status !== 0) fail("current contract and deployment source differs from approved git commit");
-  run("forge", ["build", "--offline"]);
+  buildApproved(loaded.document);
   const derived = deriveApprovedHashes(loaded.document);
   for (const [key, value] of Object.entries(derived)) {
     if (String(environment[key]).toLowerCase() !== value) fail(`${key} does not match approved build`);
@@ -266,7 +322,7 @@ function main() {
   }
   if (command === "derive") {
     const loaded = loadAndDigest(inputPath);
-    run("forge", ["build", "--offline"]);
+    buildApproved(loaded.document);
     console.log(JSON.stringify(deriveApprovedHashes(loaded.document), null, 2));
     return;
   }

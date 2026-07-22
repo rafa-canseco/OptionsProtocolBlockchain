@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {linkAdapterRuntime, sha256Hex, validateDocument} from "./prepare-b1n-352-inputs.mjs";
+import {
+  linkAdapterRuntime,
+  linkOperationsRuntime,
+  sha256Hex,
+  validateDocument
+} from "./prepare-b1n-352-inputs.mjs";
 
 test("links both approved library references at their exact offsets", () => {
   const artifact = {
@@ -31,6 +36,37 @@ test("rejects a partially described linked runtime", () => {
   assert.throws(
     () => linkAdapterRuntime(artifact, "0x1234567890123456789012345678901234567890"),
     /exactly two/
+  );
+});
+
+test("patches both pre-linked adapter address immutables", () => {
+  const artifact = {
+    deployedBytecode: {
+      object: `0x6000${"0".repeat(64)}6001${"0".repeat(64)}6002`,
+      linkReferences: {},
+      immutableReferences: {
+        library: [{start: 2, length: 32}, {start: 36, length: 32}]
+      }
+    }
+  };
+  const address = "1234567890123456789012345678901234567890";
+  const padded = address.padStart(64, "0");
+  assert.equal(linkAdapterRuntime(artifact, `0x${address}`), `6000${padded}6001${padded}6002`);
+});
+
+test("patches the deployed library self-address immutable", () => {
+  const artifact = {
+    deployedBytecode: {
+      object: `0x6000${"0".repeat(64)}6001`,
+      immutableReferences: {
+        library_deploy_address: [{start: 2, length: 32}]
+      }
+    }
+  };
+  const address = "1234567890123456789012345678901234567890";
+  assert.equal(
+    linkOperationsRuntime(artifact, `0x${address}`),
+    `6000${address.padStart(64, "0")}6001`
   );
 });
 
