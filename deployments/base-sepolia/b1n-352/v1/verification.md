@@ -22,4 +22,11 @@ Verify and record the Blockscout URL for:
 
 Core proxies use constructor args `(implementation, 0x)` because FundFactory initializes them after deployment. The adapter proxy uses `(adapterImplementation, adapterInitializeCalldata)`; preserve that calldata in the final manifest.
 
-No verification command in this checklist has been executed for B1N-352.
+Base Sepolia status after deployment:
+
+- Verified on Blockscout: the operations library, FundShare/FundAccounting/FundFlowManager implementations,
+  NavReportVerifier, CspFundAdapter implementation, CspFundValuator, both StrategyAssetEscrow instances,
+  FundAccessManager, FundAccessManagerDeployer, ClaimEscrow, and all six ERC1967Proxy instances.
+- Blockscout returned `Fail - Unable to verify` for the FundVault implementation, StrategyManager implementation,
+  and FundFactory after accepting their standard-json submissions. Their on-chain deployment receipts and runtime
+  code remain reconciled; retry these three when the Blockscout verifier queue/tooling is fixed.

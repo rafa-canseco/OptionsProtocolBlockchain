@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "1.0.0",
+  "deploymentStatus": "DEPLOYED_POLICY_PENDING",
+  "issue": "B1N-352",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532,
+    "reconciliationBlock": 44485851
+  },
+  "gates": {
+    "manualQaValidationPolicyApproved": true,
+    "approvedInputsDigestMatchesSeparatelyRecordedApproval": true,
+    "custodialPreflightPassed": true,
+    "broadcastSeparatelyApproved": true,
+    "activeStagingV1Untouched": true
+  },
+  "transactions": {
+    "libraryReceiptSuccess": true,
+    "fundReceiptsSuccess": 16,
+    "fundReceiptFailures": 0,
+    "accessScheduleReceiptSuccess": true,
+    "policyScheduleReceiptSuccess": true,
+    "finalDeployerNonce": 12224
+  },
+  "topology": {
+    "allExpectedAddressesHaveCode": true,
+    "cspAdapterImplementationSlotMatches": true,
+    "cspAdapterImplementationAddress": "0xed5984658DcA4Cd4DECE6E113862dF38e7eA4Ad8",
+    "cspAdapterImplementationCodehashMatches": true,
+    "operationsLibraryAddressMatches": true,
+    "operationsLibraryCodehashMatches": true,
+    "factoryOwnerMatches": true
+  },
+  "initialState": {
+    "fundName": "b1nary Base Sepolia CSP Fund",
+    "fundSymbol": "b1CSP-TEST",
+    "depositsPaused": true,
+    "redemptionsPaused": false,
+    "totalAssets": 0,
+    "adapterOnboarded": false,
+    "strategyActive": false
+  },
+  "timelocks": {
+    "policyReadyAt": 1784826378,
+    "policyReadyAtLocal": "2026-07-23 11:06:18 CST",
+    "accessReadyAt": 1784998928,
+    "accessReadyAtLocal": "2026-07-25 11:02:08 CST"
+  },
+  "verification": {
+    "blockscoutVerifiedContracts": 18,
+    "blockscoutFailedSubmissions": 3
+  },
+  "smokeTests": {
+    "deployment": "PASS",
+    "initialPause": "PASS",
+    "digestAndCodehashBindings": "PASS",
+    "deposit": "WAITING_FOR_POLICY_TIMELOCK",
+    "navAndShares": "WAITING_FOR_POLICY_TIMELOCK",
+    "cspOpenAndSettlement": "WAITING_FOR_POLICY_AND_ACCESS_TIMELOCKS",
+    "redemption": "WAITING_FOR_POLICY_TIMELOCK"
+  }
+}
