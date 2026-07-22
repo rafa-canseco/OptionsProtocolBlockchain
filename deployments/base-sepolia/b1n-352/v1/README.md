@@ -31,15 +31,18 @@ Before any command is run with `--broadcast`:
 ## Approved input workflow
 
 `deployment-inputs.approved.template.json` is the single non-secret source for deployment configuration, the B1N-346
-policy digest, V1 baselines and ownership, the planned linked-library address, and both expected runtime codehashes.
+policy digest, V1 baselines and ownership, the planned linked-library and adapter implementation addresses, and both
+expected runtime codehashes.
 Scripts parse those values directly from the digest-bound JSON; the generated `.env` contains only its path and digest,
 so it cannot diverge into a second configuration source. Populate numeric configuration values as JSON numbers and
 address lists as JSON arrays.
 
 1. Copy the template to a versioned `deployment-inputs.approved.json`, populate it from the approved source commit and
-   B1N-346 artifact, and obtain the planned `CspFundAdapterOperations` address from a no-broadcast simulation.
+   B1N-346 artifact, and obtain the planned `CspFundAdapterOperations` and adapter implementation addresses from a
+   no-broadcast simulation.
 2. Run `npm run b1n352:inputs:derive -- <approved-json>`. Copy the two derived hashes back into the JSON. The adapter
-   derivation patches both exact Foundry link references with the approved library address before hashing.
+   derivation compiles with the approved library address and patches the library self-address plus the adapter UUPS
+   self-address immutables before hashing.
 3. Set `approval.status` to `APPROVED`, record approver/time, calculate the exact-file SHA-256, and record that digest
    separately in Linear and `manifest.json`. Changing even whitespace invalidates the digest.
 4. Run `npm run b1n352:inputs:check -- <approved-json> <approved-sha256>`. This verifies the source tree against the
@@ -71,16 +74,18 @@ Deployment and governance scripts are deliberately split into phases. Every mult
 or execution is one `FundAccessManager.multicall` transaction; scripts preflight the complete batch and refuse partial
 schedules:
 
-1. `DeployTokenizedCspFundBaseSepolia` — deploys the complete fund and atomically leaves public deposits paused for
-   the manual-QA-only validation policy.
-2. `ScheduleB1N352Access` / wait 72h / `ExecuteB1N352Access`
-3. `ScheduleB1N352Policy` / wait 24h / `ExecuteB1N352Policy` — strategy remains inactive
-4. `PrepareB1N352Onboarding` — read-only baseline and calldata preparation; then `OnboardB1N352Adapter` performs the
+1. Deploy `CspFundAdapterOperations` with `forge create` using the exact `--libraries` binding recorded in the
+   approved inputs. This must be the next deployer nonce and its address/codehash must match before continuing.
+2. `DeployTokenizedCspFundBaseSepolia` with the same `--libraries` binding — deploys the complete fund and leaves
+   public deposits paused for the manual-QA-only validation policy.
+3. `ScheduleB1N352Access` / wait 72h / `ExecuteB1N352Access`
+4. `ScheduleB1N352Policy` / wait 24h / `ExecuteB1N352Policy` — strategy remains inactive
+5. `PrepareB1N352Onboarding` — read-only baseline and calldata preparation; then `OnboardB1N352Adapter` performs the
    sole V1 mutation on the isolated B1N-336 BatchSettler.
-5. `ScheduleB1N352Activation` / record the emitted `FUND_SCHEDULED_ALLOCATION_PAUSE_NONCE` / wait 24h /
+6. `ScheduleB1N352Activation` / record the emitted `FUND_SCHEDULED_ALLOCATION_PAUSE_NONCE` / wait 24h /
    `ExecuteB1N352Activation`. Activation calls only `resumeAllocation(adapter, scheduledPauseNonce)`, so it cannot
    restore caps reduced by the guardian and cannot override a later guardian pause or emergency exit.
-6. Wait until the access execution timestamp plus `AccessManager.minSetback()` (five days), then run
+7. Wait until the access execution timestamp plus `AccessManager.minSetback()` (five days), then run
    `ReconcileB1N352Deployment`.
 
 Each normal schedule and execute command is idempotent after the complete expected phase state is present. A normal

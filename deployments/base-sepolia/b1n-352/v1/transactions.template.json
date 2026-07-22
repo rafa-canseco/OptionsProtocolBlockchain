@@ -3,12 +3,20 @@
   "deploymentStatus": "NOT_BROADCAST",
   "transactions": [
     {
+      "phase": "deploy-library",
+      "label": "csp-adapter-operations",
+      "command": "forge create CspFundAdapterOperations with the approved --libraries binding",
+      "approvedInputsSha256": "TO_BE_FILLED_FROM_SEPARATELY_RECORDED_APPROVAL",
+      "hashes": [],
+      "status": "not-broadcast"
+    },
+    {
       "phase": "deploy",
       "label": "fresh-fund-stack",
       "script": "DeployTokenizedCspFundBaseSepolia",
       "approvedInputsSha256": "TO_BE_FILLED_FROM_SEPARATELY_RECORDED_APPROVAL",
       "hashes": [],
-      "status": "not-authorized"
+      "status": "not-broadcast"
     },
     {
       "phase": "access",
@@ -71,10 +79,10 @@
     {
       "phase": "v1-onboarding",
       "label": "prepare-atomic-setPhysicalDeliveryVault",
-      "script": "PrepareB1N352AtomicOnboarding",
-      "requirement": "approved smart-contract owner flow that pins and checks the V1 baseline in the same transaction as the mutation",
+      "script": "PrepareB1N352Onboarding / OnboardB1N352Adapter",
+      "requirement": "isolated B1N-336 owner flow that pins and checks the complete V1 baseline before and after the mutation",
       "hashes": [],
-      "status": "blocked-until-atomic-owner-flow-approved"
+      "status": "authorized-manual-qa-after-policy-delay"
     },
     {
       "phase": "activation",
