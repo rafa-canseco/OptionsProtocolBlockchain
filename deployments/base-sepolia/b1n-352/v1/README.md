@@ -71,7 +71,8 @@ Deployment and governance scripts are deliberately split into phases. Every mult
 or execution is one `FundAccessManager.multicall` transaction; scripts preflight the complete batch and refuse partial
 schedules:
 
-1. `DeployTokenizedCspFundBaseSepolia`
+1. `DeployTokenizedCspFundBaseSepolia` — deploys the complete fund and atomically leaves public deposits paused for
+   the manual-QA-only validation policy.
 2. `ScheduleB1N352Access` / wait 72h / `ExecuteB1N352Access`
 3. `ScheduleB1N352Policy` / wait 24h / `ExecuteB1N352Policy` — strategy remains inactive
 4. `PrepareB1N352Onboarding` — read-only baseline and calldata preparation; then `OnboardB1N352Adapter` performs the

@@ -44,6 +44,10 @@ contract B1N352DeployHarness is DeployTokenizedCspFundBaseSepolia {
         _requireApprovedInputsDigest();
     }
 
+    function pauseDepositsForQa(address fundVault) external {
+        _pauseDepositsForQa(fundVault);
+    }
+
     function approvedInputsDigest() external view returns (bytes32) {
         return sha256(bytes(_approvedInputs()));
     }
@@ -272,6 +276,17 @@ contract B1N352DeploymentTest is Test {
         assertEq(manager.getTargetAdminDelay(deployed.emergencyStrategyEscrow), FundConstants.CORE_UPGRADE_DELAY);
 
         _assertLegacyPerUserStateAbsent(address(vault));
+    }
+
+    function test_initialQaPauseRequiresGuardianAndClosesDeposits() public {
+        B1N352Base.DeployConfig memory deployConfig = _deployConfig();
+        deployConfig.roles.guardian = address(deployHarness);
+        B1N352Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(deployConfig);
+        FundVault vault = FundVault(deployed.fundVaultProxy);
+
+        assertFalse(vault.depositsPaused());
+        deployHarness.pauseDepositsForQa(address(vault));
+        assertTrue(vault.depositsPaused());
     }
 
     function test_expectedV1BaselineRejectsStructurallyValidWrongImplementation() public {
