@@ -19,6 +19,22 @@ import {B1N352Operations} from "./B1N352Operations.sol";
 /// @notice Read-only state reconciliation for manifest finalization and post-configuration checks.
 abstract contract B1N352DeploymentReconciler is B1N352Operations {
     function _reconcile(bool expectedOnboarded, bool expectedActive) internal view {
+        _reconcileWithDelays(
+            expectedOnboarded,
+            expectedActive,
+            FundConstants.CORE_UPGRADE_DELAY,
+            FundConstants.ADAPTER_UPGRADE_DELAY,
+            FundConstants.CURATOR_DELAY
+        );
+    }
+
+    function _reconcileWithDelays(
+        bool expectedOnboarded,
+        bool expectedActive,
+        uint32 expectedCoreDelay,
+        uint32 expectedAdapterDelay,
+        uint32 expectedCuratorDelay
+    ) internal view {
         _requireBaseSepolia();
         DeployConfig memory deployConfig = _loadDeployConfig();
         PolicyConfig memory policyConfig = _loadPolicyConfig();
@@ -88,7 +104,10 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             address(strategy),
             address(adapter),
             inKindEscrow,
-            emergencyEscrow
+            emergencyEscrow,
+            expectedCoreDelay,
+            expectedAdapterDelay,
+            expectedCuratorDelay
         );
 
         require(adapter.isOnboarded() == expectedOnboarded, "B1N352: onboarded state");
@@ -171,16 +190,19 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
         address strategy,
         address adapter,
         address inKindEscrow,
-        address emergencyEscrow
-    ) private view {
+        address emergencyEscrow,
+        uint32 expectedCoreDelay,
+        uint32 expectedAdapterDelay,
+        uint32 expectedCuratorDelay
+    ) internal view {
         _verifyRole(
             manager,
             manager.ADMIN_ROLE(),
             manager.ADMIN_ROLE(),
             manager.ADMIN_ROLE(),
-            FundConstants.CORE_UPGRADE_DELAY,
+            expectedCoreDelay,
             _approvedAddress("FUND_ADMIN"),
-            FundConstants.CORE_UPGRADE_DELAY,
+            expectedCoreDelay,
             1
         );
         _verifyRole(
@@ -188,9 +210,9 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             FundConstants.UPGRADER_ROLE,
             manager.ADMIN_ROLE(),
             manager.ADMIN_ROLE(),
-            FundConstants.CORE_UPGRADE_DELAY,
+            expectedCoreDelay,
             _approvedAddress("FUND_UPGRADER"),
-            FundConstants.CORE_UPGRADE_DELAY,
+            expectedCoreDelay,
             1
         );
         _verifyRole(
@@ -228,9 +250,9 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             FundConstants.CURATOR_ROLE,
             manager.ADMIN_ROLE(),
             FundConstants.GUARDIAN_ROLE,
-            FundConstants.CURATOR_DELAY,
+            expectedCuratorDelay,
             _approvedAddress("FUND_CURATOR"),
-            FundConstants.CURATOR_DELAY,
+            expectedCuratorDelay,
             1
         );
         _verifyRole(
@@ -251,9 +273,9 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
             FundConstants.ADAPTER_UPGRADER_ROLE,
             manager.ADMIN_ROLE(),
             manager.ADMIN_ROLE(),
-            FundConstants.ADAPTER_UPGRADE_DELAY,
+            expectedAdapterDelay,
             _approvedAddress("FUND_UPGRADER"),
-            FundConstants.ADAPTER_UPGRADE_DELAY,
+            expectedAdapterDelay,
             1
         );
         require(!manager.isTargetClosed(address(manager)), "B1N352: manager closed");
@@ -268,14 +290,14 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
         _verifyRules(manager, inKindEscrow, FundAccessPolicy.strategyAssetEscrowRules(), 0);
         _verifyRules(manager, emergencyEscrow, FundAccessPolicy.strategyAssetEscrowRules(), 0);
 
-        _verifyTargetAdminDelay(manager, vault);
-        _verifyTargetAdminDelay(manager, share);
-        _verifyTargetAdminDelay(manager, accounting);
-        _verifyTargetAdminDelay(manager, flow);
-        _verifyTargetAdminDelay(manager, strategy);
-        _verifyTargetAdminDelay(manager, adapter);
-        _verifyTargetAdminDelay(manager, inKindEscrow);
-        _verifyTargetAdminDelay(manager, emergencyEscrow);
+        _verifyTargetAdminDelay(manager, vault, expectedCoreDelay);
+        _verifyTargetAdminDelay(manager, share, expectedCoreDelay);
+        _verifyTargetAdminDelay(manager, accounting, expectedCoreDelay);
+        _verifyTargetAdminDelay(manager, flow, expectedCoreDelay);
+        _verifyTargetAdminDelay(manager, strategy, expectedCoreDelay);
+        _verifyTargetAdminDelay(manager, adapter, expectedCoreDelay);
+        _verifyTargetAdminDelay(manager, inKindEscrow, expectedCoreDelay);
+        _verifyTargetAdminDelay(manager, emergencyEscrow, expectedCoreDelay);
     }
 
     function _verifyRole(
@@ -326,9 +348,9 @@ abstract contract B1N352DeploymentReconciler is B1N352Operations {
         require(manager.getTargetFunctionRole(target, selector) == expectedRole, "B1N352: target role");
     }
 
-    function _verifyTargetAdminDelay(FundAccessManager manager, address target) private view {
+    function _verifyTargetAdminDelay(FundAccessManager manager, address target, uint32 expectedDelay) private view {
         (uint32 currentDelay, uint32 pendingDelay, uint48 effect) = manager.getTargetAdminDelayFull(target);
-        require(currentDelay == FundConstants.CORE_UPGRADE_DELAY, "B1N352: target admin delay");
+        require(currentDelay == expectedDelay, "B1N352: target admin delay");
         require(pendingDelay == 0 && effect == 0, "B1N352: pending target admin delay");
     }
 

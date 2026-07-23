@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "2.0.0",
+  "issue": "B1N-352",
+  "deploymentStatus": "NOT_BROADCAST",
+  "transactions": [
+    {
+      "phase": "deploy",
+      "script": "DeployTokenizedCspFundBaseSepoliaV2",
+      "shape": "fresh one-shot Fund stack; deposits paused during createFund",
+      "hashes": [],
+      "status": "not-broadcast"
+    },
+    {
+      "phase": "access",
+      "script": "ConfigureB1N352V2Access",
+      "shape": "single FundAccessManager.multicall; direct admin calls; no schedules",
+      "idempotence": "no-op only when exact selector roles and zero target-admin delays are finalized",
+      "hashes": [],
+      "status": "not-broadcast"
+    },
+    {
+      "phase": "policy",
+      "script": "ConfigureB1N352V2Policy",
+      "shape": "single AccessManager.multicall of immediate execute calls; no schedules",
+      "idempotence": "no-op only when the complete inactive low-cap policy matches",
+      "hashes": [],
+      "status": "not-broadcast"
+    },
+    {
+      "phase": "configured-reconciliation",
+      "script": "ReconcileB1N352V2Configured",
+      "readOnly": true,
+      "status": "not-run"
+    },
+    {
+      "phase": "v1-onboarding",
+      "script": "OnboardB1N352V2Adapter",
+      "shape": "single setPhysicalDeliveryVault(newAdapter,true) on pinned B1N-336 BatchSettler",
+      "idempotence": "no-op only when both BatchSettler and adapter report onboarded",
+      "hashes": [],
+      "status": "not-broadcast"
+    },
+    {
+      "phase": "onboarded-reconciliation",
+      "script": "ReconcileB1N352V2Onboarded",
+      "readOnly": true,
+      "status": "not-run"
+    },
+    {
+      "phase": "activation",
+      "script": "ActivateB1N352V2Strategy",
+      "shape": "single immediate AccessManager.multicall bound to current allocationPauseNonce",
+      "effect": "strategy active; deposits remain paused",
+      "hashes": [],
+      "status": "not-broadcast"
+    },
+    {
+      "phase": "activated-reconciliation",
+      "script": "ReconcileB1N352V2Activated",
+      "readOnly": true,
+      "status": "not-run"
+    },
+    {
+      "phase": "open-deposits",
+      "script": "OpenB1N352V2Deposits",
+      "shape": "single immediate AccessManager.multicall after activation",
+      "hashes": [],
+      "status": "not-broadcast"
+    },
+    {
+      "phase": "open-reconciliation",
+      "script": "ReconcileB1N352V2Open",
+      "readOnly": true,
+      "status": "not-run"
+    }
+  ]
+}

@@ -19,10 +19,11 @@ import {B1N352Base} from "./B1N352Base.sol";
 
 /// @notice Deployment phase only. It does not configure delayed roles, onboard V1, or activate the strategy.
 contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
-    function run() external returns (DeploymentAddresses memory deployed) {
+    function run() external virtual returns (DeploymentAddresses memory deployed) {
         _requireBaseSepolia();
         DeployConfig memory config = _loadDeployConfig();
         _validateExternalConfig(config);
+        _validateDeploymentProfile(config);
         _requireExpectedV1Baseline(config.addressBook);
         _logV1Baseline(config.addressBook);
 
@@ -64,7 +65,7 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
         deployed.strategyManagerImplementation = address(new StrategyManager());
         deployed.navReportVerifier = address(new NavReportVerifier());
 
-        FundFactory factory = new FundFactory(deployer);
+        FundFactory factory = _newFactory(deployer);
         deployed.fundFactory = address(factory);
         deployed.fundAccessManagerDeployer = address(factory.accessManagerDeployer());
         factory.registerImplementationVersion(
@@ -141,10 +142,16 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
         factory.transferOwnership(config.factoryOwner);
     }
 
+    function _newFactory(address deployer) internal virtual returns (FundFactory) {
+        return new FundFactory(deployer);
+    }
+
+    function _validateDeploymentProfile(DeployConfig memory) internal view virtual {}
+
     function _pauseDepositsForQa(address fundVault) internal {
         FundVault vault = FundVault(fundVault);
         vault.pauseDeposits();
-        require(vault.depositsPaused(), "B1N352: QA deposits not paused");
+        require(vault.depositsPaused(), "B1N352: initial deposits not paused");
     }
 
     function _logDeployment(DeploymentAddresses memory deployed) private view {

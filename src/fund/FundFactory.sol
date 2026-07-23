@@ -124,7 +124,7 @@ contract FundFactory is Ownable {
         return _computeDeploymentId(params, creator);
     }
 
-    function createFund(CreateFundParams calldata params) external returns (FundDeployment memory deployed) {
+    function createFund(CreateFundParams calldata params) public virtual returns (FundDeployment memory deployed) {
         ImplementationSet memory implementationSet = implementationSets[params.implementationVersion];
         if (!implementationSet.active || address(params.asset) == address(0)) {
             revert InvalidImplementationSet(params.implementationVersion);
@@ -193,35 +193,14 @@ contract FundFactory is Ownable {
         StrategyManager(strategyProxy)
             .initialize(vaultProxy, address(manager), implementationSet.compatibilityVersion, params.minimumIdleBps);
 
+        _beforeRulesConfigured(vaultProxy);
+
         _configureRules(manager, shareProxy, FundAccessPolicy.shareRules());
         _configureRules(manager, vaultProxy, FundAccessPolicy.vaultRules());
         _configureRules(manager, accountingProxy, FundAccessPolicy.accountingRules());
         _configureRules(manager, flowProxy, FundAccessPolicy.flowRules());
         _configureRules(manager, strategyProxy, FundAccessPolicy.strategyRules());
         _setSingleRule(manager, accountingProxy, FundAccounting.setComponentState.selector, FundConstants.CURATOR_ROLE);
-        manager.setRoleGuardian(FundConstants.CURATOR_ROLE, FundConstants.GUARDIAN_ROLE);
-        manager.setGrantDelay(manager.ADMIN_ROLE(), FundConstants.CORE_UPGRADE_DELAY);
-        manager.setGrantDelay(FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
-        manager.setGrantDelay(FundConstants.ADAPTER_UPGRADER_ROLE, FundConstants.ADAPTER_UPGRADE_DELAY);
-        manager.setGrantDelay(FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
-        manager.setTargetAdminDelay(shareProxy, FundConstants.CORE_UPGRADE_DELAY);
-        manager.setTargetAdminDelay(vaultProxy, FundConstants.CORE_UPGRADE_DELAY);
-        manager.setTargetAdminDelay(accountingProxy, FundConstants.CORE_UPGRADE_DELAY);
-        manager.setTargetAdminDelay(flowProxy, FundConstants.CORE_UPGRADE_DELAY);
-        manager.setTargetAdminDelay(strategyProxy, FundConstants.CORE_UPGRADE_DELAY);
-
-        manager.grantRole(FundConstants.UPGRADER_ROLE, params.roles.upgrader, FundConstants.CORE_UPGRADE_DELAY);
-        manager.grantRole(
-            FundConstants.ADAPTER_UPGRADER_ROLE, params.roles.upgrader, FundConstants.ADAPTER_UPGRADE_DELAY
-        );
-        manager.grantRole(FundConstants.ACCOUNTING_ROLE, params.roles.accounting, 0);
-        manager.grantRole(FundConstants.ALLOCATOR_ROLE, params.roles.allocator, 0);
-        manager.grantRole(FundConstants.PROCESSOR_ROLE, params.roles.processor, 0);
-        manager.grantRole(FundConstants.CURATOR_ROLE, params.roles.curator, FundConstants.CURATOR_DELAY);
-        manager.grantRole(FundConstants.GUARDIAN_ROLE, params.roles.guardian, 0);
-        manager.grantRole(manager.ADMIN_ROLE(), params.roles.admin, FundConstants.CORE_UPGRADE_DELAY);
-        manager.renounceRole(manager.ADMIN_ROLE(), address(this));
-
         deployed = FundDeployment({
             vault: vaultProxy,
             share: shareProxy,
@@ -233,6 +212,8 @@ contract FundFactory is Ownable {
             accessManager: address(manager),
             implementationVersion: params.implementationVersion
         });
+        _configureAuthority(manager, params.roles, deployed);
+
         _deployments[deploymentId] = deployed;
         emit FundCreated(
             deploymentId,
@@ -248,6 +229,34 @@ contract FundFactory is Ownable {
             params.implementationVersion
         );
     }
+
+    function _configureAuthority(FundAccessManager manager, RoleAccounts calldata roles, FundDeployment memory deployed)
+        internal
+        virtual
+    {
+        manager.setRoleGuardian(FundConstants.CURATOR_ROLE, FundConstants.GUARDIAN_ROLE);
+        manager.setGrantDelay(manager.ADMIN_ROLE(), FundConstants.CORE_UPGRADE_DELAY);
+        manager.setGrantDelay(FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
+        manager.setGrantDelay(FundConstants.ADAPTER_UPGRADER_ROLE, FundConstants.ADAPTER_UPGRADE_DELAY);
+        manager.setGrantDelay(FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
+        manager.setTargetAdminDelay(deployed.share, FundConstants.CORE_UPGRADE_DELAY);
+        manager.setTargetAdminDelay(deployed.vault, FundConstants.CORE_UPGRADE_DELAY);
+        manager.setTargetAdminDelay(deployed.accounting, FundConstants.CORE_UPGRADE_DELAY);
+        manager.setTargetAdminDelay(deployed.flowManager, FundConstants.CORE_UPGRADE_DELAY);
+        manager.setTargetAdminDelay(deployed.strategyManager, FundConstants.CORE_UPGRADE_DELAY);
+
+        manager.grantRole(FundConstants.UPGRADER_ROLE, roles.upgrader, FundConstants.CORE_UPGRADE_DELAY);
+        manager.grantRole(FundConstants.ADAPTER_UPGRADER_ROLE, roles.upgrader, FundConstants.ADAPTER_UPGRADE_DELAY);
+        manager.grantRole(FundConstants.ACCOUNTING_ROLE, roles.accounting, 0);
+        manager.grantRole(FundConstants.ALLOCATOR_ROLE, roles.allocator, 0);
+        manager.grantRole(FundConstants.PROCESSOR_ROLE, roles.processor, 0);
+        manager.grantRole(FundConstants.CURATOR_ROLE, roles.curator, FundConstants.CURATOR_DELAY);
+        manager.grantRole(FundConstants.GUARDIAN_ROLE, roles.guardian, 0);
+        manager.grantRole(manager.ADMIN_ROLE(), roles.admin, FundConstants.CORE_UPGRADE_DELAY);
+        manager.renounceRole(manager.ADMIN_ROLE(), address(this));
+    }
+
+    function _beforeRulesConfigured(address) internal virtual {}
 
     function _configureRules(FundAccessManager manager, address target, FundAccessPolicy.Rule[] memory rules) private {
         for (uint256 i; i < rules.length; ++i) {
