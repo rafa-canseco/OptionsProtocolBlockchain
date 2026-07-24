@@ -45,8 +45,8 @@ contract B1N352DeployHarness is DeployTokenizedCspFundBaseSepolia {
         _requireApprovedInputsDigest();
     }
 
-    function pauseDepositsForQa(address fundVault) external {
-        _pauseDepositsForQa(fundVault);
+    function pauseDepositsAtCreation(address fundVault) external {
+        _pauseDepositsAtCreation(fundVault);
     }
 
     function approvedInputsDigest() external view returns (bytes32) {
@@ -406,14 +406,14 @@ contract B1N352DeploymentTest is Test {
         _assertLegacyPerUserStateAbsent(address(vault));
     }
 
-    function test_initialQaPauseRequiresGuardianAndClosesDeposits() public {
+    function test_initialDeploymentPauseRequiresGuardianAndClosesDeposits() public {
         B1N352Base.DeployConfig memory deployConfig = _deployConfig();
         deployConfig.roles.guardian = address(deployHarness);
         B1N352Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(deployConfig);
         FundVault vault = FundVault(deployed.fundVaultProxy);
 
         assertFalse(vault.depositsPaused());
-        deployHarness.pauseDepositsForQa(address(vault));
+        deployHarness.pauseDepositsAtCreation(address(vault));
         assertTrue(vault.depositsPaused());
     }
 

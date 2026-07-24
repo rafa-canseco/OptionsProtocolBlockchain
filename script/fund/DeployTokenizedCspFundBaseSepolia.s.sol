@@ -48,7 +48,7 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
                 == _approvedBytes32("FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH"),
             "B1N352: linked adapter implementation hash"
         );
-        _pauseDepositsForQa(deployed.fundVaultProxy);
+        _pauseDepositsAtCreation(deployed.fundVaultProxy);
         vm.stopBroadcast();
 
         _logDeployment(deployed);
@@ -148,7 +148,7 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
 
     function _validateDeploymentProfile(DeployConfig memory) internal view virtual {}
 
-    function _pauseDepositsForQa(address fundVault) internal {
+    function _pauseDepositsAtCreation(address fundVault) internal {
         FundVault vault = FundVault(fundVault);
         vault.pauseDeposits();
         require(vault.depositsPaused(), "B1N352: initial deposits not paused");

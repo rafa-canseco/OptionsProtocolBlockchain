@@ -173,7 +173,7 @@ contract B1N352ZeroDelayFundFactoryTest is Test {
             implementationVersion: 1,
             salt: salt,
             name: "B1N352 V2 CSP Fund",
-            symbol: "qaCSP",
+            symbol: "v2CSP",
             asset: asset,
             minimumIdleBps: 2_000,
             navActivationDelay: 1,
