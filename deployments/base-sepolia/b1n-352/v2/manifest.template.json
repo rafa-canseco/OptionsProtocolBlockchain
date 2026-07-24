@@ -17,9 +17,9 @@
     }
   },
   "source": {
-    "gitCommit": "TO_BE_FILLED_FROM_APPROVED_COMMIT",
-    "approvedInputsSha256": "TO_BE_FILLED_FROM_EXTERNAL_APPROVAL",
-    "validationPolicySha256": "TO_BE_FILLED",
+    "gitCommit": "4a72b3e616a9c2fa335cbbe3e798474f8c390394",
+    "approvedInputsSha256": "0x1c534e8dccfef493b9559d14f846118c142abc5313aafe705acc79a790705345",
+    "validationPolicySha256": "0xa0a2d82226d1bd0e6d5472eab980acead94af8a9f17bd5b0212356d05f6f34aa",
     "branch": "feat/b1n-352-zero-delay-redeploy",
     "solc": "0.8.24",
     "optimizerRuns": 200,
@@ -86,7 +86,11 @@
       "address": "0x0863A20B89d027472639A1E0c76278798e03D276",
       "codehash": "0x2e69f662cdb82d8c8d9c59c53a2a4079b9070f748d977a8b8ba406d7b5d39b77"
     },
-    "cspFundAdapter": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
+    "cspFundAdapter": {
+      "proxy": "TO_BE_FILLED",
+      "implementation": "0x66677E767806c85656596AB9F1cE4939580Db453",
+      "implementationCodehash": "0xa7a47e2077e533405467ff332fb072cb940871dfd72929b7e8f78da14555894f"
+    },
     "cspFundValuator": {"address": "TO_BE_FILLED"},
     "inKindStrategyEscrow": "TO_BE_FILLED",
     "emergencyStrategyEscrow": "TO_BE_FILLED"

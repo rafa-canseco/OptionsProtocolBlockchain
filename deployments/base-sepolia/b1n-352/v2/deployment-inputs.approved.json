@@ -2,9 +2,13 @@
   "schemaVersion": "1.0.0",
   "issue": "B1N-352",
   "network": {"name": "base-sepolia", "chainId": 84532},
-  "approval": {"status": "NOT_APPROVED", "approvedBy": null, "approvedAt": null},
+  "approval": {
+    "status": "APPROVED",
+    "approvedBy": "Rafa Canseco",
+    "approvedAt": "2026-07-23"
+  },
   "source": {
-    "gitCommit": "TO_BE_FILLED_FROM_APPROVED_COMMIT",
+    "gitCommit": "4a72b3e616a9c2fa335cbbe3e798474f8c390394",
     "solc": "0.8.24",
     "optimizerRuns": 200,
     "viaIr": true,
@@ -13,7 +17,7 @@
   },
   "policy": {
     "artifact": "deployments/base-sepolia/b1n-352/v2/validation-policy.approved.json",
-    "sha256": "TO_BE_FILLED_FROM_APPROVED_POLICY_ARTIFACT"
+    "sha256": "0xa0a2d82226d1bd0e6d5472eab980acead94af8a9f17bd5b0212356d05f6f34aa"
   },
   "environment": {
     "FUND_PHASE_SCHEDULER": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
@@ -81,8 +85,8 @@
     "FUND_STRATEGY_ABSOLUTE_CAP": 25000000,
     "FUND_CSP_ADAPTER_OPERATIONS": "0x0863A20B89d027472639A1E0c76278798e03D276",
     "FUND_CSP_ADAPTER_OPERATIONS_CODEHASH": "0x2e69f662cdb82d8c8d9c59c53a2a4079b9070f748d977a8b8ba406d7b5d39b77",
-    "FUND_CSP_ADAPTER_IMPLEMENTATION": "TO_BE_FILLED_FROM_APPROVED_DRY_RUN",
-    "FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH": "TO_BE_DERIVED_FROM_APPROVED_BUILD",
+    "FUND_CSP_ADAPTER_IMPLEMENTATION": "0x66677E767806c85656596AB9F1cE4939580Db453",
+    "FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH": "0xa7a47e2077e533405467ff332fb072cb940871dfd72929b7e8f78da14555894f",
     "FUND_EXPECTED_V1_ADDRESS_BOOK": "0x033d9d37Baf83dBc71935239b6fA22a6905dbaa0",
     "FUND_EXPECTED_V1_ADDRESS_BOOK_IMPLEMENTATION": "0x21aBa53771dDfE58DB867D5C47Cd0DA94ba5c5A4",
     "FUND_EXPECTED_V1_ADDRESS_BOOK_CODEHASH": "0x941c8e4f854e594128e56573002d5ec2195af2f8a0496741472a65a6d0be4eb5",
