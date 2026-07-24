@@ -1,32 +1,24 @@
 {
   "schemaVersion": "1.0.0",
   "issue": "B1N-352",
-  "deploymentStatus": "DEPLOYED",
+  "deploymentStatus": "NOT_DEPLOYED",
   "network": {
     "name": "base-sepolia",
     "chainId": 84532,
     "blockscout": "https://base-sepolia.blockscout.com",
-    "deploymentBlocks": {
-      "fundFirst": 44541995,
-      "fundLast": 44542010,
-      "accessConfigured": 44542183,
-      "policyConfigured": 44542235,
-      "onboarded": 44542654,
-      "activated": 44542781,
-      "depositsOpened": 44542816
-    }
+      "deploymentBlocks": {}
   },
   "source": {
-    "gitCommit": "4a72b3e616a9c2fa335cbbe3e798474f8c390394",
+    "gitCommit": "TO_BE_FILLED_AFTER_AUTHORIZED_BROADCAST",
     "approvedInputsSha256": "0x1c534e8dccfef493b9559d14f846118c142abc5313aafe705acc79a790705345",
     "validationPolicySha256": "0xa0a2d82226d1bd0e6d5472eab980acead94af8a9f17bd5b0212356d05f6f34aa",
-    "branch": "feat/b1n-352-zero-delay-redeploy",
+    "branch": "staging",
     "solc": "0.8.24",
     "optimizerRuns": 200,
     "viaIr": true,
     "implementationVersion": 1,
     "compatibilityVersion": 1,
-    "deploymentRevision": "v2-zero-delay"
+    "deploymentRevision": "v2-zero-delay-preflight"
   },
   "v1Boundary": {
     "stack": "isolated-b1n-336",

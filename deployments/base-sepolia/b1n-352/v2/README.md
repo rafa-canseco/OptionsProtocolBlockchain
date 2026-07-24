@@ -1,6 +1,6 @@
 # B1N-352 v2 Base Sepolia redeploy
 
-Status: **DEPLOYED — STRICT RECONCILIATION PASSED**
+Status: **NOT DEPLOYED — PREFLIGHT READY**
 
 This is the single replacement Fund deployment for B1N-352. It reuses the codehash-pinned isolated
 B1N-336 core and the existing Base Sepolia authority. It does not deploy or upgrade V1 components and
@@ -25,6 +25,9 @@ The reused V1 `OTokenFactory` still requires every expiry to be in the future at
 
 ## Deployment endpoints
 
+Addresses and transaction receipts are intentionally absent until the separately authorized
+Base Sepolia broadcast. Run all scripts without `--broadcast` for local/fork validation.
+
 - FundVault: `0x53e38Baf2fC55259729085b7542BFF066F6a509e`
 - FundShare: `0x07Db1F574ecCFD15c4A8bd4582e5d25baA84De7d`
 - FundAccounting: `0x21d3acc5a2c64666dA93ABC8c77AB483b96836a3`
@@ -34,18 +37,18 @@ The reused V1 `OTokenFactory` still requires every expiry to be in the future at
 - CSP valuator: `0x43a6a2470Cb382d525B2ec17548C3F74cbc2fDDC`
 - AccessManager: `0x729d5076C1C59a7C2676Faf3fB9133Ff80cDaB12`
 
-## Completed phases
+## Planned phases (not yet broadcast)
 
-1. Fund deployment: blocks `44541995–44542010`, 16/16 receipts successful.
-2. Access configuration: block `44542183`.
-3. Policy configuration: block `44542235`.
-4. Configured reconciliation: passed.
-5. Adapter onboarding: block `44542654`; the pinned B1N-336 implementation remained unchanged.
-6. Onboarded reconciliation: passed.
-7. Strategy activation: block `44542781`; deposits remained paused.
-8. Activated reconciliation: passed.
-9. Deposit opening: block `44542816`.
-10. Final open reconciliation: passed at block `44542850`.
+1. Fund deployment: fresh one-shot stack, deposits paused inside `createFund`.
+2. Access configuration: immediate zero-delay role grants.
+3. Policy configuration: low-cap inactive policy.
+4. Configured reconciliation.
+5. Adapter onboarding; pinned B1N-336 implementation remains unchanged.
+6. Onboarded reconciliation.
+7. Strategy activation; deposits remain paused.
+8. Activated reconciliation.
+9. Deposit opening only after final smoke-test gate.
+10. Final open reconciliation.
 
 Access and policy phases are immediate, idempotent, and atomic within their respective
 `AccessManager.multicall` transactions. No v1 schedule/execute script is part of this v2 path.

@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "issue": "B1N-352",
-  "deploymentStatus": "DEPLOYED",
-  "network": {"name": "base-sepolia", "chainId": 84532, "reconciliationBlock": 44542850},
+  "deploymentStatus": "NOT_DEPLOYED",
+  "network": {"name": "base-sepolia", "chainId": 84532, "reconciliationBlock": null},
   "gates": {
     "approvedInputsDigestMatchesExternalApproval": true,
     "custodialPreflightPassed": true,
-    "broadcastSeparatelyApproved": true
+    "broadcastSeparatelyApproved": false
   },
   "v1Boundary": {
     "isolatedB1N336CoreMatchesApprovedBaseline": true,
