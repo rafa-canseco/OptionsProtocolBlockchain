@@ -12,6 +12,7 @@ build_info = true
 extra_output = ["storageLayout"]
 fs_permissions = [
   { access = "read", path = "./deployments/base-sepolia/b1n-352/v1" },
+  { access = "read", path = "./deployments/base-sepolia/b1n-352/v2" },
   { access = "read", path = "./test/fixtures" },
   { access = "read", path = "./out" }
 ]
