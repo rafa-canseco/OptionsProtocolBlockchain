@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "issue": "B1N-352",
-  "deploymentStatus": "NOT_DEPLOYED",
-  "network": {"name": "base-sepolia", "chainId": 84532, "reconciliationBlock": null},
+  "deploymentStatus": "DEPLOYED",
+  "network": {"name": "base-sepolia", "chainId": 84532, "reconciliationBlock": 44570018},
   "gates": {
     "approvedInputsDigestMatchesExternalApproval": true,
     "custodialPreflightPassed": true,
-    "broadcastSeparatelyApproved": false
+    "broadcastSeparatelyApproved": true
   },
   "v1Boundary": {
     "isolatedB1N336CoreMatchesApprovedBaseline": true,
@@ -47,12 +47,12 @@
     "configured": "PASSED",
     "onboarded": "PASSED",
     "activatedDepositsPaused": "PASSED",
-    "depositsOpen": "PASSED"
+    "depositsOpen": "INTENTIONALLY_PAUSED"
   },
   "finalState": {
-    "depositsPaused": false,
+    "depositsPaused": true,
     "adapterOnboarded": true,
-    "strategyActive": true,
+    "strategyActive": false,
     "maxAllocationBps": 2500,
     "maxLossBps": 1000,
     "cooldownSeconds": 0,
@@ -63,8 +63,8 @@
     "mainnetAuthorized": false
   },
   "smokeTests": {
-    "deposit": "NOT_RUN",
-    "navAndShares": "NOT_RUN",
+    "deposit": "BLOCKED_BY_PAUSE",
+    "navAndShares": "NAV_CONFIRMED_NONCE_1",
     "cspOpenAndSettlement": "NOT_RUN",
     "redemption": "NOT_RUN"
   }

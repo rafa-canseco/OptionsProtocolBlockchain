@@ -1,10 +1,11 @@
 # B1N-352 v2 Base Sepolia redeploy
 
-Status: **NOT DEPLOYED — PREFLIGHT READY**
+Status: **DEPLOYED — QA HANDOFF**
 
 This is the single replacement Fund deployment for B1N-352. It reuses the codehash-pinned isolated
 B1N-336 core and the existing Base Sepolia authority. It does not deploy or upgrade V1 components and
-does not overwrite the historical `b1n-352/v1` handoff.
+does not overwrite the historical `b1n-352/v1` handoff. The final deployment and read-only reconciliation
+are recorded in `manifest.json`, `reconciliation.json`, and `v1-boundary-evidence.json`.
 
 ## Fixed deployment invariants
 
@@ -25,23 +26,16 @@ The reused V1 `OTokenFactory` still requires every expiry to be in the future at
 
 ## Deployment endpoints
 
-Addresses and transaction receipts are intentionally absent until the separately authorized
-Base Sepolia broadcast. Run all scripts without `--broadcast` for local/fork validation.
+The deployment is on Base Sepolia (`84532`) only. Contract addresses and the deployment block range are
+recorded in `manifest.json`; the pause, emergency-exit reconciliation, and NAV smoke transactions are
+recorded in `transactions.json`. Deposits are still paused and the allocator bot is not authorized.
 
-No contract addresses exist yet; they will be recorded after the authorized broadcast.
+## QA status
 
-## Planned phases (not yet broadcast)
-
-1. Fund deployment: fresh one-shot stack, deposits paused inside `createFund`.
-2. Access configuration: immediate zero-delay role grants.
-3. Policy configuration: low-cap inactive policy.
-4. Configured reconciliation.
-5. Adapter onboarding; pinned B1N-336 implementation remains unchanged.
-6. Onboarded reconciliation.
-7. Strategy activation; deposits remain paused.
-8. Activated reconciliation.
-9. Deposit opening only after final smoke-test gate.
-10. Final open reconciliation.
+1. Fund deployment, zero-delay access configuration, policy configuration, and adapter onboarding: complete.
+2. Deposit pause and state reconciliation: complete; `depositsPaused()` is `true`.
+3. NAV reporter smoke: complete; nonce 1 confirmed on-chain.
+4. Full deposit/CSP/redemption smoke: pending QA; no strategy position or user funds are enabled.
 
 Access and policy phases are immediate, idempotent, and atomic within their respective
 `AccessManager.multicall` transactions. No v1 schedule/execute script is part of this v2 path.

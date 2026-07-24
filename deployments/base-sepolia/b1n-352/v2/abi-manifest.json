@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-352",
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "sourceDirectory": "../v1/abis",
+  "generatedFrom": "blockchain/out/<Contract>.sol/<Contract>.json ABI entries",
+  "proxyPattern": "ERC1967Proxy; use the implementation ABI for proxy calls",
+  "contracts": {
+    "FundVault": {"address": "0x53e38Baf2fC55259729085b7542BFF066F6a509e", "artifact": "FundVault.json"},
+    "FundShare": {"address": "0x07Db1F574ecCFD15c4A8bd4582e5d25baA84De7d", "artifact": "FundShare.json"},
+    "FundAccounting": {"address": "0x21d3acc5a2c64666dA93ABC8c77AB483b96836a3", "artifact": "FundAccounting.json"},
+    "FundFlowManager": {"address": "0x0206C0A5050b09B7A2AD4E8CbF83a06ae2193080", "artifact": "FundFlowManager.json"},
+    "StrategyManager": {"address": "0xfC28237145596D4E1dfD28B80e186EFC09A1F988", "artifact": "StrategyManager.json"},
+    "CspFundAdapter": {"address": "0x68e5C9f55201a4fa87040830b1A53A4B6E26b0e3", "artifact": "CspFundAdapter.json"},
+    "FundAccessManager": {"address": "0x729d5076C1C59a7C2676Faf3fB9133Ff80cDaB12", "artifact": "FundAccessManager.json"},
+    "ClaimEscrow": {"address": "0xf0E540dfb0D3d8c3eDfCB5B5E457CafE116C5439", "artifact": "ClaimEscrow.json"},
+    "NavReportVerifier": {"address": "0x3093a0f0634aF2991ACD265d1f1F325480113d40", "artifact": "NavReportVerifier.json"},
+    "CspFundValuator": {"address": "0x43a6a2470Cb382d525B2ec17548C3F74cbc2fDDC", "artifact": "CspFundValuator.json"}
+  },
+  "integrationNotes": {
+    "deposit": "Use FundVault deposit/requestDeposit ABI from FundVault.json; writes remain fail-closed while depositsPaused=true.",
+    "redemption": "Use FundFlowManager request/redeem batch ABI; status is pending until the processor releases the batch.",
+    "claim": "Use ClaimEscrow claim ABI for assigned WETH; do not use the legacy per-option WETH claim flow.",
+    "nav": "FundAccounting.submitNav is restricted to ACCOUNTING; confirmed smoke report has nonce 1."
+  }
+}
