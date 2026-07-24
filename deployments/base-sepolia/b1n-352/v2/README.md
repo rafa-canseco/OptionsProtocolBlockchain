@@ -28,14 +28,7 @@ The reused V1 `OTokenFactory` still requires every expiry to be in the future at
 Addresses and transaction receipts are intentionally absent until the separately authorized
 Base Sepolia broadcast. Run all scripts without `--broadcast` for local/fork validation.
 
-- FundVault: `0x53e38Baf2fC55259729085b7542BFF066F6a509e`
-- FundShare: `0x07Db1F574ecCFD15c4A8bd4582e5d25baA84De7d`
-- FundAccounting: `0x21d3acc5a2c64666dA93ABC8c77AB483b96836a3`
-- FundFlowManager: `0x0206C0A5050b09B7A2AD4E8CbF83a06ae2193080`
-- StrategyManager: `0xfC28237145596D4E1dfD28B80e186EFC09A1F988`
-- CSP adapter: `0x68e5C9f55201a4fa87040830b1A53A4B6E26b0e3`
-- CSP valuator: `0x43a6a2470Cb382d525B2ec17548C3F74cbc2fDDC`
-- AccessManager: `0x729d5076C1C59a7C2676Faf3fB9133Ff80cDaB12`
+No contract addresses exist yet; they will be recorded after the authorized broadcast.
 
 ## Planned phases (not yet broadcast)
 
