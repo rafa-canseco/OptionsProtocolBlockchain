@@ -1,6 +1,6 @@
 # B1N-352 v2 Base Sepolia redeploy
 
-Status: **NOT_DEPLOYED — BROADCAST NOT YET EXECUTED**
+Status: **DEPLOYED — STRICT RECONCILIATION PASSED**
 
 This is the single replacement Fund deployment for B1N-352. It reuses the codehash-pinned isolated
 B1N-336 core and the existing Base Sepolia authority. It does not deploy or upgrade V1 components and
@@ -23,34 +23,45 @@ does not overwrite the historical `b1n-352/v1` handoff.
 
 The reused V1 `OTokenFactory` still requires every expiry to be in the future at exactly 08:00 UTC.
 
-## Required phases
+## Deployment endpoints
 
-Every mutating phase requires a separately approved `--broadcast`. Until then, run without it.
+- FundVault: `0x53e38Baf2fC55259729085b7542BFF066F6a509e`
+- FundShare: `0x07Db1F574ecCFD15c4A8bd4582e5d25baA84De7d`
+- FundAccounting: `0x21d3acc5a2c64666dA93ABC8c77AB483b96836a3`
+- FundFlowManager: `0x0206C0A5050b09B7A2AD4E8CbF83a06ae2193080`
+- StrategyManager: `0xfC28237145596D4E1dfD28B80e186EFC09A1F988`
+- CSP adapter: `0x68e5C9f55201a4fa87040830b1A53A4B6E26b0e3`
+- CSP valuator: `0x43a6a2470Cb382d525B2ec17548C3F74cbc2fDDC`
+- AccessManager: `0x729d5076C1C59a7C2676Faf3fB9133Ff80cDaB12`
 
-1. Approve and digest-bind `deployment-inputs.approved.json` after committing the exact source.
-2. Run `PreflightB1N352BaseSepolia`.
-3. Deploy with `DeployTokenizedCspFundBaseSepoliaV2`; deposits are already paused.
-4. Run `ConfigureB1N352V2Access`, then `ConfigureB1N352V2Policy`.
-5. Run `ReconcileB1N352V2Configured`.
-6. Run `OnboardB1N352V2Adapter`, then `ReconcileB1N352V2Onboarded`.
-7. Run `ActivateB1N352V2Strategy`, then `ReconcileB1N352V2Activated`.
-8. Open deposits explicitly with `OpenB1N352V2Deposits` only after the activated reconciliation passes.
-9. Run `ReconcileB1N352V2Open` and capped end-to-end smoke tests.
+## Completed phases
+
+1. Fund deployment: blocks `44541995–44542010`, 16/16 receipts successful.
+2. Access configuration: block `44542183`.
+3. Policy configuration: block `44542235`.
+4. Configured reconciliation: passed.
+5. Adapter onboarding: block `44542654`; the pinned B1N-336 implementation remained unchanged.
+6. Onboarded reconciliation: passed.
+7. Strategy activation: block `44542781`; deposits remained paused.
+8. Activated reconciliation: passed.
+9. Deposit opening: block `44542816`.
+10. Final open reconciliation: passed at block `44542850`.
 
 Access and policy phases are immediate, idempotent, and atomic within their respective
 `AccessManager.multicall` transactions. No v1 schedule/execute script is part of this v2 path.
 
-## Pre-broadcast gates
+The remaining work is the capped end-to-end smoke suite: NAV/deposit/share transfer, CSP open and settlement,
+and redemption. No allocator bot or mainnet operation is authorized.
+
+## Approved deployment bindings
 
 - Approved source commit: `4a72b3e616a9c2fa335cbbe3e798474f8c390394`.
 - Approved policy SHA-256: `0xa0a2d82226d1bd0e6d5472eab980acead94af8a9f17bd5b0212356d05f6f34aa`.
 - Approved inputs SHA-256: `0x1c534e8dccfef493b9559d14f846118c142abc5313aafe705acc79a790705345`.
-- Predicted adapter implementation: `0x66677E767806c85656596AB9F1cE4939580Db453`, derived from
-  pending deployer nonce `12224` and confirmed by the no-broadcast dry-run.
+- Adapter implementation: `0x66677E767806c85656596AB9F1cE4939580Db453`.
 - Linked adapter implementation codehash:
   `0xa7a47e2077e533405467ff332fb072cb940871dfd72929b7e8f78da14555894f`.
-- Immediately before broadcast, revalidate that the pending deployer nonce is still `12224`.
-- Run:
+- Reproducibility check:
 
 ```bash
 npm run b1n352:inputs:check -- \
@@ -60,12 +71,4 @@ forge fmt --check
 forge build
 forge test --offline --match-path test/fund/B1N352ZeroDelayFundFactory.t.sol -vv
 forge test --offline --match-path test/fund/B1N352Deployment.t.sol -vv
-forge script \
-  script/fund/DeployTokenizedCspFundBaseSepoliaV2.s.sol:DeployTokenizedCspFundBaseSepoliaV2 \
-  --rpc-url "$BASE_SEPOLIA_RPC_URL" \
-  --libraries \
-  src/fund/libraries/CspFundAdapterOperations.sol:CspFundAdapterOperations:0x0863A20B89d027472639A1E0c76278798e03D276
 ```
-
-The final command is a dry-run unless `--broadcast` is added explicitly. Omitting the `--libraries` binding
-causes Foundry to deploy a temporary library and the script correctly rejects the resulting address.

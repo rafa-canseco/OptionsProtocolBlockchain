@@ -1,19 +1,19 @@
 {
   "schemaVersion": "1.0.0",
   "issue": "B1N-352",
-  "deploymentStatus": "NOT_DEPLOYED",
+  "deploymentStatus": "DEPLOYED",
   "network": {
     "name": "base-sepolia",
     "chainId": 84532,
     "blockscout": "https://base-sepolia.blockscout.com",
     "deploymentBlocks": {
-      "fundFirst": null,
-      "fundLast": null,
-      "accessConfigured": null,
-      "policyConfigured": null,
-      "onboarded": null,
-      "activated": null,
-      "depositsOpened": null
+      "fundFirst": 44541995,
+      "fundLast": 44542010,
+      "accessConfigured": 44542183,
+      "policyConfigured": 44542235,
+      "onboarded": 44542654,
+      "activated": 44542781,
+      "depositsOpened": 44542816
     }
   },
   "source": {
@@ -67,33 +67,61 @@
       "proxy": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
       "implementation": "0x040219e594de2862D1480a6A3c1d45c5c032aCE6",
       "unchanged": true,
-      "physicalDeliveryVaultAuthorized": false
+      "physicalDeliveryVaultAuthorized": true
     }
   },
   "contracts": {
-    "fundFactory": "TO_BE_FILLED",
-    "fundAccessManagerDeployer": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
-    "deploymentId": "TO_BE_FILLED",
-    "accessManager": {"address": "TO_BE_FILLED", "type": "FundAccessManager", "codehash": "TO_BE_FILLED"},
-    "fundVault": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
-    "fundShare": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
-    "fundAccounting": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
-    "fundFlowManager": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
-    "strategyManager": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
-    "navReportVerifier": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
-    "claimEscrow": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
+    "fundFactory": "0xf8b508271F92eE5DC81a9Bc8E569C7Ff458E517C",
+    "fundAccessManagerDeployer": {
+      "address": "0x1a043801B1ac557a41730aF45bE1fc78e1F542dd",
+      "codehash": "0x932567a26a4661c0eb450db05ed6a66e4af9c778867525b70ed8b990465626fd"
+    },
+    "deploymentId": "0xbae644142ab8b8c4f00e3925c434a5728fab5bbc4e3748ef4a1e77adfe676d7c",
+    "accessManager": {
+      "address": "0x729d5076C1C59a7C2676Faf3fB9133Ff80cDaB12",
+      "type": "FundAccessManager",
+      "codehash": "0x44b7541c0dee1e5ed76eef040c7b78005a51e0d22eb22aa9184b3a58919d18fc"
+    },
+    "fundVault": {
+      "proxy": "0x53e38Baf2fC55259729085b7542BFF066F6a509e",
+      "implementation": "0xAf77368c61ef4C0Cfc4A9b64D53d17807204F5A1"
+    },
+    "fundShare": {
+      "proxy": "0x07Db1F574ecCFD15c4A8bd4582e5d25baA84De7d",
+      "implementation": "0xaefF1f67F925a8410D7BE36703FaB63e265b158F"
+    },
+    "fundAccounting": {
+      "proxy": "0x21d3acc5a2c64666dA93ABC8c77AB483b96836a3",
+      "implementation": "0x95902E4fbC65a008703a43f308C4Bb6694E431B1"
+    },
+    "fundFlowManager": {
+      "proxy": "0x0206C0A5050b09B7A2AD4E8CbF83a06ae2193080",
+      "implementation": "0x3e7dB54f340C23A7c8479AaAf8a8626Ce4b34b9E"
+    },
+    "strategyManager": {
+      "proxy": "0xfC28237145596D4E1dfD28B80e186EFC09A1F988",
+      "implementation": "0x6EA9FC22349a23634cF99C7363023d64fb625ACa"
+    },
+    "navReportVerifier": {
+      "address": "0x3093a0f0634aF2991ACD265d1f1F325480113d40",
+      "codehash": "0xe7080151696c6d6d9b59d4c8bdd80af95bcae0e83e432a17280868b81c1d8d93"
+    },
+    "claimEscrow": {
+      "address": "0xf0E540dfb0D3d8c3eDfCB5B5E457CafE116C5439",
+      "codehash": "0xa14e32f6baa28aa3ceb7c7dc943a33b9827abdbc52a785792243670ac6ec0dab"
+    },
     "cspAdapterOperations": {
       "address": "0x0863A20B89d027472639A1E0c76278798e03D276",
       "codehash": "0x2e69f662cdb82d8c8d9c59c53a2a4079b9070f748d977a8b8ba406d7b5d39b77"
     },
     "cspFundAdapter": {
-      "proxy": "TO_BE_FILLED",
+      "proxy": "0x68e5C9f55201a4fa87040830b1A53A4B6E26b0e3",
       "implementation": "0x66677E767806c85656596AB9F1cE4939580Db453",
       "implementationCodehash": "0xa7a47e2077e533405467ff332fb072cb940871dfd72929b7e8f78da14555894f"
     },
-    "cspFundValuator": {"address": "TO_BE_FILLED"},
-    "inKindStrategyEscrow": "TO_BE_FILLED",
-    "emergencyStrategyEscrow": "TO_BE_FILLED"
+    "cspFundValuator": {"address": "0x43a6a2470Cb382d525B2ec17548C3F74cbc2fDDC"},
+    "inKindStrategyEscrow": "0x40cC1867582a369449a918aA7A7E16028f25aC8b",
+    "emergencyStrategyEscrow": "0xD9D92B4D29554A1FaF61478e517AF0f87364d37E"
   },
   "policy": {
     "artifact": "validation-policy.approved.json",
@@ -126,13 +154,13 @@
     "guardian": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382"
   },
   "readiness": {
-    "handoffReady": false,
-    "initialDeploymentReconciled": false,
-    "strictReconciliationComplete": false,
-    "depositsPaused": true,
-    "adapterOnboarded": false,
-    "strategyActive": false,
-    "publicDepositsAuthorized": false,
+    "handoffReady": true,
+    "initialDeploymentReconciled": true,
+    "strictReconciliationComplete": true,
+    "depositsPaused": false,
+    "adapterOnboarded": true,
+    "strategyActive": true,
+    "publicDepositsAuthorized": true,
     "allocatorBotAuthorized": false,
     "mainnetAuthorized": false
   },
