@@ -49,7 +49,20 @@ abstract contract B1N352Operations is B1N352Base {
         pure
         returns (Operation[] memory operations)
     {
-        operations = new Operation[](8);
+        return _accessOperationsWithAdminDelay(
+            manager_, adapter, inKindEscrow, emergencyEscrow, FundConstants.CORE_UPGRADE_DELAY
+        );
+    }
+
+    function _accessOperationsWithAdminDelay(
+        address manager_,
+        address adapter,
+        address inKindEscrow,
+        address emergencyEscrow,
+        uint32 targetAdminDelay
+    ) internal pure returns (Operation[] memory operations) {
+        bool configureAdminDelay = targetAdminDelay != 0;
+        operations = new Operation[](configureAdminDelay ? 8 : 5);
         AccessManager manager = AccessManager(manager_);
 
         operations[0] = Operation({
@@ -71,23 +84,32 @@ abstract contract B1N352Operations is B1N352Base {
             FundConstants.CURATOR_ROLE,
             "ADAPTER_CURATOR_ROLE"
         );
-        operations[3] = _targetAdminDelayOperation(manager, adapter, "ADAPTER_ADMIN_DELAY");
-        operations[4] = _targetRoleOperation(
+        uint256 cursor = 3;
+        if (configureAdminDelay) {
+            operations[cursor++] = _targetAdminDelayOperation(manager, adapter, targetAdminDelay, "ADAPTER_ADMIN_DELAY");
+        }
+        operations[cursor++] = _targetRoleOperation(
             manager,
             inKindEscrow,
             IStrategyAssetEscrow.releaseToFund.selector,
             FundConstants.CURATOR_ROLE,
             "IN_KIND_ESCROW_CURATOR_ROLE"
         );
-        operations[5] = _targetAdminDelayOperation(manager, inKindEscrow, "IN_KIND_ESCROW_ADMIN_DELAY");
-        operations[6] = _targetRoleOperation(
+        if (configureAdminDelay) {
+            operations[cursor++] =
+                _targetAdminDelayOperation(manager, inKindEscrow, targetAdminDelay, "IN_KIND_ESCROW_ADMIN_DELAY");
+        }
+        operations[cursor++] = _targetRoleOperation(
             manager,
             emergencyEscrow,
             IStrategyAssetEscrow.releaseToFund.selector,
             FundConstants.CURATOR_ROLE,
             "EMERGENCY_ESCROW_CURATOR_ROLE"
         );
-        operations[7] = _targetAdminDelayOperation(manager, emergencyEscrow, "EMERGENCY_ESCROW_ADMIN_DELAY");
+        if (configureAdminDelay) {
+            operations[cursor] =
+                _targetAdminDelayOperation(manager, emergencyEscrow, targetAdminDelay, "EMERGENCY_ESCROW_ADMIN_DELAY");
+        }
     }
 
     function _loadPolicyConfig() internal view returns (PolicyConfig memory config) {
@@ -318,17 +340,30 @@ abstract contract B1N352Operations is B1N352Base {
         address inKindEscrow,
         address emergencyEscrow
     ) internal view returns (bool) {
+        return _isAccessPhaseFinalizedWithAdminDelay(
+            manager, adapter, inKindEscrow, emergencyEscrow, FundConstants.CORE_UPGRADE_DELAY
+        );
+    }
+
+    function _isAccessPhaseFinalizedWithAdminDelay(
+        FundAccessManager manager,
+        address adapter,
+        address inKindEscrow,
+        address emergencyEscrow,
+        uint32 targetAdminDelay
+    ) internal view returns (bool) {
         return manager.configuredSelectorCount(adapter) == 2
             && manager.getTargetFunctionRole(adapter, FundAccessPolicy.UPGRADE_TO_AND_CALL_SELECTOR)
                 == FundConstants.ADAPTER_UPGRADER_ROLE
             && manager.getTargetFunctionRole(adapter, ICspFundAdapter.setAdapterConfig.selector)
-                == FundConstants.CURATOR_ROLE && _isTargetAdminDelayConfigured(manager, adapter)
+                == FundConstants.CURATOR_ROLE && _isTargetAdminDelayConfigured(manager, adapter, targetAdminDelay)
             && manager.configuredSelectorCount(inKindEscrow) == 1
             && manager.getTargetFunctionRole(inKindEscrow, IStrategyAssetEscrow.releaseToFund.selector)
-                == FundConstants.CURATOR_ROLE && _isTargetAdminDelayConfigured(manager, inKindEscrow)
+                == FundConstants.CURATOR_ROLE && _isTargetAdminDelayConfigured(manager, inKindEscrow, targetAdminDelay)
             && manager.configuredSelectorCount(emergencyEscrow) == 1
             && manager.getTargetFunctionRole(emergencyEscrow, IStrategyAssetEscrow.releaseToFund.selector)
-                == FundConstants.CURATOR_ROLE && _isTargetAdminDelayConfigured(manager, emergencyEscrow);
+                == FundConstants.CURATOR_ROLE
+            && _isTargetAdminDelayConfigured(manager, emergencyEscrow, targetAdminDelay);
     }
 
     function _isPolicyPhaseFinalized(PolicyConfig memory config) internal view returns (bool) {
@@ -544,6 +579,62 @@ abstract contract B1N352Operations is B1N352Base {
         }
     }
 
+    function _executeImmediateManagerOperations(
+        FundAccessManager manager,
+        Operation[] memory operations,
+        uint256 callerKey,
+        bool phaseFinalized
+    ) internal {
+        require(operations.length != 0, "B1N352: empty immediate manager phase");
+        if (phaseFinalized) {
+            console2.log("PHASE_ALREADY_FINALIZED");
+            return;
+        }
+        address caller = vm.addr(callerKey);
+        (bool isAdmin, uint32 adminDelay) = manager.hasRole(manager.ADMIN_ROLE(), caller);
+        require(isAdmin && adminDelay == 0, "B1N352: immediate admin unavailable");
+
+        bytes[] memory calls = new bytes[](operations.length);
+        for (uint256 i; i < operations.length; ++i) {
+            require(operations[i].target == address(manager), "B1N352: non-manager immediate operation");
+            require(
+                manager.getSchedule(manager.hashOperation(caller, operations[i].target, operations[i].data)) == 0,
+                "B1N352: unexpected manager schedule"
+            );
+            calls[i] = operations[i].data;
+        }
+
+        vm.startBroadcast(callerKey);
+        manager.multicall(calls);
+        vm.stopBroadcast();
+    }
+
+    function _executeImmediateOperations(
+        AccessManager manager,
+        Operation[] memory operations,
+        uint256 callerKey,
+        bool phaseFinalized
+    ) internal {
+        require(operations.length != 0, "B1N352: empty immediate phase");
+        if (phaseFinalized) {
+            console2.log("PHASE_ALREADY_FINALIZED");
+            return;
+        }
+        address caller = vm.addr(callerKey);
+        bytes[] memory calls = new bytes[](operations.length);
+        for (uint256 i; i < operations.length; ++i) {
+            require(
+                manager.getSchedule(manager.hashOperation(caller, operations[i].target, operations[i].data)) == 0,
+                "B1N352: unexpected immediate schedule"
+            );
+            calls[i] = abi.encodeCall(manager.execute, (operations[i].target, operations[i].data));
+        }
+
+        vm.startBroadcast(callerKey);
+        manager.multicall(calls);
+        vm.stopBroadcast();
+    }
+
     function _cancelOperations(
         AccessManager manager,
         Operation[] memory operations,
@@ -587,12 +678,16 @@ abstract contract B1N352Operations is B1N352Base {
         require(vm.addr(callerKey) == _approvedAddress("FUND_PHASE_SCHEDULER"), "B1N352: phase scheduler key");
     }
 
-    function _isTargetAdminDelayConfigured(FundAccessManager manager, address target) private view returns (bool) {
+    function _isTargetAdminDelayConfigured(FundAccessManager manager, address target, uint32 expectedDelay)
+        private
+        view
+        returns (bool)
+    {
         (uint32 currentDelay, uint32 pendingDelay, uint48 effect) = manager.getTargetAdminDelayFull(target);
-        if (currentDelay == FundConstants.CORE_UPGRADE_DELAY) {
+        if (currentDelay == expectedDelay) {
             return pendingDelay == 0 && effect == 0;
         }
-        return pendingDelay == FundConstants.CORE_UPGRADE_DELAY && effect > block.timestamp;
+        return pendingDelay == expectedDelay && effect > block.timestamp;
     }
 
     function _logScheduledOperation(Operation memory operation, bytes32 operationId, uint32 nonce, uint48 readyAt)
@@ -624,14 +719,15 @@ abstract contract B1N352Operations is B1N352Base {
         });
     }
 
-    function _targetAdminDelayOperation(AccessManager manager, address target, string memory label)
-        private
-        pure
-        returns (Operation memory operation)
-    {
+    function _targetAdminDelayOperation(
+        AccessManager manager,
+        address target,
+        uint32 targetAdminDelay,
+        string memory label
+    ) private pure returns (Operation memory operation) {
         operation = Operation({
             target: address(manager),
-            data: abi.encodeCall(manager.setTargetAdminDelay, (target, FundConstants.CORE_UPGRADE_DELAY)),
+            data: abi.encodeCall(manager.setTargetAdminDelay, (target, targetAdminDelay)),
             label: keccak256(bytes(label))
         });
     }

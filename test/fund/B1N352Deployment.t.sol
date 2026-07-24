@@ -29,6 +29,7 @@ import {ICspFundAdapter} from "../../src/fund/interfaces/ICspFundAdapter.sol";
 import {IStrategyManager} from "../../src/fund/interfaces/IStrategyManager.sol";
 import {B1N352Base} from "../../script/fund/B1N352Base.sol";
 import {DeployTokenizedCspFundBaseSepolia} from "../../script/fund/DeployTokenizedCspFundBaseSepolia.s.sol";
+import {DeployTokenizedCspFundBaseSepoliaV2} from "../../script/fund/DeployTokenizedCspFundBaseSepoliaV2.s.sol";
 import {B1N352Operations} from "../../script/fund/B1N352Operations.sol";
 
 contract B1N352DeployHarness is DeployTokenizedCspFundBaseSepolia {
@@ -42,6 +43,10 @@ contract B1N352DeployHarness is DeployTokenizedCspFundBaseSepolia {
 
     function requireApprovedInputsDigest() external view {
         _requireApprovedInputsDigest();
+    }
+
+    function pauseDepositsAtCreation(address fundVault) external {
+        _pauseDepositsAtCreation(fundVault);
     }
 
     function approvedInputsDigest() external view returns (bytes32) {
@@ -62,6 +67,12 @@ contract B1N352DeployHarness is DeployTokenizedCspFundBaseSepolia {
 
     function _approvedBytes32(string memory key) internal view override returns (bytes32) {
         return vm.envBytes32(key);
+    }
+}
+
+contract B1N352V2DeployHarness is DeployTokenizedCspFundBaseSepoliaV2 {
+    function deployForTest(DeployConfig memory config) external returns (DeploymentAddresses memory) {
+        return _deploy(config, address(this));
     }
 }
 
@@ -86,6 +97,14 @@ contract B1N352OperationsHarness is B1N352Operations {
         returns (Operation[] memory)
     {
         return _accessOperations(manager, adapter, inKindEscrow, emergencyEscrow);
+    }
+
+    function zeroDelayAccessOperations(address manager, address adapter, address inKindEscrow, address emergencyEscrow)
+        external
+        pure
+        returns (Operation[] memory)
+    {
+        return _accessOperationsWithAdminDelay(manager, adapter, inKindEscrow, emergencyEscrow, 0);
     }
 
     function policyOperations(PolicyConfig memory config) external pure returns (Operation[] memory) {
@@ -164,6 +183,33 @@ contract B1N352OperationsHarness is B1N352Operations {
     function isPolicyPhaseFinalized(PolicyConfig memory config) external view returns (bool) {
         return _isPolicyPhaseFinalized(config);
     }
+
+    function isZeroDelayAccessFinalized(
+        FundAccessManager manager,
+        address adapter,
+        address inKindEscrow,
+        address emergencyEscrow
+    ) external view returns (bool) {
+        return _isAccessPhaseFinalizedWithAdminDelay(manager, adapter, inKindEscrow, emergencyEscrow, 0);
+    }
+
+    function executeImmediateManagerOperations(
+        FundAccessManager manager,
+        Operation[] memory operations,
+        uint256 callerKey,
+        bool phaseFinalized
+    ) external {
+        _executeImmediateManagerOperations(manager, operations, callerKey, phaseFinalized);
+    }
+
+    function executeImmediateOperations(
+        AccessManager manager,
+        Operation[] memory operations,
+        uint256 callerKey,
+        bool phaseFinalized
+    ) external {
+        _executeImmediateOperations(manager, operations, callerKey, phaseFinalized);
+    }
 }
 
 contract B1N352DeploymentTest is Test {
@@ -176,6 +222,7 @@ contract B1N352DeploymentTest is Test {
     AddressBook internal addressBook;
     BatchSettler internal settler;
     B1N352DeployHarness internal deployHarness;
+    B1N352V2DeployHarness internal v2DeployHarness;
     B1N352OperationsHarness internal operationsHarness;
 
     function setUp() public {
@@ -186,7 +233,92 @@ contract B1N352DeploymentTest is Test {
         swapRouter.setPriceFeed(address(weth), address(spotFeed));
         _deployV1();
         deployHarness = new B1N352DeployHarness();
+        v2DeployHarness = new B1N352V2DeployHarness();
         operationsHarness = new B1N352OperationsHarness();
+    }
+
+    function test_v2ZeroDelayConfigureOnboardActivateAndOpenWithoutSchedules() public {
+        uint256 phaseKey = 0xB1A35202;
+        address phaseCaller = vm.addr(phaseKey);
+        B1N352Base.DeployConfig memory deployConfig = _deployConfig();
+        deployConfig.factoryOwner = phaseCaller;
+        deployConfig.roles = _roleAccounts(phaseCaller);
+        deployConfig.minimumIdleBps = 7_500;
+        deployConfig.navActivationDelay = 1;
+        deployConfig.feeConfig = FundTypes.FeeConfig({
+            managementFeeWad: 0,
+            performanceFeeBps: 0,
+            maxManagementFeeBps: 0,
+            maxPerformanceFeeBps: 0,
+            maxAccrualInterval: 0,
+            crystallizationPeriod: 0,
+            feeRecipient: phaseCaller
+        });
+        deployConfig.adapterRiskConfig.minExpiryDelay = 1;
+        deployConfig.adapterRiskConfig.settlementDefaultDelay = 1;
+        deployConfig.adapterRiskConfig.maxOpenPositions = 3;
+        deployConfig.adapterRiskConfig.maxCollateralPerPosition = 25e6;
+
+        B1N352Base.DeploymentAddresses memory deployed = v2DeployHarness.deployForTest(deployConfig);
+        FundAccessManager manager = FundAccessManager(deployed.accessManager);
+        FundVault vault = FundVault(deployed.fundVaultProxy);
+        assertTrue(vault.depositsPaused());
+
+        B1N352Operations.Operation[] memory access = operationsHarness.zeroDelayAccessOperations(
+            address(manager),
+            deployed.cspFundAdapterProxy,
+            deployed.inKindStrategyEscrow,
+            deployed.emergencyStrategyEscrow
+        );
+        operationsHarness.executeImmediateManagerOperations(manager, access, phaseKey, false);
+        assertTrue(
+            operationsHarness.isZeroDelayAccessFinalized(
+                manager, deployed.cspFundAdapterProxy, deployed.inKindStrategyEscrow, deployed.emergencyStrategyEscrow
+            )
+        );
+
+        B1N352Operations.PolicyConfig memory policy = _policyConfig(deployed);
+        policy.maxExitFeeBps = 0;
+        policy.minimumIdleBps = 7_500;
+        policy.maxAllocationBps = 2_500;
+        policy.cooldown = 0;
+        policy.absoluteCap = 25e6;
+        B1N352Operations.Operation[] memory policyOperations = operationsHarness.policyOperations(policy);
+        operationsHarness.executeImmediateOperations(manager, policyOperations, phaseKey, false);
+        assertTrue(operationsHarness.isPolicyPhaseFinalized(policy));
+        assertFalse(StrategyManager(deployed.strategyManagerProxy).strategyConfig(policy.adapter).active);
+        assertTrue(vault.depositsPaused());
+
+        settler.setPhysicalDeliveryVault(deployed.cspFundAdapterProxy, true);
+        assertTrue(ICspFundAdapter(deployed.cspFundAdapterProxy).isOnboarded());
+
+        B1N352Operations.Operation[] memory activation = new B1N352Operations.Operation[](1);
+        activation[0] =
+            operationsHarness.activationOperation(deployed.strategyManagerProxy, deployed.cspFundAdapterProxy);
+        operationsHarness.executeImmediateOperations(manager, activation, phaseKey, false);
+        assertTrue(StrategyManager(deployed.strategyManagerProxy).strategyConfig(policy.adapter).active);
+        assertTrue(vault.depositsPaused());
+
+        B1N352Operations.Operation[] memory open = new B1N352Operations.Operation[](1);
+        open[0] = B1N352Operations.Operation({
+            target: address(vault),
+            data: abi.encodeCall(vault.resumeDeposits, ()),
+            label: keccak256("OPEN_B1N352_V2_DEPOSITS")
+        });
+        operationsHarness.executeImmediateOperations(manager, open, phaseKey, false);
+        assertFalse(vault.depositsPaused());
+
+        for (uint256 i; i < access.length; ++i) {
+            assertEq(manager.getSchedule(manager.hashOperation(phaseCaller, access[i].target, access[i].data)), 0);
+        }
+        for (uint256 i; i < policyOperations.length; ++i) {
+            assertEq(
+                manager.getSchedule(
+                    manager.hashOperation(phaseCaller, policyOperations[i].target, policyOperations[i].data)
+                ),
+                0
+            );
+        }
     }
 
     function test_localDryRunDeployConfigureOnboardAndActivate() public {
@@ -272,6 +404,17 @@ contract B1N352DeploymentTest is Test {
         assertEq(manager.getTargetAdminDelay(deployed.emergencyStrategyEscrow), FundConstants.CORE_UPGRADE_DELAY);
 
         _assertLegacyPerUserStateAbsent(address(vault));
+    }
+
+    function test_initialDeploymentPauseRequiresGuardianAndClosesDeposits() public {
+        B1N352Base.DeployConfig memory deployConfig = _deployConfig();
+        deployConfig.roles.guardian = address(deployHarness);
+        B1N352Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(deployConfig);
+        FundVault vault = FundVault(deployed.fundVaultProxy);
+
+        assertFalse(vault.depositsPaused());
+        deployHarness.pauseDepositsAtCreation(address(vault));
+        assertTrue(vault.depositsPaused());
     }
 
     function test_expectedV1BaselineRejectsStructurallyValidWrongImplementation() public {

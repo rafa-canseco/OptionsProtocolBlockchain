@@ -19,10 +19,11 @@ import {B1N352Base} from "./B1N352Base.sol";
 
 /// @notice Deployment phase only. It does not configure delayed roles, onboard V1, or activate the strategy.
 contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
-    function run() external returns (DeploymentAddresses memory deployed) {
+    function run() external virtual returns (DeploymentAddresses memory deployed) {
         _requireBaseSepolia();
         DeployConfig memory config = _loadDeployConfig();
         _validateExternalConfig(config);
+        _validateDeploymentProfile(config);
         _requireExpectedV1Baseline(config.addressBook);
         _logV1Baseline(config.addressBook);
 
@@ -39,10 +40,15 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
             "B1N352: adapter operations hash"
         );
         require(
+            deployed.cspFundAdapterImplementation == _approvedAddress("FUND_CSP_ADAPTER_IMPLEMENTATION"),
+            "B1N352: adapter implementation address"
+        );
+        require(
             deployed.cspFundAdapterImplementation.codehash
                 == _approvedBytes32("FUND_CSP_ADAPTER_IMPLEMENTATION_CODEHASH"),
             "B1N352: linked adapter implementation hash"
         );
+        _pauseDepositsAtCreation(deployed.fundVaultProxy);
         vm.stopBroadcast();
 
         _logDeployment(deployed);
@@ -59,7 +65,7 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
         deployed.strategyManagerImplementation = address(new StrategyManager());
         deployed.navReportVerifier = address(new NavReportVerifier());
 
-        FundFactory factory = new FundFactory(deployer);
+        FundFactory factory = _newFactory(deployer);
         deployed.fundFactory = address(factory);
         deployed.fundAccessManagerDeployer = address(factory.accessManagerDeployer());
         factory.registerImplementationVersion(
@@ -134,6 +140,18 @@ contract DeployTokenizedCspFundBaseSepolia is B1N352Base {
             address(new StrategyAssetEscrow(fund.vault, fund.accessManager, EMERGENCY_ESCROW_PURPOSE));
 
         factory.transferOwnership(config.factoryOwner);
+    }
+
+    function _newFactory(address deployer) internal virtual returns (FundFactory) {
+        return new FundFactory(deployer);
+    }
+
+    function _validateDeploymentProfile(DeployConfig memory) internal view virtual {}
+
+    function _pauseDepositsAtCreation(address fundVault) internal {
+        FundVault vault = FundVault(fundVault);
+        vault.pauseDeposits();
+        require(vault.depositsPaused(), "B1N352: initial deposits not paused");
     }
 
     function _logDeployment(DeploymentAddresses memory deployed) private view {

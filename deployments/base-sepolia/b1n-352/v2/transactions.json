@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-352",
+  "deploymentStatus": "DEPLOYED",
+  "transactions": [
+    {
+      "name": "pauseDeposits",
+      "to": "0x53e38Baf2fC55259729085b7542BFF066F6a509e",
+      "hash": "0xd9e46c6ec4f301ee682dde5dfd73a8035dfd7d77434b045838ff8bee749ec79b",
+      "status": "confirmed",
+      "block": 44545322,
+      "effect": "depositsPaused=true"
+    },
+    {
+      "name": "syncCspComponentState",
+      "to": "0x729d5076C1C59a7C2676Faf3fB9133Ff80cDaB12",
+      "hash": "0x6f34360b3b0f634958eee79d8ecb79b7c52efada60eb193582c7032f17429513",
+      "status": "confirmed",
+      "effect": "no-op emergency exit used to reconcile the CSP component state hash; no funds or positions"
+    },
+    {
+      "name": "navSmoke",
+      "to": "0x21d3acc5a2c64666dA93ABC8c77AB483b96836a3",
+      "hash": "0xf3f1e8f7022b1c4cf9b5bd7caafbc1e0d0122cd79e1566e4288e072249c9c9aa",
+      "status": "confirmed",
+      "block": 44569960,
+      "reportNonce": 1
+    }
+  ]
+}

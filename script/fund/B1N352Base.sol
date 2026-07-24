@@ -301,6 +301,10 @@ abstract contract B1N352Base is Script {
         _logOwnership("BATCH_SETTLER", book.batchSettler());
     }
 
+    function _requireNotOnboarded(BatchSettler settler, address adapter) internal view {
+        require(!settler.authorizedPhysicalDeliveryVault(adapter), "B1N352: already onboarded");
+    }
+
     function _requireExpectedProxyBaseline(
         address proxy,
         string memory proxyEnv,

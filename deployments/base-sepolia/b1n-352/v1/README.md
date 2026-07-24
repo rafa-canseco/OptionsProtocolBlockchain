@@ -1,6 +1,7 @@
 # B1N-352 Base Sepolia deployment handoff
 
-Status: **local artifacts only; no Base Sepolia deployment has been authorized or executed**.
+Status: **the isolated B1N-336 Base Sepolia core stack is selected and fully pinned; no transaction has been
+transmitted yet. The active staging V1 proxies will not be upgraded**.
 
 This directory is the versioned handoff root for the first tokenized ETH/USDC CSP Fund deployment. Do not replace `null` manifest fields with assumed addresses. Populate them only from Foundry broadcast receipts and read-only reconciliation.
 
@@ -8,31 +9,40 @@ This directory is the versioned handoff root for the first tokenized ETH/USDC CS
 
 Before any command is run with `--broadcast`:
 
-1. B1N-346 must provide an approved, versioned policy artifact and go decision.
+0. Use only the fresh, isolated B1N-336 AddressBook/Controller/BatchSettler stack recorded in
+   `deployments-csp-base-sepolia.json`. Its Controller already enforces custodial redemption and its BatchSettler
+   already supports physical-delivery vaults. The active staging V1 stack is excluded because its BatchSettler storage
+   layout is not compatible with the physical-delivery implementation.
+
+1. B1N-346 remains a no-go for automated operation. B1N-352 may use only a separately approved manual-QA validation
+   policy with testnet caps, no public deposits, and no allocator bot.
 2. `PreflightB1N352BaseSepolia` must confirm the selected V1 wiring, WETH/USDC product configuration, and `custodiedRedemptionOnly() == true`.
 3. The approved proxy, implementation, and implementation codehash for AddressBook, Controller, MarginPool,
    OTokenFactory, Oracle, Whitelist, and BatchSettler must be supplied as expected values. The approved current and
    pending owners are also mandatory for AddressBook, Controller, Oracle, Whitelist, and BatchSettler. MarginPool and
    OTokenFactory inherit their authority from AddressBook, so their wiring is pinned instead of inventing duplicate
    owner checks. Preflight and deployment fail before any broadcast if any live V1 component differs.
-4. A separate user approval is required before adding `--broadcast`, onboarding the adapter, or activating StrategyManager.
-5. V1 onboarding additionally requires an approved smart-contract owner flow capable of checking the pinned baseline
-   and invoking `setPhysicalDeliveryVault` atomically. The legacy direct-broadcast script is disabled and fails closed.
+4. The explicit Base Sepolia broadcast approval must be recorded in B1N-352 before transmitting transactions.
+5. V1 onboarding is a single `setPhysicalDeliveryVault(adapter, true)` call on the isolated B1N-336 BatchSettler. The
+   script pins every core proxy, implementation, codehash, owner, and wiring value before and after the transaction.
 6. The exact SHA-256 of `deployment-inputs.approved.json` must be recorded outside that file in the B1N-352 approval
    and copied into the manifest. Every Base Sepolia script recomputes it before doing any work.
 
 ## Approved input workflow
 
 `deployment-inputs.approved.template.json` is the single non-secret source for deployment configuration, the B1N-346
-policy digest, V1 baselines and ownership, the planned linked-library address, and both expected runtime codehashes.
+policy digest, V1 baselines and ownership, the planned linked-library and adapter implementation addresses, and both
+expected runtime codehashes.
 Scripts parse those values directly from the digest-bound JSON; the generated `.env` contains only its path and digest,
 so it cannot diverge into a second configuration source. Populate numeric configuration values as JSON numbers and
 address lists as JSON arrays.
 
 1. Copy the template to a versioned `deployment-inputs.approved.json`, populate it from the approved source commit and
-   B1N-346 artifact, and obtain the planned `CspFundAdapterOperations` address from a no-broadcast simulation.
+   B1N-346 artifact, and obtain the planned `CspFundAdapterOperations` and adapter implementation addresses from a
+   no-broadcast simulation.
 2. Run `npm run b1n352:inputs:derive -- <approved-json>`. Copy the two derived hashes back into the JSON. The adapter
-   derivation patches both exact Foundry link references with the approved library address before hashing.
+   derivation compiles with the approved library address and patches the library self-address plus the adapter UUPS
+   self-address immutables before hashing.
 3. Set `approval.status` to `APPROVED`, record approver/time, calculate the exact-file SHA-256, and record that digest
    separately in Linear and `manifest.json`. Changing even whitespace invalidates the digest.
 4. Run `npm run b1n352:inputs:check -- <approved-json> <approved-sha256>`. This verifies the source tree against the
@@ -64,15 +74,18 @@ Deployment and governance scripts are deliberately split into phases. Every mult
 or execution is one `FundAccessManager.multicall` transaction; scripts preflight the complete batch and refuse partial
 schedules:
 
-1. `DeployTokenizedCspFundBaseSepolia`
-2. `ScheduleB1N352Access` / wait 72h / `ExecuteB1N352Access`
-3. `ScheduleB1N352Policy` / wait 24h / `ExecuteB1N352Policy` — strategy remains inactive
-4. `PrepareB1N352AtomicOnboarding` — read-only baseline and calldata preparation; the approved owner flow performs
-   the sole V1 mutation atomically. `OnboardB1N352Adapter` is intentionally disabled.
-5. `ScheduleB1N352Activation` / record the emitted `FUND_SCHEDULED_ALLOCATION_PAUSE_NONCE` / wait 24h /
+1. Deploy `CspFundAdapterOperations` with `forge create` using the exact `--libraries` binding recorded in the
+   approved inputs. This must be the next deployer nonce and its address/codehash must match before continuing.
+2. `DeployTokenizedCspFundBaseSepolia` with the same `--libraries` binding — deploys the complete fund and leaves
+   public deposits paused for the manual-QA-only validation policy.
+3. `ScheduleB1N352Access` / wait 72h / `ExecuteB1N352Access`
+4. `ScheduleB1N352Policy` / wait 24h / `ExecuteB1N352Policy` — strategy remains inactive
+5. `PrepareB1N352Onboarding` — read-only baseline and calldata preparation; then `OnboardB1N352Adapter` performs the
+   sole V1 mutation on the isolated B1N-336 BatchSettler.
+6. `ScheduleB1N352Activation` / record the emitted `FUND_SCHEDULED_ALLOCATION_PAUSE_NONCE` / wait 24h /
    `ExecuteB1N352Activation`. Activation calls only `resumeAllocation(adapter, scheduledPauseNonce)`, so it cannot
    restore caps reduced by the guardian and cannot override a later guardian pause or emergency exit.
-6. Wait until the access execution timestamp plus `AccessManager.minSetback()` (five days), then run
+7. Wait until the access execution timestamp plus `AccessManager.minSetback()` (five days), then run
    `ReconcileB1N352Deployment`.
 
 Each normal schedule and execute command is idempotent after the complete expected phase state is present. A normal

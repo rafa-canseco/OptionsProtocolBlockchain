@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-352",
+  "deploymentStatus": "DEPLOYED",
+  "network": {"name": "base-sepolia", "chainId": 84532, "reconciliationBlock": 44570018},
+  "gates": {
+    "approvedInputsDigestMatchesExternalApproval": true,
+    "custodialPreflightPassed": true,
+    "broadcastSeparatelyApproved": true
+  },
+  "v1Boundary": {
+    "isolatedB1N336CoreMatchesApprovedBaseline": true,
+    "implementationsUnchanged": true,
+    "ownersUnchanged": true,
+    "authorityRotated": false,
+    "onlyExpectedMutationObserved": true
+  },
+  "topology": {
+    "factoryOneShotAndConsumed": true,
+    "allExpectedAddressesHaveCode": true,
+    "proxyImplementationsMatch": true,
+    "moduleAndEscrowBindingsMatch": true,
+    "approvedRuntimeCodehashesMatch": true
+  },
+  "accessManager": {
+    "exactRoleMembersMatch": true,
+    "allRoleGrantDelaysZero": true,
+    "allMemberExecutionDelaysZero": true,
+    "allTargetAdminDelaysZero": true,
+    "noPendingDelayChanges": true,
+    "selectorRolesMatch": true,
+    "noLiveSchedules": true
+  },
+  "policy": {
+    "depositsPausedAfterDeploy": true,
+    "strategyInactiveAfterConfigure": true,
+    "fundAbsoluteCap": "25000000",
+    "maxCollateralPerPosition": "25000000",
+    "maxOpenPositions": 3,
+    "minimumIdleBps": 7500,
+    "maxAllocationBps": 2500,
+    "feesZero": true,
+    "navActivationBlocks": 1,
+    "cooldownSeconds": 0
+  },
+  "phases": {
+    "configured": "PASSED",
+    "onboarded": "PASSED",
+    "activatedDepositsPaused": "PASSED",
+    "depositsOpen": "INTENTIONALLY_PAUSED"
+  },
+  "finalState": {
+    "depositsPaused": true,
+    "adapterOnboarded": true,
+    "strategyActive": false,
+    "maxAllocationBps": 2500,
+    "maxLossBps": 1000,
+    "cooldownSeconds": 0,
+    "interfaceVersion": 1,
+    "valuator": "0x43a6a2470Cb382d525B2ec17548C3F74cbc2fDDC",
+    "absoluteCap": "25000000",
+    "allocatorBotAuthorized": false,
+    "mainnetAuthorized": false
+  },
+  "smokeTests": {
+    "deposit": "BLOCKED_BY_PAUSE",
+    "navAndShares": "NAV_CONFIRMED_NONCE_1",
+    "cspOpenAndSettlement": "NOT_RUN",
+    "redemption": "NOT_RUN"
+  }
+}
