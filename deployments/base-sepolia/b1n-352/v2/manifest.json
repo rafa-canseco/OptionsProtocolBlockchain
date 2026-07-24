@@ -164,5 +164,34 @@
     "allocatorBotAuthorized": false,
     "mainnetAuthorized": false
   },
-  "verification": {"status": "NOT_STARTED", "contracts": {}}
+  "verification": {
+    "status": "PARTIAL_VERIFIED_BLOCKSCOUT",
+    "verifiedContracts": 18,
+    "totalContracts": 21,
+    "adapterLibraryBinding": {
+      "library": "src/fund/libraries/CspFundAdapterOperations.sol:CspFundAdapterOperations",
+      "address": "0x0863A20B89d027472639A1E0c76278798e03D276",
+      "blockscoutConfirmed": true
+    },
+    "failed": [
+      {
+        "contract": "FundVault implementation",
+        "address": "0xAf77368c61ef4C0Cfc4A9b64D53d17807204F5A1",
+        "guid": "af77368c61ef4c0cfc4a9b64d53d17807204f5a16a62b877",
+        "details": "Fail - Unable to verify"
+      },
+      {
+        "contract": "StrategyManager implementation",
+        "address": "0x6EA9FC22349a23634cF99C7363023d64fb625ACa",
+        "guid": "6ea9fc22349a23634cf99c7363023d64fb625aca6a62b8af",
+        "details": "Fail - Unable to verify"
+      },
+      {
+        "contract": "B1N352ZeroDelayFundFactory",
+        "address": "0xf8b508271F92eE5DC81a9Bc8E569C7Ff458E517C",
+        "guid": "f8b508271f92ee5dc81a9bc8e569c7ff458e517c6a62b8cb",
+        "details": "Fail - Unable to verify"
+      }
+    ]
+  }
 }
