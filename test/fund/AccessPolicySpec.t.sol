@@ -64,6 +64,13 @@ contract AccessPolicySpecTest is Test {
         assertEq(rules[0].selector, bytes4(keccak256("upgradeToAndCall(address,bytes)")));
         assertEq(rules[0].role, FundConstants.ADAPTER_UPGRADER_ROLE);
         assertEq(rules[0].executionDelay, FundConstants.ADAPTER_UPGRADE_DELAY);
+
+        rules = FundAccessPolicy.coveredCallAdapterRules();
+        assertEq(rules[0].selector, bytes4(keccak256("upgradeToAndCall(address,bytes)")));
+        assertEq(rules[0].role, FundConstants.ADAPTER_UPGRADER_ROLE);
+        assertEq(rules[0].executionDelay, FundConstants.ADAPTER_UPGRADE_DELAY);
+        assertEq(rules[1].role, FundConstants.CURATOR_ROLE);
+        assertEq(rules[1].executionDelay, FundConstants.CURATOR_DELAY);
     }
 
     function test_guardianCanPauseImmediatelyButCannotResume() public {

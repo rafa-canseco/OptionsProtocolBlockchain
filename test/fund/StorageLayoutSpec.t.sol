@@ -12,7 +12,8 @@ import {
     FundFlowManagerStorageHarnessV2,
     StrategyManagerStorageHarnessV1,
     StrategyManagerStorageHarnessV2,
-    CspFundAdapterStorageHarnessV1
+    CspFundAdapterStorageHarnessV1,
+    CoveredCallFundAdapterStorageHarnessV1
 } from "./harness/StorageLayoutHarnesses.sol";
 
 contract StorageLayoutSpecTest is Test {
@@ -25,8 +26,13 @@ contract StorageLayoutSpecTest is Test {
         Upgrades.validateImplementation("src/fund/FundAccounting.sol:FundAccounting", options);
         Upgrades.validateImplementation("src/fund/FundFlowManager.sol:FundFlowManager", options);
         Upgrades.validateImplementation("src/fund/StrategyManager.sol:StrategyManager", options);
+    }
+
+    function test_productionAdapterUupsImplementationsPassUpgradeSafetyValidation() public {
+        Options memory options;
         options.unsafeAllow = "external-library-linking";
         Upgrades.validateImplementation("src/fund/CspFundAdapter.sol:CspFundAdapter", options);
+        Upgrades.validateImplementation("src/fund/CoveredCallFundAdapter.sol:CoveredCallFundAdapter", options);
     }
 
     function test_storageHarnessImplementationsPassUpgradeSafetyValidation() public {
@@ -38,6 +44,7 @@ contract StorageLayoutSpecTest is Test {
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV1"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV2"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "CspFundAdapterStorageHarnessV1"), options);
+        Upgrades.validateImplementation(string.concat(HARNESS_PATH, "CoveredCallFundAdapterStorageHarnessV1"), options);
     }
 
     function test_appendToNamespaceIsCompatible() public {
@@ -87,12 +94,14 @@ contract StorageLayoutSpecTest is Test {
         FundFlowManagerStorageHarnessV1 flow = new FundFlowManagerStorageHarnessV1();
         StrategyManagerStorageHarnessV1 strategy = new StrategyManagerStorageHarnessV1();
         CspFundAdapterStorageHarnessV1 cspAdapter = new CspFundAdapterStorageHarnessV1();
+        CoveredCallFundAdapterStorageHarnessV1 coveredCallAdapter = new CoveredCallFundAdapterStorageHarnessV1();
 
         assertEq(vault.storageLocation(), _erc7201("b1nary.storage.FundVault"));
         assertEq(accounting.storageLocation(), _erc7201("b1nary.storage.FundAccounting"));
         assertEq(flow.storageLocation(), _erc7201("b1nary.storage.FundFlowManager"));
         assertEq(strategy.storageLocation(), _erc7201("b1nary.storage.StrategyManager"));
         assertEq(cspAdapter.storageLocation(), _erc7201("b1nary.storage.CspFundAdapter"));
+        assertEq(coveredCallAdapter.storageLocation(), _erc7201("b1nary.storage.CoveredCallFundAdapter"));
     }
 
     function _erc7201(string memory namespace) private pure returns (bytes32) {
