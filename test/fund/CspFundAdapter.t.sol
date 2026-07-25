@@ -296,6 +296,45 @@ contract CspFundAdapterTest is Test {
         assertEq(adapter.adapterState().stateNonce, 4);
     }
 
+    function test_assignmentKeepsWethAndAllowsAnotherUsdcCsp() public {
+        _authorizeAndOpen();
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1_800e8);
+
+        strategyManager.deallocate(adapter, 1, 0, _settleData());
+        settler.operatorPhysicalRedeemVault(address(adapter), 1, COLLATERAL);
+        strategyManager.deallocate(adapter, 1, 0, _settleData());
+
+        assertEq(uint256(adapter.position(1).lifecycle), uint256(ICspFundAdapter.Lifecycle.Assigned));
+        assertEq(adapter.adapterState().activePositionCount, 0);
+        assertEq(adapter.adapterState().accountedWeth, 1e18);
+
+        expiry = _nextEightAm();
+        (ICspFundAdapter.OpenPositionData memory openData,) = _openData();
+        strategyManager.allocate(adapter, address(usdc), COLLATERAL, abi.encode(openData));
+
+        ICspFundAdapter.AdapterState memory state = adapter.adapterState();
+        ICspFundAdapter.Position memory reopened = adapter.position(2);
+        assertEq(state.positionCount, 2);
+        assertEq(state.activePositionCount, 1);
+        assertEq(state.accountedWeth, 1e18);
+        assertEq(weth.balanceOf(address(adapter)), 1e18);
+        assertEq(uint256(reopened.lifecycle), uint256(ICspFundAdapter.Lifecycle.Open));
+        assertEq(reopened.collateral, COLLATERAL);
+        assertEq(reopened.oToken, controller.getVault(address(adapter), 2).shortOtoken);
+
+        uint64 snapshot = uint64(block.number);
+        ICspFundValuator.OptionObservation[] memory observations = new ICspFundValuator.OptionObservation[](2);
+        observations[0] = _observation(2, MM_KEY, snapshot, 100e6, 1e6, 1);
+        observations[1] = _observation(2, OBSERVER_KEY, snapshot, 120e6, 2e6, 2);
+        ICspFundValuator.ValuationData memory valuationData =
+            ICspFundValuator.ValuationData({optionObservations: observations});
+        FundTypes.PositionValue memory value = valuator.value(address(adapter), snapshot, abi.encode(valuationData));
+        assertEq(value.grossAssets, state.accountedUsdc + 1_800e6 + COLLATERAL);
+        assertEq(value.liquidAccountingAssets, state.accountedUsdc);
+        assertEq(value.liabilities, 132e6);
+    }
+
     function test_itmCashFallbackPaysIntrinsicToMmWithoutWeth() public {
         _authorizeAndOpen();
         vm.warp(expiry + 1);
@@ -342,8 +381,8 @@ contract CspFundAdapterTest is Test {
         _authorizeAndOpen();
         uint64 snapshot = uint64(block.number);
         ICspFundValuator.OptionObservation[] memory observations = new ICspFundValuator.OptionObservation[](2);
-        observations[0] = _observation(MM_KEY, snapshot, 100e6, 1e6, 1);
-        observations[1] = _observation(OBSERVER_KEY, snapshot, 120e6, 2e6, 2);
+        observations[0] = _observation(1, MM_KEY, snapshot, 100e6, 1e6, 1);
+        observations[1] = _observation(1, OBSERVER_KEY, snapshot, 120e6, 2e6, 2);
         ICspFundValuator.ValuationData memory valuationData =
             ICspFundValuator.ValuationData({optionObservations: observations});
 
@@ -454,16 +493,20 @@ contract CspFundAdapterTest is Test {
         });
     }
 
-    function _observation(uint256 signerKey, uint64 snapshot, uint256 liability, uint256 exitCost, uint256 nonce)
-        private
-        returns (ICspFundValuator.OptionObservation memory observation)
-    {
+    function _observation(
+        uint256 positionId,
+        uint256 signerKey,
+        uint64 snapshot,
+        uint256 liability,
+        uint256 exitCost,
+        uint256 nonce
+    ) private returns (ICspFundValuator.OptionObservation memory observation) {
         uint64 validUntil = snapshot + 5;
         bytes32 digest =
-            valuator.observationDigest(address(adapter), 1, snapshot, validUntil, liability, exitCost, nonce);
+            valuator.observationDigest(address(adapter), positionId, snapshot, validUntil, liability, exitCost, nonce);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digest);
         observation = ICspFundValuator.OptionObservation({
-            positionId: 1,
+            positionId: positionId,
             snapshotBlock: snapshot,
             validUntilBlock: validUntil,
             liability: liability,
