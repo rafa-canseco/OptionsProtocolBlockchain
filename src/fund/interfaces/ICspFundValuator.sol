@@ -20,7 +20,10 @@ interface ICspFundValuator {
     error DuplicateObserver(address observer);
     error InsufficientObservationQuorum(uint256 positionId, uint256 required, uint256 actual);
     error InvalidAdapter(address adapter);
+    error InvalidFairValuePolicy();
+    error InvalidModelVersion(uint256 positionId, uint64 expected, uint64 actual);
     error InvalidObservation(uint256 positionId);
+    error ObservationDivergence(uint256 positionId, uint256 minimum, uint256 maximum, uint256 median);
     error InvalidSnapshotBlock(uint64 expected, uint64 actual);
     error InvalidSpotObservation();
     error LedgerMismatch(uint256 positionId);

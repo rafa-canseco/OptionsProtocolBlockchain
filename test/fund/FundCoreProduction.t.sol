@@ -386,6 +386,24 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(share.balanceOf(alice), 75e18);
         }
 
+        function test_previewDepositPreservesFairSharePriceWhenStrategyCollateralIsLocked() public {
+            _depositForAlice(1_000e6);
+            // The component valuator has already included locked collateral in gross assets and subtracted only
+            // the $30 fair put liability, producing a $970 transactional NAV.
+            _submitNav(970e6, 1_000e6);
+
+            uint256 preview = vault.previewDeposit(200e6);
+            assertGt(preview, 206e18);
+            assertLt(preview, 207e18);
+            assertNotEq(preview, 1_000e18);
+
+            uint256 navBefore = vault.totalAssets();
+            uint256 supplyBefore = vault.shareSupply();
+            _depositForBob(200e6);
+            assertEq(share.balanceOf(bob), preview);
+            assertApproxEqAbs(vault.totalAssets() * 1e18 / vault.shareSupply(), navBefore * 1e18 / supplyBefore, 1);
+        }
+
         function test_donationIsQuarantinedWithoutClosingEntry() public {
             _depositForAlice(100e6);
             asset.mint(address(this), 10e6);

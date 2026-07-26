@@ -13,6 +13,7 @@ import {FundAccessManagerDeployer} from "../../src/fund/FundAccessManagerDeploye
 import {ClaimEscrow} from "../../src/fund/ClaimEscrow.sol";
 import {CspFundAdapter} from "../../src/fund/CspFundAdapter.sol";
 import {CspFundValuator} from "../../src/fund/CspFundValuator.sol";
+import {CspFundValuatorV2} from "../../src/fund/CspFundValuatorV2.sol";
 import {CspFundAdapterOperations} from "../../src/fund/libraries/CspFundAdapterOperations.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
 import {MockChainlinkFeed} from "../../src/mocks/MockChainlinkFeed.sol";
@@ -39,6 +40,10 @@ contract RuntimeBudgetTest is Test {
         observers[1] = address(0xB0B);
         assertLt(
             address(new CspFundValuator(address(spotFeed), 8, 1 hours, 10, 2, 1_000, observers)).code.length,
+            EIP170_RUNTIME_LIMIT
+        );
+        assertLt(
+            address(new CspFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, 0, observers)).code.length,
             EIP170_RUNTIME_LIMIT
         );
     }
