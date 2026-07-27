@@ -27,6 +27,8 @@
   "topology": {
     "factoryOneShotAndConsumed": true,
     "allExpectedAddressesHaveCode": true,
+    "allContractValidFromBlocksReconciled": true,
+    "nestedCreationFirstCodeChecksPassed": true,
     "proxyImplementationsMatch": true,
     "moduleAndEscrowBindingsMatch": true,
     "accountingAssetIsWeth": true,

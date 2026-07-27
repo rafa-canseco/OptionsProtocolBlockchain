@@ -9,6 +9,10 @@ successfully.
 
 The canonical integration artifact is `manifest.json`. Confirmed mutations are recorded in
 `transactions.json`, and the final state assertions are recorded in `reconciliation.json`.
+Every V2 contract entry carries its exact `validFromBlock`. Direct creations use confirmed receipt
+blocks; contracts created inside factory calls use first-code evidence showing no code in the prior
+block and code at the recorded block. Consumers must not default every address to `fundFirst` or
+`fundLast`.
 
 The isolated active V1 configuration was touched by exactly three approved mutations: WETH was
 enabled as collateral, the WETH/USDC physically settled covered-call product was enabled, and the

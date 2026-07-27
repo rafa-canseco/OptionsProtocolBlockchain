@@ -128,63 +128,82 @@
   "contracts": {
     "fundFactory": {
       "address": "0x6F5b59047629730f973c75c8941d88Ed526946b8",
+      "validFromBlock": 44709935,
       "codehash": "0x55711227f32266b6bfe6418a08c413e16d38ef4c862675c9687a1813249bedca"
     },
     "fundAccessManagerDeployer": {
       "address": "0x36CCDa1DBEbb09012Dd589821B8e3fD19dBfe4D7",
+      "validFromBlock": 44709935,
       "codehash": "0x090404a35957266b4163a2a8c1399f25c74dcbee607bb1031b13e6674e9842bd"
     },
     "deploymentId": "0x642e01014a44b6b6236b5de3ac50b10b3d693f9991a580d48e7ce926672608dc",
     "accessManager": {
       "address": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "validFromBlock": 44709937,
       "type": "FundAccessManager",
       "codehash": "0xb12b4f94beba48fe8a7b463894c1fd4a385ada50e36d15da0b1df9c394185840"
     },
     "fundVault": {
       "proxy": "0x9060946E6ACC4E430A823E90120743c7305EE2CA",
-      "implementation": "0xAf51984EcC261a4B3052eA90c9a85768F81DE764"
+      "implementation": "0xAf51984EcC261a4B3052eA90c9a85768F81DE764",
+      "validFromBlock": {"proxy": 44709937, "implementation": 44709929}
     },
     "fundShare": {
       "proxy": "0xaA1070adb74C5455320285618BF1ED804d3745C3",
-      "implementation": "0x900264215ED313a6cC95e8BA8BF47b20069777fC"
+      "implementation": "0x900264215ED313a6cC95e8BA8BF47b20069777fC",
+      "validFromBlock": {"proxy": 44709937, "implementation": 44709930}
     },
     "fundAccounting": {
       "proxy": "0x9a112A65FE8510bCf5DC894fFBf06aEa8d12d311",
-      "implementation": "0xca698509f7770465A580Be3733E56D3CbC8bCd76"
+      "implementation": "0xca698509f7770465A580Be3733E56D3CbC8bCd76",
+      "validFromBlock": {"proxy": 44709937, "implementation": 44709931}
     },
     "fundFlowManager": {
       "proxy": "0x59fc0d88aAF3D14b82696cc7E91ea37b629E48cc",
-      "implementation": "0x20EB957dfF753074a52487CbC3F4297879E9536e"
+      "implementation": "0x20EB957dfF753074a52487CbC3F4297879E9536e",
+      "validFromBlock": {"proxy": 44709937, "implementation": 44709932}
     },
     "strategyManager": {
       "proxy": "0x745422dd14E84ee27C2E56D2845C3BB1658027d9",
-      "implementation": "0x88CDCF59F289b0346F568a751Fd8e08409B08271"
+      "implementation": "0x88CDCF59F289b0346F568a751Fd8e08409B08271",
+      "validFromBlock": {"proxy": 44709937, "implementation": 44709933}
     },
     "navReportVerifier": {
       "address": "0xb71252822F1Bd5F526E80A225ade2520d6903dB8",
+      "validFromBlock": 44709934,
       "codehash": "0xcb8a15664d9cdbf3f9d98b8dee60fe0497d5eae8185a3f991748b68c013e7d9f"
     },
     "claimEscrow": {
       "address": "0x8842372431CA713402Ac15E868Eb7d8A7c98A807",
+      "validFromBlock": 44709937,
       "codehash": "0xab3f03123182bd134a6430c4263918396b91ae06365115096c127c8d271892e7"
     },
     "coveredCallAdapterOperations": {
       "address": "0x3AB0634fCb58D4447fd8A5469De001d64f028AEe",
+      "validFromBlock": 44709928,
       "codehash": "0xb53473d452fdf245e23e18ca4e35822f9bcac110cb4b685ca73e6b99252df567"
     },
     "coveredCallFundAdapter": {
       "proxy": "0x0BF96C5cE0D637d4D686d342aE42Bc00fDa19De9",
       "implementation": "0x42e603131671Aba8C9e2b0B21b0f7B376C9151Be",
+      "validFromBlock": {"proxy": 44709939, "implementation": 44709938},
       "implementationCodehash": "0x27d4cc680034e7bc5a86cf020120338ee657c5bc3e090a4167ae90832922d43c"
     },
     "coveredCallFundValuator": {
       "address": "0xA1BFC1bE3C7fCA77CA0b32d25de1Ce58A50333A0",
+      "validFromBlock": 44709940,
       "codehash": "0x1e133012a9ecf688ce473d2925c0595188117121e970423f5b822208a9d2eee5",
       "valuationPolicyVersion": 2,
       "requiredModelVersion": 1
     },
-    "inKindStrategyEscrow": "0xA267AdB9FBf02d453e3586A03b6d3853a9d20583",
-    "emergencyStrategyEscrow": "0x1C38ED1c7d750Ef8908C537dC4c654da9E71fd03"
+    "inKindStrategyEscrow": {
+      "address": "0xA267AdB9FBf02d453e3586A03b6d3853a9d20583",
+      "validFromBlock": 44709941
+    },
+    "emergencyStrategyEscrow": {
+      "address": "0x1C38ED1c7d750Ef8908C537dC4c654da9E71fd03",
+      "validFromBlock": 44709942
+    }
   },
   "policy": {
     "artifact": "validation-policy.approved.json",
