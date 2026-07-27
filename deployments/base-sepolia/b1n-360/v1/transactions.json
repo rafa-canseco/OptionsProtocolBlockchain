@@ -196,6 +196,14 @@
       "block": 44710058,
       "status": "confirmed",
       "effect": "authorizedPhysicalDeliveryVault(adapter)=true"
+    },
+    {
+      "name": "repairAccountingRole",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x50f5db345eb841e21575b9ce052c280ba1256adc23f3d07fac54c268d249b8e7",
+      "block": 44712837,
+      "status": "confirmed",
+      "effect": "ACCOUNTING_ROLE atomically migrated from the deployer to the backend submitter; the independent reporter set was unchanged"
     }
   ]
 }
