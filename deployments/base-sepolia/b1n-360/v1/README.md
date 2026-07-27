@@ -28,6 +28,8 @@ pending owner changed. The manifest records each mutation with its transaction h
 - Maximum allocation: 25%.
 - Maximum open positions: 1.
 - Target policy: 0.05 call delta, 1.5–2.5 day expiry, minimum 10 bps net premium.
+- `ACCOUNTING_ROLE` is held exclusively by the backend NAV submitter. The two independent
+  reporters remain unchanged and are not granted submission authority.
 - Deposits remain paused.
 - The strategy remains inactive.
 - Final allocator and processor workers have not been granted roles.

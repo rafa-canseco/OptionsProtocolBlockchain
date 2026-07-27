@@ -16,6 +16,8 @@ import {MockERC20} from "../../src/mocks/MockERC20.sol";
 import {MockSwapRouter} from "../../src/mocks/MockSwapRouter.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
 import {FundAccessManager} from "../../src/fund/FundAccessManager.sol";
+import {FundAccounting} from "../../src/fund/FundAccounting.sol";
+import {FundConstants} from "../../src/fund/FundConstants.sol";
 import {FundVault} from "../../src/fund/FundVault.sol";
 import {FundShare} from "../../src/fund/FundShare.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
@@ -244,6 +246,56 @@ contract B1N360DeploymentTest is Test {
         B1N360Operations.Operation memory open = operationsHarness.openDepositsOperation(address(vault));
         manager.execute(open.target, open.data);
         assertFalse(vault.depositsPaused());
+    }
+
+    function test_accountingRoleMigrationPreservesReporterSetAndOtherRoles() public {
+        B1N360Base.DeployConfig memory deployConfig = _deployConfig();
+        B1N360Base.DeploymentAddresses memory deployed = deployHarness.deployForTest(deployConfig);
+        FundAccessManager manager = FundAccessManager(deployed.accessManager);
+        FundAccounting accounting = FundAccounting(deployed.fundAccountingProxy);
+        B1N360Operations.PolicyConfig memory policy = _policyConfig(deployed);
+        _executeRestrictedOperations(manager, operationsHarness.policyOperations(policy));
+
+        address oldAccounting = address(this);
+        address navSubmitter = address(0x195D);
+        bytes32 reportersBefore = keccak256(
+            abi.encode(
+                accounting.reporterSetVersion(),
+                accounting.reporterThreshold(),
+                accounting.activeReporterAt(0),
+                accounting.activeReporterAt(1)
+            )
+        );
+        uint256 allocatorCountBefore = manager.roleMemberCount(FundConstants.ALLOCATOR_ROLE);
+
+        bytes[] memory calls = new bytes[](2);
+        calls[0] = abi.encodeCall(manager.grantRole, (FundConstants.ACCOUNTING_ROLE, navSubmitter, uint32(0)));
+        calls[1] = abi.encodeCall(manager.revokeRole, (FundConstants.ACCOUNTING_ROLE, oldAccounting));
+        manager.multicall(calls);
+
+        assertEq(manager.roleMemberCount(FundConstants.ACCOUNTING_ROLE), 1);
+        assertEq(manager.roleMemberAt(FundConstants.ACCOUNTING_ROLE, 0), navSubmitter);
+        (bool submitterActive, uint32 submitterDelay) = manager.hasRole(FundConstants.ACCOUNTING_ROLE, navSubmitter);
+        (bool oldActive,) = manager.hasRole(FundConstants.ACCOUNTING_ROLE, oldAccounting);
+        assertTrue(submitterActive);
+        assertEq(submitterDelay, 0);
+        assertFalse(oldActive);
+        assertEq(manager.roleMemberCount(FundConstants.ALLOCATOR_ROLE), allocatorCountBefore);
+        assertEq(
+            manager.getTargetFunctionRole(deployed.fundAccountingProxy, FundAccounting.submitNav.selector),
+            FundConstants.ACCOUNTING_ROLE
+        );
+        assertEq(
+            keccak256(
+                abi.encode(
+                    accounting.reporterSetVersion(),
+                    accounting.reporterThreshold(),
+                    accounting.activeReporterAt(0),
+                    accounting.activeReporterAt(1)
+                )
+            ),
+            reportersBefore
+        );
     }
 
     function test_factoryIsOneShotAndBaseSepoliaOnly() public {

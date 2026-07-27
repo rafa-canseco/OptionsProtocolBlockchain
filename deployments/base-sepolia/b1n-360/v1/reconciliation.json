@@ -5,7 +5,7 @@
   "network": {
     "name": "base-sepolia",
     "chainId": 84532,
-    "reconciliationBlock": 44710111
+    "reconciliationBlock": 44712837
   },
   "gates": {
     "approvedInputsDigestMatches": true,
@@ -36,6 +36,10 @@
   },
   "accessManager": {
     "exactRoleMembersMatch": true,
+    "accountingRoleMember": "0x195De7eDc5e912D7b7001d3F268bbE0d14f7E1C3",
+    "previousAccountingRoleRevoked": true,
+    "submitNavSelectorRole": 2,
+    "reporterSetUnchanged": true,
     "allRoleGrantDelaysZero": true,
     "allMemberExecutionDelaysZero": true,
     "allTargetAdminDelaysZero": true,
