@@ -9,6 +9,7 @@ import {FundAccountingStorage} from "../../../src/fund/storage/FundAccountingSto
 import {FundFlowManagerStorage} from "../../../src/fund/storage/FundFlowManagerStorage.sol";
 import {StrategyManagerStorage} from "../../../src/fund/storage/StrategyManagerStorage.sol";
 import {CspFundAdapterStorage} from "../../../src/fund/storage/CspFundAdapterStorage.sol";
+import {CoveredCallFundAdapterStorage} from "../../../src/fund/storage/CoveredCallFundAdapterStorage.sol";
 import {FundTypes} from "../../../src/fund/FundTypes.sol";
 
 abstract contract StorageHarnessBase is Initializable, UUPSUpgradeable, OwnableUpgradeable {
@@ -235,6 +236,25 @@ contract CspFundAdapterStorageHarnessV1 is StorageHarnessBase, CspFundAdapterSto
 
     function setFund(address value) external onlyOwner {
         _getCspFundAdapterStorage().fund = value;
+    }
+}
+
+contract CoveredCallFundAdapterStorageHarnessV1 is StorageHarnessBase, CoveredCallFundAdapterStorage {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address owner) external initializer {
+        __StorageHarnessBase_init(owner);
+    }
+
+    function storageLocation() external pure returns (bytes32) {
+        return COVERED_CALL_FUND_ADAPTER_STORAGE_LOCATION;
+    }
+
+    function setFund(address value) external onlyOwner {
+        _getCoveredCallFundAdapterStorage().fund = value;
     }
 }
 
