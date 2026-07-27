@@ -20,7 +20,8 @@
   "policy": {
     "repository": "rafa-canseco/OptionsProtocolMarketMaker",
     "gitCommit": "73e21a2e2df0a8dbe2aa480bf3c76777e1531f8b",
-    "artifact": "policies/covered_call_fund_policy.v2.base-sepolia.json",
+    "sourceArtifact": "policies/covered_call_fund_policy.v2.base-sepolia.json",
+    "artifact": "deployments/base-sepolia/b1n-360/v1/validation-policy.approved.json",
     "sha256": "0x4ecb60fc6a19ac0a10c37ca380998b3566a3193693a10fb211f86bb61a2bebf3"
   },
   "environment": {
