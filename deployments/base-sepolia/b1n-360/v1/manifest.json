@@ -251,7 +251,37 @@
     "mainnetAuthorized": false
   },
   "verification": {
-    "status": "PENDING_BLOCKSCOUT_SUBMISSION",
-    "explorer": "https://base-sepolia.blockscout.com"
+    "status": "PARTIAL_VERIFIED_BLOCKSCOUT",
+    "explorer": "https://base-sepolia.blockscout.com",
+    "verifiedContracts": 18,
+    "totalContracts": 21,
+    "coveredCallFundAdapterVerified": true,
+    "coveredCallFundValuatorVerified": true,
+    "adapterLibraryBinding": {
+      "library": "src/fund/libraries/CoveredCallFundAdapterOperations.sol:CoveredCallFundAdapterOperations",
+      "address": "0x3AB0634fCb58D4447fd8A5469De001d64f028AEe",
+      "runtimeReproduced": true,
+      "blockscoutConfirmed": false
+    },
+    "failed": [
+      {
+        "contract": "CoveredCallFundAdapterOperations",
+        "address": "0x3AB0634fCb58D4447fd8A5469De001d64f028AEe",
+        "guid": "3ab0634fcb58d4447fd8a5469de001d64f028aee6a67d792",
+        "details": "Fail - Unable to verify"
+      },
+      {
+        "contract": "FundVault implementation",
+        "address": "0xAf51984EcC261a4B3052eA90c9a85768F81DE764",
+        "guid": "af51984ecc261a4b3052ea90c9a85768f81de7646a67d7e2",
+        "details": "Fail - Unable to verify"
+      },
+      {
+        "contract": "FundFlowManager implementation",
+        "address": "0x20EB957dfF753074a52487CbC3F4297879E9536e",
+        "guid": "20eb957dff753074a52487cbc3f4297879e9536e6a67d7e3",
+        "details": "Fail - Unable to verify"
+      }
+    ]
   }
 }

@@ -46,5 +46,8 @@ They were not executed as part of B1N-360.
 ## Verification
 
 Local validation completed with 41 directed tests, 512 fuzz cases, 256 invariant runs,
-128,000 invariant calls, and OpenZeppelin upgrade validation. Blockscout source submission is
-tracked separately from deployment correctness and does not authorize activation.
+128,000 invariant calls, and OpenZeppelin upgrade validation. Blockscout verified 18 of 21
+contracts, including the CoveredCallFundAdapter implementation/proxy and CoveredCallFundValuatorV2.
+The three rejected standard-JSON submissions reproduce the exact deployed runtime after normalizing
+compiler immutables; Blockscout returned only `Fail - Unable to verify`. See `verification.md`.
+Explorer verification does not authorize activation.
