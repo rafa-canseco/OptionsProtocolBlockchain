@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-360",
+  "deploymentStatus": "DEPLOYED",
+  "transactions": [
+    {
+      "name": "whitelistWethCollateral",
+      "to": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
+      "hash": "0x59e4dc1a7532e27c339009598734d2dceea1f487fd6058c1cb2e41aa2c93e1ae",
+      "block": 44709872,
+      "status": "confirmed"
+    },
+    {
+      "name": "whitelistCoveredCallProduct",
+      "to": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
+      "hash": "0x0476c6a439148dae1e20daf2749c1090741d7de856a26bdc691b8c65a13671a9",
+      "block": 44709873,
+      "status": "confirmed"
+    },
+    {
+      "name": "deployFundAndCoveredCallModules",
+      "artifact": "broadcast/DeployTokenizedCoveredCallFundBaseSepolia.s.sol/84532/run-latest.json",
+      "firstBlock": 44709928,
+      "lastBlock": 44709943,
+      "transactionCount": 16,
+      "status": "confirmed"
+    },
+    {
+      "name": "configureAccess",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x726501971b2985243fa9ee78ea3176365f8125e985b95e532151ae55fa2dbf30",
+      "block": 44710016,
+      "status": "confirmed"
+    },
+    {
+      "name": "configurePolicy",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x808e8d630670e260d3e23d29fefcec219892224f5cf74282a01a0dbd2f5c5037",
+      "block": 44710037,
+      "status": "confirmed",
+      "effect": "strategy configured inactive and deposits remain paused"
+    },
+    {
+      "name": "onboardCoveredCallAdapter",
+      "to": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
+      "hash": "0x8b86f91bce60898778ababc7c8952a3096a7e3c046395cd6c3faa1d456ee3af9",
+      "block": 44710058,
+      "status": "confirmed",
+      "effect": "authorizedPhysicalDeliveryVault(adapter)=true"
+    }
+  ]
+}
