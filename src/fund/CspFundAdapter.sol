@@ -173,9 +173,7 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
 
         OpenPositionData memory openData = abi.decode(data, (OpenPositionData));
         if (openData.collateral != amount || openData.optionAmount == 0) revert InvalidAmount();
-        if ($.activePositionCount >= $.riskConfig.maxOpenPositions || $.accountedWeth != 0) {
-            revert InvalidRiskConfig();
-        }
+        if ($.activePositionCount >= $.riskConfig.maxOpenPositions) revert InvalidRiskConfig();
         _validatePut($, openData);
 
         IERC20 usdc = IERC20($.accountingAsset);
