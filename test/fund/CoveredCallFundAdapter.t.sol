@@ -14,7 +14,7 @@ import {OTokenFactory} from "../../src/core/OTokenFactory.sol";
 import {Oracle} from "../../src/core/Oracle.sol";
 import {Whitelist} from "../../src/core/Whitelist.sol";
 import {CoveredCallFundAdapter} from "../../src/fund/CoveredCallFundAdapter.sol";
-import {CoveredCallFundValuator} from "../../src/fund/CoveredCallFundValuator.sol";
+import {CoveredCallFundValuatorV2} from "../../src/fund/CoveredCallFundValuatorV2.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
 import {ICoveredCallFundAdapter} from "../../src/fund/interfaces/ICoveredCallFundAdapter.sol";
 import {ICoveredCallFundValuator} from "../../src/fund/interfaces/ICoveredCallFundValuator.sol";
@@ -61,6 +61,7 @@ contract CoveredCallFundAdapterTest is Test {
     uint256 private constant PREMIUM = 70e6;
     uint256 private constant MM_KEY = 0xAA02;
     uint256 private constant OBSERVER_KEY = 0xCA11;
+    uint256 private constant MODEL_VERSION_PREFIX = uint256(1) << 192;
     bytes32 private constant STORAGE_SLOT = 0x87c2fcf2eb487ab099069387b4c834e159db5117bd35c067363dcc0f68a6c200;
 
     AddressBook private addressBook;
@@ -78,7 +79,7 @@ contract CoveredCallFundAdapterTest is Test {
     CoveredCallStrategyManagerCaller private strategyManager;
     CoveredCallFundAdapter private adapter;
     CoveredCallFundAdapter private adapterImplementation;
-    CoveredCallFundValuator private valuator;
+    CoveredCallFundValuatorV2 private valuator;
 
     address private mm;
     address private observer;
@@ -168,7 +169,7 @@ contract CoveredCallFundAdapterTest is Test {
         address[] memory observers = new address[](2);
         observers[0] = mm;
         observers[1] = observer;
-        valuator = new CoveredCallFundValuator(address(spotFeed), 8, 1 hours, 10, 2, 1_000, observers);
+        valuator = new CoveredCallFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, 0, observers);
 
         expiry = _nextEightAm();
         weth.mint(address(strategyManager), 20e18);
@@ -455,7 +456,7 @@ contract CoveredCallFundAdapterTest is Test {
         ICoveredCallFundValuator.OptionObservation[] memory observations =
             new ICoveredCallFundValuator.OptionObservation[](2);
         observations[0] = _observation(MM_KEY, snapshot, 0.1e18, 0.001e18, 1);
-        observations[1] = _observation(OBSERVER_KEY, snapshot, 0.12e18, 0.002e18, 2);
+        observations[1] = _observation(OBSERVER_KEY, snapshot, 0.104e18, 0.00104e18, 2);
         ICoveredCallFundValuator.ValuationData memory valuationData =
             ICoveredCallFundValuator.ValuationData({optionObservations: observations});
 
@@ -463,9 +464,9 @@ contract CoveredCallFundAdapterTest is Test {
         uint256 premiumWeth = _expectedWeth(PREMIUM, 1_800e8);
         uint256 normalizationCost = Math.mulDiv(premiumWeth, 100, 10_000, Math.Rounding.Ceil);
         assertEq(value.grossAssets, COLLATERAL + premiumWeth);
-        assertEq(value.liabilities, 0.132e18);
+        assertEq(value.liabilities, 0.102e18);
         assertEq(value.liquidAccountingAssets, 0);
-        assertEq(value.baseExitCost, 0.002e18 + normalizationCost);
+        assertEq(value.baseExitCost, 0.00102e18 + normalizationCost);
 
         ICoveredCallFundValuator.ValuationData memory emptyData = ICoveredCallFundValuator.ValuationData({
             optionObservations: new ICoveredCallFundValuator.OptionObservation[](0)
@@ -474,6 +475,101 @@ contract CoveredCallFundAdapterTest is Test {
             abi.encodeWithSelector(ICoveredCallFundValuator.InsufficientObservationQuorum.selector, 1, 2, 0)
         );
         valuator.value(address(adapter), snapshot, abi.encode(emptyData));
+    }
+
+    function test_valuatorV2RejectsWrongModelZeroSequenceAndDivergentMarks() public {
+        _open();
+        uint64 snapshot = uint64(block.number);
+        ICoveredCallFundValuator.OptionObservation[] memory observations =
+            new ICoveredCallFundValuator.OptionObservation[](2);
+
+        observations[0] = _observationWithNonce(MM_KEY, snapshot, 0.1e18, 0.001e18, 1);
+        observations[1] = _observation(OBSERVER_KEY, snapshot, 0.1e18, 0.001e18, 2);
+        ICoveredCallFundValuator.ValuationData memory valuationData =
+            ICoveredCallFundValuator.ValuationData({optionObservations: observations});
+        vm.expectRevert(
+            abi.encodeWithSelector(ICoveredCallFundValuator.InvalidModelVersion.selector, 1, uint64(1), uint64(0))
+        );
+        valuator.value(address(adapter), snapshot, abi.encode(valuationData));
+
+        observations[0] = _observationWithNonce(MM_KEY, snapshot, 0.1e18, 0.001e18, MODEL_VERSION_PREFIX);
+        observations[1] = _observation(OBSERVER_KEY, snapshot, 0.1e18, 0.001e18, 2);
+        valuationData = ICoveredCallFundValuator.ValuationData({optionObservations: observations});
+        vm.expectRevert(abi.encodeWithSelector(ICoveredCallFundValuator.InvalidObservation.selector, 1));
+        valuator.value(address(adapter), snapshot, abi.encode(valuationData));
+
+        observations[0] = _observation(MM_KEY, snapshot, 0.1e18, 0.001e18, 1);
+        observations[1] = _observation(OBSERVER_KEY, snapshot, 0.11e18, 0.001e18, 2);
+        valuationData = ICoveredCallFundValuator.ValuationData({optionObservations: observations});
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICoveredCallFundValuator.ObservationDivergence.selector, 1, 0.1e18, 0.11e18, 0.105e18
+            )
+        );
+        valuator.value(address(adapter), snapshot, abi.encode(valuationData));
+    }
+
+    function test_valuatorV2RejectsOneSidedTransactionalNavBuffer() public {
+        address[] memory observers = new address[](2);
+        observers[0] = mm;
+        observers[1] = observer;
+        vm.expectRevert(ICoveredCallFundValuator.InvalidFairValuePolicy.selector);
+        new CoveredCallFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, 1, observers);
+    }
+
+    function test_expiredOpenCallFailsClosedUntilOracleExpiryPriceExists() public {
+        _open();
+        vm.warp(expiry + 1);
+        spotFeed.setPrice(1_800e8);
+        ICoveredCallFundValuator.ValuationData memory emptyData = ICoveredCallFundValuator.ValuationData({
+            optionObservations: new ICoveredCallFundValuator.OptionObservation[](0)
+        });
+
+        vm.expectRevert(abi.encodeWithSelector(ICoveredCallFundValuator.ExpiryPriceUnavailable.selector, 1, expiry));
+        valuator.value(address(adapter), uint64(block.number), abi.encode(emptyData));
+    }
+
+    function test_expiredOtmOpenCallRetainsLockedCollateralAndNav() public {
+        _open();
+        vm.warp(expiry + 1);
+        spotFeed.setPrice(1_800e8);
+        oracle.setExpiryPrice(address(weth), expiry, 1_800e8);
+        ICoveredCallFundValuator.ValuationData memory emptyData = ICoveredCallFundValuator.ValuationData({
+            optionObservations: new ICoveredCallFundValuator.OptionObservation[](0)
+        });
+
+        FundTypes.PositionValue memory value =
+            valuator.value(address(adapter), uint64(block.number), abi.encode(emptyData));
+        uint256 premiumWeth = _expectedWeth(PREMIUM, 1_800e8);
+        uint256 nav = value.grossAssets - value.liabilities - value.baseExitCost;
+
+        assertEq(value.grossAssets, COLLATERAL + premiumWeth);
+        assertEq(value.liabilities, 0);
+        assertGt(nav, COLLATERAL);
+        assertGt(nav, 0.9e18);
+    }
+
+    function test_expiredItmOpenCallUsesIntrinsicWithoutTreatingCollateralAsLost() public {
+        _open();
+        vm.warp(expiry + 1);
+        spotFeed.setPrice(2_200e8);
+        oracle.setExpiryPrice(address(weth), expiry, 2_200e8);
+        ICoveredCallFundValuator.ValuationData memory emptyData = ICoveredCallFundValuator.ValuationData({
+            optionObservations: new ICoveredCallFundValuator.OptionObservation[](0)
+        });
+
+        FundTypes.PositionValue memory value =
+            valuator.value(address(adapter), uint64(block.number), abi.encode(emptyData));
+        uint256 premiumWeth = _expectedWeth(PREMIUM, 2_200e8);
+        uint256 intrinsic = Math.mulDiv(OPTION_AMOUNT * 1e10, 2_200e8 - STRIKE, 2_200e8, Math.Rounding.Ceil);
+        uint256 nav = value.grossAssets - value.liabilities - value.baseExitCost;
+        uint256 sharePrice = Math.mulDiv(nav, 1e18, 1e18);
+
+        assertEq(value.grossAssets, COLLATERAL + premiumWeth);
+        assertEq(value.liabilities, intrinsic);
+        assertLt(value.liabilities, COLLATERAL);
+        assertGt(nav, 0.9e18);
+        assertEq(sharePrice, nav);
     }
 
     function test_inKindIsWethOnlyAndEmergencyQuarantinesTransientUsdc() public {
@@ -532,6 +628,16 @@ contract CoveredCallFundAdapterTest is Test {
         private
         returns (ICoveredCallFundValuator.OptionObservation memory observation)
     {
+        return _observationWithNonce(signerKey, snapshot, liability, exitCost, MODEL_VERSION_PREFIX | nonce);
+    }
+
+    function _observationWithNonce(
+        uint256 signerKey,
+        uint64 snapshot,
+        uint256 liability,
+        uint256 exitCost,
+        uint256 nonce
+    ) private returns (ICoveredCallFundValuator.OptionObservation memory observation) {
         uint64 validUntil = snapshot + 5;
         bytes32 digest =
             valuator.observationDigest(address(adapter), 1, snapshot, validUntil, liability, exitCost, nonce);

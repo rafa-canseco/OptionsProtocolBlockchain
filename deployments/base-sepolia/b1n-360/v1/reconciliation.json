@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-360",
+  "deploymentStatus": "DEPLOYED",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532,
+    "reconciliationBlock": 44710111
+  },
+  "gates": {
+    "approvedInputsDigestMatches": true,
+    "validationPolicyDigestMatches": true,
+    "baseSepoliaOnly": true,
+    "testnetApprovalPresent": true,
+    "mainnetAuthorizationAbsent": true
+  },
+  "v1Boundary": {
+    "activeStagingV1Touched": true,
+    "implementationsOrOwnersChanged": false,
+    "implementationsMatchPinnedBaseline": true,
+    "ownersMatchPinnedBaseline": true,
+    "onlyApprovedV1MutationsObserved": true,
+    "coveredCallCollateralWhitelisted": true,
+    "coveredCallProductWhitelisted": true,
+    "coveredCallAdapterOnboarded": true
+  },
+  "topology": {
+    "factoryOneShotAndConsumed": true,
+    "allExpectedAddressesHaveCode": true,
+    "allContractValidFromBlocksReconciled": true,
+    "nestedCreationFirstCodeChecksPassed": true,
+    "proxyImplementationsMatch": true,
+    "moduleAndEscrowBindingsMatch": true,
+    "accountingAssetIsWeth": true,
+    "settlementAssetIsUsdc": true
+  },
+  "accessManager": {
+    "exactRoleMembersMatch": true,
+    "allRoleGrantDelaysZero": true,
+    "allMemberExecutionDelaysZero": true,
+    "allTargetAdminDelaysZero": true,
+    "selectorRolesMatch": true
+  },
+  "policy": {
+    "depositsPausedAfterDeploy": true,
+    "strategyInactiveAfterConfigure": true,
+    "maxOpenPositions": 1,
+    "minimumIdleBps": 0,
+    "maxAllocationBps": 2500,
+    "maxLossBps": 10000,
+    "maxCollateralPerPositionWeth": "2500000000000000",
+    "liabilityBufferBps": 0,
+    "observerCount": 2,
+    "observerQuorum": 2,
+    "valuationPolicyVersion": 2,
+    "requiredModelVersion": 1,
+    "maximumObservationDivergenceBps": 500
+  },
+  "phases": {
+    "v1ProductPrepared": "PASSED",
+    "fundDeployed": "PASSED",
+    "accessConfigured": "PASSED",
+    "policyConfigured": "PASSED",
+    "adapterOnboarded": "PASSED",
+    "finalWorkersGranted": "NOT_RUN",
+    "strategyActivated": "NOT_RUN",
+    "depositsOpen": "INTENTIONALLY_PAUSED"
+  },
+  "finalState": {
+    "depositsPaused": true,
+    "adapterOnboarded": true,
+    "strategyActive": false,
+    "allocatorBotAuthorized": false,
+    "publicDepositsAuthorized": false,
+    "mainnetAuthorized": false
+  }
+}
