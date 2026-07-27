@@ -37,9 +37,42 @@
   },
   "v1Boundary": {
     "stack": "isolated-b1n-336",
+    "activeStagingV1Touched": true,
+    "implementationsOrOwnersChanged": false,
     "accountingAsset": "0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6",
     "weth": "0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6",
     "usdc": "0xAB51a471493832C1D70cef8ff937A850cf37c860",
+    "approvedMutations": [
+      {
+        "target": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
+        "operation": "whitelistCollateral(address)",
+        "selector": "0xa34626c4",
+        "arguments": ["0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6"],
+        "transactionHash": "0x59e4dc1a7532e27c339009598734d2dceea1f487fd6058c1cb2e41aa2c93e1ae",
+        "block": 44709872
+      },
+      {
+        "target": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
+        "operation": "whitelistProduct(address,address,address,bool)",
+        "selector": "0x82d90ebf",
+        "arguments": [
+          "0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6",
+          "0xAB51a471493832C1D70cef8ff937A850cf37c860",
+          "0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6",
+          false
+        ],
+        "transactionHash": "0x0476c6a439148dae1e20daf2749c1090741d7de856a26bdc691b8c65a13671a9",
+        "block": 44709873
+      },
+      {
+        "target": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
+        "operation": "setPhysicalDeliveryVault(address,bool)",
+        "selector": "0x067e3d23",
+        "arguments": ["0x0BF96C5cE0D637d4D686d342aE42Bc00fDa19De9", true],
+        "transactionHash": "0x8b86f91bce60898778ababc7c8952a3096a7e3c046395cd6c3faa1d456ee3af9",
+        "block": 44710058
+      }
+    ],
     "addressBook": {
       "proxy": "0x033d9d37Baf83dBc71935239b6fA22a6905dbaa0",
       "implementation": "0x21aBa53771dDfE58DB867D5C47Cd0DA94ba5c5A4",
@@ -74,12 +107,21 @@
       "proxy": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
       "implementation": "0x440FF0Bba13D35dD9bCe388C8A5970ceeCdB53b9",
       "implementationCodehash": "0x6236288208616a5bb50b9a6a792966c3de4c408010d717ee7785752c0882cc8b",
+      "ownerBefore": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+      "ownerAfter": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+      "implementationBefore": "0x440FF0Bba13D35dD9bCe388C8A5970ceeCdB53b9",
+      "implementationAfter": "0x440FF0Bba13D35dD9bCe388C8A5970ceeCdB53b9",
+      "wethCollateralWhitelisted": true,
       "coveredCallProductWhitelisted": true
     },
     "batchSettler": {
       "proxy": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
       "implementation": "0x040219e594de2862D1480a6A3c1d45c5c032aCE6",
       "implementationCodehash": "0x5614f407be81f95e601647ed2777d2762ff5e26d64a329b525d7fab9f21c207d",
+      "ownerBefore": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+      "ownerAfter": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+      "implementationBefore": "0x040219e594de2862D1480a6A3c1d45c5c032aCE6",
+      "implementationAfter": "0x040219e594de2862D1480a6A3c1d45c5c032aCE6",
       "physicalDeliveryVaultAuthorized": true
     }
   },
@@ -181,6 +223,7 @@
     "handoffReady": true,
     "initialDeploymentReconciled": true,
     "strictReconciliationComplete": true,
+    "onlyApprovedV1MutationsObserved": true,
     "depositsPaused": true,
     "adapterOnboarded": true,
     "strategyActive": false,

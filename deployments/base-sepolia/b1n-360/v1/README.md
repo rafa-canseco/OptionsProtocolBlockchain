@@ -10,6 +10,11 @@ successfully.
 The canonical integration artifact is `manifest.json`. Confirmed mutations are recorded in
 `transactions.json`, and the final state assertions are recorded in `reconciliation.json`.
 
+The isolated active V1 configuration was touched by exactly three approved mutations: WETH was
+enabled as collateral, the WETH/USDC physically settled covered-call product was enabled, and the
+new adapter was authorized as a physical-delivery vault. No V1 proxy implementation, owner, or
+pending owner changed. The manifest records each mutation with its transaction hash and block.
+
 ## Current safe state
 
 - Fund key: `base-sepolia:covered-call`.

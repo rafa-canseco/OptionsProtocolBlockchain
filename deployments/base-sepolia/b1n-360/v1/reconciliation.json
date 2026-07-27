@@ -15,8 +15,11 @@
     "mainnetAuthorizationAbsent": true
   },
   "v1Boundary": {
+    "activeStagingV1Touched": true,
+    "implementationsOrOwnersChanged": false,
     "implementationsMatchPinnedBaseline": true,
     "ownersMatchPinnedBaseline": true,
+    "onlyApprovedV1MutationsObserved": true,
     "coveredCallCollateralWhitelisted": true,
     "coveredCallProductWhitelisted": true,
     "coveredCallAdapterOnboarded": true
