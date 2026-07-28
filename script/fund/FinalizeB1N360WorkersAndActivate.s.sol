@@ -75,21 +75,23 @@ contract FinalizeB1N360Workers is B1N360FinalWorkerBase {
 contract ActivateB1N360CoveredCall is B1N360FinalWorkerBase {
     function run() external {
         _requireBaseSepolia();
-        (, address allocator, address processor) = _workers();
+        (address scheduler, address allocator, address processor) = _workers();
         FundAccessManager manager = FundAccessManager(vm.envAddress("FUND_ACCESS_MANAGER"));
         StrategyManager strategyManager = StrategyManager(vm.envAddress("FUND_STRATEGY_MANAGER_PROXY"));
         FundVault vault = FundVault(vm.envAddress("FUND_VAULT_PROXY"));
         address adapter = vm.envAddress("FUND_CC_ADAPTER_PROXY");
         bool depositsPausedBefore = vault.depositsPaused();
-        uint256 allocatorKey = vm.envUint("PRIVATE_KEY");
-        require(vm.addr(allocatorKey) == allocator, "B1N360: allocator key");
+        uint256 curatorKey = vm.envUint("PRIVATE_KEY");
+        require(vm.addr(curatorKey) == scheduler, "B1N360: curator key");
         (bool allocatorActive, uint32 allocatorDelay) = manager.hasRole(FundConstants.ALLOCATOR_ROLE, allocator);
         (bool processorActive, uint32 processorDelay) = manager.hasRole(FundConstants.PROCESSOR_ROLE, processor);
+        (bool curatorActive, uint32 curatorDelay) = manager.hasRole(FundConstants.CURATOR_ROLE, scheduler);
         require(allocatorActive && allocatorDelay == 0, "B1N360: allocator not ready");
         require(processorActive && processorDelay == 0, "B1N360: processor not ready");
+        require(curatorActive && curatorDelay == 0, "B1N360: curator not ready");
 
         if (!strategyManager.strategyConfig(adapter).active) {
-            vm.startBroadcast(allocatorKey);
+            vm.startBroadcast(curatorKey);
             strategyManager.resumeAllocation(adapter, strategyManager.allocationPauseNonce(adapter));
             vm.stopBroadcast();
         }

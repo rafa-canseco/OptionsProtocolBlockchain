@@ -204,6 +204,97 @@
       "block": 44712837,
       "status": "confirmed",
       "effect": "ACCOUNTING_ROLE atomically migrated from the deployer to the backend submitter; the independent reporter set was unchanged"
+    },
+    {
+      "name": "grantFinalAllocator",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x76ecf1deb697545ef1294917acf77e0373a06a76f96e672f46971bbb164315a1",
+      "block": 44713445,
+      "status": "confirmed"
+    },
+    {
+      "name": "grantInitialFinalProcessor",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0xd7291353d5b86339528c57c6cb026ec8f4b505e03a7f44002a3fcb45d256e5f0",
+      "block": 44713445,
+      "status": "confirmed"
+    },
+    {
+      "name": "revokeSchedulerAllocator",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x93f1c6c2768c3b65de6d6e2b629fa918d0082cd4c7cfb78ac9acb6b8c36187db",
+      "block": 44713445,
+      "status": "confirmed"
+    },
+    {
+      "name": "revokeSchedulerProcessor",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0xac92858d710fa9302fa0ce34eb3a45db5dec32345be9988b7b99cc98e30b98c6",
+      "block": 44713445,
+      "status": "confirmed"
+    },
+    {
+      "name": "grantRotatedProcessor",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x0775f6230bf635ec7a48380b146b2cec1d44bc206be3e7e9a8caba65ea70ede4",
+      "block": 44713589,
+      "status": "confirmed",
+      "effect": "new Railway processor received immediate PROCESSOR_ROLE before the previous processor was revoked"
+    },
+    {
+      "name": "revokePreviousProcessor",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x80a587420692f5a402bdb450c12f8e0a27b55e01f75529fe8e7784335f001295",
+      "block": 44713590,
+      "status": "confirmed"
+    },
+    {
+      "name": "activateCoveredCallStrategy",
+      "to": "0x745422dd14E84ee27C2E56D2845C3BB1658027d9",
+      "hash": "0xd785598f278c1b14635988373153d8701ed98f5369532c4f660e54bc02031752",
+      "block": 44713652,
+      "status": "confirmed",
+      "effect": "CURATOR_ROLE resumed allocation during active NAV nonce 7"
+    },
+    {
+      "name": "supersededDepositResume",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x7500f589095e16845cf14872248e3e96b75a0fd3d7ab57fd6611398410c53ce0",
+      "block": 44713663,
+      "status": "confirmed_then_repaused",
+      "effect": "resume mined after NAV nonce 7 expired; deposits were repaused six blocks later and no Deposit events occurred in blocks 44713663-44713669"
+    },
+    {
+      "name": "rePauseDepositsAfterExpiredWindow",
+      "to": "0x9060946E6ACC4E430A823E90120743c7305EE2CA",
+      "hash": "0xb7d8b990279b5a12946a6822d5e442a533efc98f04b9022cb6c42f0bba021973",
+      "block": 44713669,
+      "status": "confirmed"
+    },
+    {
+      "name": "deployNavGatedFundVaultImplementation",
+      "to": null,
+      "createdContract": "0xCae10a81aE1aA0183A4b4283A3ACbE9A2642613A",
+      "hash": "0x0be488852a084dbfdd58ca796cc012463797c0721a66e893b686a04e7e0216fb",
+      "block": 44714399,
+      "status": "confirmed",
+      "effect": "resumeDeposits now rejects an inactive NAV window on-chain"
+    },
+    {
+      "name": "upgradeFundVaultNavGate",
+      "to": "0x9060946E6ACC4E430A823E90120743c7305EE2CA",
+      "hash": "0xa45c6c25b168c0301d0a778a7ad7384006d450340f20195cd7e906554b5e9542",
+      "block": 44714433,
+      "status": "confirmed",
+      "effect": "UUPS implementation upgraded after full build, regression test and OpenZeppelin upgrade validation passed"
+    },
+    {
+      "name": "openDepositsWithActiveNav",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0xc4d792e7be898bf32ac726e98821facdcb9da8bb7cad19b54279773bd6d88650",
+      "block": 44714463,
+      "status": "confirmed",
+      "effect": "deposits opened atomically during NAV nonce 22, valid from block 44714422 through 44714472"
     }
   ]
 }

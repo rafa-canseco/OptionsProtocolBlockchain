@@ -1095,6 +1095,20 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertFalse(vault.depositsPaused());
         }
 
+        function test_staleNavCannotResumeDepositsAfterCuratorDelay() public {
+            vault.pauseDeposits();
+            assertTrue(vault.depositsPaused());
+
+            bytes memory data = abi.encodeCall(vault.resumeDeposits, ());
+            manager.schedule(address(vault), data, 0);
+            vm.warp(block.timestamp + FundConstants.CURATOR_DELAY);
+            vm.roll(vault.activeNavWindow().validUntilBlock + 1);
+
+            vm.expectRevert(FundVault.InactiveNavWindow.selector);
+            vault.resumeDeposits();
+            assertTrue(vault.depositsPaused());
+        }
+
         function test_scheduledUupsUpgradePreservesProductionProxyState() public {
             _depositForAlice(100e6);
             FundVault nextImplementation = new FundVault();

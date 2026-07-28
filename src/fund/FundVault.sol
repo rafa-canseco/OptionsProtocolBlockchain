@@ -510,7 +510,9 @@ contract FundVault is FundUpgradeable, FundVaultStorage {
     }
 
     function resumeDeposits() external restricted {
-        _getFundVaultStorage().depositsPaused = false;
+        FundVaultStorageLayout storage $ = _getFundVaultStorage();
+        if (!_creationReady($)) revert InactiveNavWindow();
+        $.depositsPaused = false;
     }
 
     function resumeRedemptions() external restricted {
@@ -574,7 +576,11 @@ contract FundVault is FundUpgradeable, FundVaultStorage {
 
     function _creationOpen() private view returns (bool) {
         FundVaultStorageLayout storage $ = _getFundVaultStorage();
-        if ($.depositsPaused || $.executionLockOwner != address(0)) return false;
+        return !$.depositsPaused && _creationReady($);
+    }
+
+    function _creationReady(FundVaultStorageLayout storage $) private view returns (bool) {
+        if ($.executionLockOwner != address(0)) return false;
         if (block.number < $.navValidAfterBlock || block.number > $.navValidUntilBlock) return false;
         if (shareSupply() != 0 && $.committedNav == 0) return false;
         return IERC20($.accountingAsset).balanceOf(address(this)) >= $.accountedIdleAssets;

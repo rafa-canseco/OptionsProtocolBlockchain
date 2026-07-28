@@ -5,7 +5,7 @@
   "network": {
     "name": "base-sepolia",
     "chainId": 84532,
-    "reconciliationBlock": 44712837
+    "reconciliationBlock": 44714463
   },
   "gates": {
     "approvedInputsDigestMatches": true,
@@ -31,12 +31,17 @@
     "nestedCreationFirstCodeChecksPassed": true,
     "proxyImplementationsMatch": true,
     "moduleAndEscrowBindingsMatch": true,
+    "fundVaultImplementation": "0xCae10a81aE1aA0183A4b4283A3ACbE9A2642613A",
+    "fundVaultResumeDepositsNavGated": true,
     "accountingAssetIsWeth": true,
     "settlementAssetIsUsdc": true
   },
   "accessManager": {
     "exactRoleMembersMatch": true,
     "accountingRoleMember": "0x195De7eDc5e912D7b7001d3F268bbE0d14f7E1C3",
+    "allocatorRoleMember": "0xc217F9F7607A479cFc531319f40463EF0666dcee",
+    "processorRoleMember": "0x3c1a3ad44785bE4386F020050213D29589d1fb17",
+    "curatorRoleMember": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
     "previousAccountingRoleRevoked": true,
     "submitNavSelectorRole": 2,
     "reporterSetUnchanged": true,
@@ -66,16 +71,25 @@
     "accessConfigured": "PASSED",
     "policyConfigured": "PASSED",
     "adapterOnboarded": "PASSED",
-    "finalWorkersGranted": "NOT_RUN",
-    "strategyActivated": "NOT_RUN",
-    "depositsOpen": "INTENTIONALLY_PAUSED"
+    "finalWorkersGranted": "PASSED",
+    "processorRotated": "PASSED",
+    "strategyActivated": "PASSED",
+    "navGatedVaultUpgrade": "PASSED",
+    "depositsOpen": "PASSED"
   },
   "finalState": {
-    "depositsPaused": true,
+    "depositsPaused": false,
     "adapterOnboarded": true,
-    "strategyActive": false,
-    "allocatorBotAuthorized": false,
-    "publicDepositsAuthorized": false,
+    "strategyActive": true,
+    "allocatorBotAuthorized": true,
+    "publicDepositsAuthorized": true,
+    "activationNavNonce": 7,
+    "depositsOpenedNavNonce": 22,
+    "depositsOpenedBlock": 44714463,
+    "depositsOpenedNavValidUntilBlock": 44714472,
+    "expiredWindowResumeWasRepaused": true,
+    "expiredWindowExposureBlocks": [44713663, 44713669],
+    "depositEventsDuringExpiredWindowExposure": 0,
     "mainnetAuthorized": false
   }
 }
