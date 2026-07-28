@@ -14,7 +14,13 @@
       "accessConfigured": 44710016,
       "policyConfigured": 44710037,
       "adapterOnboarded": 44710058,
-      "reconciled": 44710111
+      "reconciled": 44710111,
+      "workersFinalized": 44713445,
+      "processorRotated": 44713590,
+      "strategyActivated": 44713652,
+      "navGatedVaultImplementation": 44714399,
+      "navGatedVaultUpgrade": 44714433,
+      "depositsOpened": 44714463
     }
   },
   "source": {
@@ -145,8 +151,11 @@
     },
     "fundVault": {
       "proxy": "0x9060946E6ACC4E430A823E90120743c7305EE2CA",
-      "implementation": "0xAf51984EcC261a4B3052eA90c9a85768F81DE764",
-      "validFromBlock": {"proxy": 44709937, "implementation": 44709929}
+      "implementation": "0xCae10a81aE1aA0183A4b4283A3ACbE9A2642613A",
+      "previousImplementation": "0xAf51984EcC261a4B3052eA90c9a85768F81DE764",
+      "implementationCodehash": "0xc1e204e369fe3cf5816952e1779f67bc47de58db2274b7aaaa8f77381e8b3231",
+      "upgradeTransactionHash": "0xa45c6c25b168c0301d0a778a7ad7384006d450340f20195cd7e906554b5e9542",
+      "validFromBlock": {"proxy": 44709937, "implementation": 44714433}
     },
     "fundShare": {
       "proxy": "0xaA1070adb74C5455320285618BF1ED804d3745C3",
@@ -231,12 +240,12 @@
     "upgrader": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
     "adapterUpgrader": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
     "accounting": "0x195De7eDc5e912D7b7001d3F268bbE0d14f7E1C3",
-    "allocator": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
-    "processor": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "allocator": "0xc217F9F7607A479cFc531319f40463EF0666dcee",
+    "processor": "0x3c1a3ad44785bE4386F020050213D29589d1fb17",
     "curator": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
     "guardian": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
     "finalAllocator": "0xc217F9F7607A479cFc531319f40463EF0666dcee",
-    "finalProcessor": "0xb041D93Cd93F230B8FCb00904F293e62a6a104Bf",
+    "finalProcessor": "0x3c1a3ad44785bE4386F020050213D29589d1fb17",
     "accountingRoleTransition": {
       "previousMember": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
       "currentMember": "0x195De7eDc5e912D7b7001d3F268bbE0d14f7E1C3",
@@ -251,18 +260,21 @@
     "initialDeploymentReconciled": true,
     "strictReconciliationComplete": true,
     "onlyApprovedV1MutationsObserved": true,
-    "depositsPaused": true,
+    "depositsPaused": false,
     "adapterOnboarded": true,
-    "strategyActive": false,
-    "publicDepositsAuthorized": false,
-    "allocatorBotAuthorized": false,
+    "strategyActive": true,
+    "publicDepositsAuthorized": true,
+    "allocatorBotAuthorized": true,
+    "navGatedDepositResume": true,
+    "activationNavNonce": 7,
+    "depositsOpenedNavNonce": 22,
     "mainnetAuthorized": false
   },
   "verification": {
     "status": "PARTIAL_VERIFIED_BLOCKSCOUT",
     "explorer": "https://base-sepolia.blockscout.com",
     "verifiedContracts": 18,
-    "totalContracts": 21,
+    "totalContracts": 22,
     "coveredCallFundAdapterVerified": true,
     "coveredCallFundValuatorVerified": true,
     "adapterLibraryBinding": {
