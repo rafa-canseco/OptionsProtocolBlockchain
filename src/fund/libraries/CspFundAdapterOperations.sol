@@ -5,6 +5,9 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AddressBook} from "../../core/AddressBook.sol";
+import {BatchSettler} from "../../core/BatchSettler.sol";
+import {Controller} from "../../core/Controller.sol";
+import {OToken} from "../../core/OToken.sol";
 import {Oracle} from "../../core/Oracle.sol";
 import {ISwapRouter} from "../../interfaces/ISwapRouter.sol";
 import {FundConstants} from "../FundConstants.sol";
@@ -29,9 +32,23 @@ library CspFundAdapterOperations {
     bytes4 private constant WHITELISTED_PRODUCT_SELECTOR =
         bytes4(keccak256("isProductWhitelisted(address,address,address,bool)"));
 
+    event PositionTransitioned(
+        uint256 indexed positionId,
+        uint256 indexed protocolVaultId,
+        ICspFundAdapter.Lifecycle lifecycle,
+        uint256 collateralDelta,
+        uint256 payment,
+        uint256 wethDelta,
+        bytes32 lifecycleHash
+    );
     event AssignedWethSwapped(uint256 wethIn, uint256 usdcOut);
+    event UnaccountedAssetIsolated(address indexed asset, uint256 amount);
 
     error InvalidAmount();
+    error InvalidLifecycle(uint256 positionId, ICspFundAdapter.Lifecycle lifecycle);
+    error InvalidPosition(uint256 positionId);
+    error LedgerMismatch(uint256 positionId);
+    error SettlementNotReady(uint256 positionId);
     error SlippageExceeded(uint256 minimum, uint256 actual);
 
     function isOnboarded(CspFundAdapterStorage.CspFundAdapterStorageLayout storage $) public view returns (bool) {
@@ -72,6 +89,181 @@ library CspFundAdapterOperations {
             WHITELISTED_PRODUCT_SELECTOR,
             abi.encode($.weth, $.accountingAsset, $.accountingAsset, true)
         );
+    }
+
+    function settlePosition(CspFundAdapterStorage.CspFundAdapterStorageLayout storage $, uint256 positionId) public {
+        ICspFundAdapter.Position storage current = $.positions[positionId];
+        if (current.protocolVaultId == 0) revert InvalidPosition(positionId);
+        if (current.lifecycle == ICspFundAdapter.Lifecycle.Open) {
+            _prepareSettlement($, positionId, current);
+            return;
+        }
+        if (current.lifecycle == ICspFundAdapter.Lifecycle.AwaitingPhysicalDelivery) {
+            _completePhysicalOrFallback($, positionId, current);
+            return;
+        }
+        revert InvalidLifecycle(positionId, current.lifecycle);
+    }
+
+    function checkpointPosition(
+        CspFundAdapterStorage.CspFundAdapterStorageLayout storage $,
+        uint256 positionId,
+        ICspFundAdapter.Position storage current
+    ) public {
+        uint64 nextNonce = ++$.stateNonce;
+        current.lifecycleHash = keccak256(
+            abi.encode(
+                current.lifecycleHash,
+                nextNonce,
+                positionId,
+                current.protocolVaultId,
+                current.oToken,
+                current.marketMaker,
+                current.optionAmount,
+                current.collateral,
+                current.premiumEarned,
+                current.collateralReturned,
+                current.assignedWeth,
+                current.lifecycle
+            )
+        );
+        $.positionsHash = keccak256(abi.encode($.positionsHash, nextNonce, positionId, current.lifecycleHash));
+    }
+
+    function _prepareSettlement(
+        CspFundAdapterStorage.CspFundAdapterStorageLayout storage $,
+        uint256 positionId,
+        ICspFundAdapter.Position storage current
+    ) private {
+        OToken oToken = OToken(current.oToken);
+        if (block.timestamp < oToken.expiry()) revert SettlementNotReady(positionId);
+        AddressBook book = AddressBook($.addressBook);
+        Controller controller = Controller(book.controller());
+        BatchSettler settler = BatchSettler(book.batchSettler());
+        uint256 usdcBefore = IERC20($.accountingAsset).balanceOf(address(this));
+        controller.settleVault(address(this), current.protocolVaultId);
+        uint256 collateralReturned = IERC20($.accountingAsset).balanceOf(address(this)) - usdcBefore;
+        if (collateralReturned > current.collateral) revert LedgerMismatch(positionId);
+        $.accountedUsdc += collateralReturned;
+        current.collateralReturned = collateralReturned;
+
+        (uint256 expiryPrice, bool isSet) = Oracle(book.oracle()).getExpiryPrice($.weth, oToken.expiry());
+        if (!isSet) revert SettlementNotReady(positionId);
+        if (expiryPrice >= oToken.strikePrice()) {
+            uint256 payout = settler.settleReservedPhysicalDelivery(current.protocolVaultId, current.marketMaker, 0);
+            if (payout != 0 || collateralReturned != current.collateral) revert LedgerMismatch(positionId);
+            current.lifecycle = ICspFundAdapter.Lifecycle.SettledOtm;
+            _closeActivePosition($, current);
+            _validateTerminalLedger($, positionId, current);
+            checkpointPosition($, positionId, current);
+            emit PositionTransitioned(
+                positionId, current.protocolVaultId, current.lifecycle, collateralReturned, 0, 0, current.lifecycleHash
+            );
+            return;
+        }
+
+        settler.releasePhysicalDelivery(current.protocolVaultId);
+        current.wethBalanceBeforeDelivery = IERC20($.weth).balanceOf(address(this));
+        current.fallbackEligibleAt = uint64(block.timestamp + $.riskConfig.settlementDefaultDelay);
+        current.lifecycle = ICspFundAdapter.Lifecycle.AwaitingPhysicalDelivery;
+        checkpointPosition($, positionId, current);
+        emit PositionTransitioned(
+            positionId, current.protocolVaultId, current.lifecycle, collateralReturned, 0, 0, current.lifecycleHash
+        );
+    }
+
+    function _completePhysicalOrFallback(
+        CspFundAdapterStorage.CspFundAdapterStorageLayout storage $,
+        uint256 positionId,
+        ICspFundAdapter.Position storage current
+    ) private {
+        AddressBook book = AddressBook($.addressBook);
+        BatchSettler settler = BatchSettler(book.batchSettler());
+        uint256 remainingLedger = settler.vaultOTokenBalance(address(this), current.protocolVaultId);
+        if (remainingLedger == 0) {
+            if (settler.physicalDeliveryReservedVault(address(this), current.protocolVaultId)) {
+                revert LedgerMismatch(positionId);
+            }
+            uint256 expectedWeth = current.optionAmount * 1e10;
+            uint256 wethBalance = IERC20($.weth).balanceOf(address(this));
+            if (wethBalance < current.wethBalanceBeforeDelivery) revert LedgerMismatch(positionId);
+            uint256 deliveredWeth = wethBalance - current.wethBalanceBeforeDelivery;
+            if (deliveredWeth < expectedWeth) revert LedgerMismatch(positionId);
+            $.accountedWeth += expectedWeth;
+            current.assignedWeth = expectedWeth;
+            current.lifecycle = ICspFundAdapter.Lifecycle.Assigned;
+            _closeActivePosition($, current);
+            checkpointPosition($, positionId, current);
+            if (deliveredWeth > expectedWeth) {
+                emit UnaccountedAssetIsolated($.weth, deliveredWeth - expectedWeth);
+            }
+            emit PositionTransitioned(
+                positionId, current.protocolVaultId, current.lifecycle, 0, 0, expectedWeth, current.lifecycleHash
+            );
+            return;
+        }
+
+        if (block.timestamp < current.fallbackEligibleAt) revert SettlementNotReady(positionId);
+        if (!settler.physicalDeliveryReservedVault(address(this), current.protocolVaultId)) {
+            settler.reservePhysicalDelivery(current.protocolVaultId);
+        }
+        (uint256 redemptionPayout, uint256 mmCashPayout) = _putCashPayouts($, current);
+        uint256 usdcBefore = IERC20($.accountingAsset).balanceOf(address(this));
+        uint256 payout =
+            settler.settleReservedPhysicalDelivery(current.protocolVaultId, address(this), redemptionPayout);
+        uint256 observedPayout = IERC20($.accountingAsset).balanceOf(address(this)) - usdcBefore;
+        if (payout != redemptionPayout || observedPayout != redemptionPayout || mmCashPayout > payout) {
+            revert LedgerMismatch(positionId);
+        }
+        $.accountedUsdc += payout;
+        if (mmCashPayout != 0) {
+            $.accountedUsdc -= mmCashPayout;
+            IERC20($.accountingAsset).safeTransfer(current.marketMaker, mmCashPayout);
+        }
+        current.lifecycle = ICspFundAdapter.Lifecycle.CashFallback;
+        _closeActivePosition($, current);
+        _validateTerminalLedger($, positionId, current);
+        checkpointPosition($, positionId, current);
+        emit PositionTransitioned(
+            positionId, current.protocolVaultId, current.lifecycle, payout, mmCashPayout, 0, current.lifecycleHash
+        );
+    }
+
+    function _putCashPayouts(
+        CspFundAdapterStorage.CspFundAdapterStorageLayout storage $,
+        ICspFundAdapter.Position storage current
+    ) private view returns (uint256 redemptionPayout, uint256 mmCashPayout) {
+        OToken oToken = OToken(current.oToken);
+        (uint256 expiryPrice, bool isSet) =
+            Oracle(AddressBook($.addressBook).oracle()).getExpiryPrice($.weth, oToken.expiry());
+        if (!isSet || expiryPrice >= oToken.strikePrice()) revert SettlementNotReady(current.protocolVaultId);
+        redemptionPayout = Math.mulDiv(current.optionAmount, oToken.strikePrice(), 1e10);
+        mmCashPayout = Math.mulDiv(current.optionAmount, oToken.strikePrice() - expiryPrice, 1e10);
+    }
+
+    function _validateTerminalLedger(
+        CspFundAdapterStorage.CspFundAdapterStorageLayout storage $,
+        uint256 positionId,
+        ICspFundAdapter.Position storage current
+    ) private view {
+        AddressBook book = AddressBook($.addressBook);
+        BatchSettler settler = BatchSettler(book.batchSettler());
+        if (
+            !Controller(book.controller()).vaultSettled(address(this), current.protocolVaultId)
+                || settler.vaultOTokenBalance(address(this), current.protocolVaultId) != 0
+                || settler.physicalDeliveryReservedVault(address(this), current.protocolVaultId)
+        ) revert LedgerMismatch(positionId);
+    }
+
+    function _closeActivePosition(
+        CspFundAdapterStorage.CspFundAdapterStorageLayout storage $,
+        ICspFundAdapter.Position storage current
+    ) private {
+        if ($.activePositionCount == 0) {
+            revert LedgerMismatch(current.protocolVaultId);
+        }
+        --$.activePositionCount;
+        $.releasablePrincipal += current.collateral;
     }
 
     function swapAssignedWeth(

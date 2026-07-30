@@ -18,9 +18,9 @@ interface ICspFundValuator {
 
     error AccountingDeficit(address asset, uint256 accounted, uint256 actual);
     error DuplicateObserver(address observer);
+    error ExpiryPriceUnavailable(uint256 positionId, uint256 expiry);
     error InsufficientObservationQuorum(uint256 positionId, uint256 required, uint256 actual);
     error InvalidAdapter(address adapter);
-    error InvalidFairValuePolicy();
     error InvalidModelVersion(uint256 positionId, uint64 expected, uint64 actual);
     error InvalidObservation(uint256 positionId);
     error ObservationDivergence(uint256 positionId, uint256 minimum, uint256 maximum, uint256 median);

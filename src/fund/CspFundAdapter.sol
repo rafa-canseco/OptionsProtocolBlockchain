@@ -10,7 +10,6 @@ import {BatchSettler} from "../core/BatchSettler.sol";
 import {Controller} from "../core/Controller.sol";
 import {MarginPool} from "../core/MarginPool.sol";
 import {OToken} from "../core/OToken.sol";
-import {Oracle} from "../core/Oracle.sol";
 import {FundUpgradeable} from "./FundUpgradeable.sol";
 import {FundConstants} from "./FundConstants.sol";
 import {CspFundAdapterStorage} from "./storage/CspFundAdapterStorage.sol";
@@ -121,6 +120,10 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
         return 1;
     }
 
+    function deallocationInterfaceVersion() external pure returns (uint64) {
+        return 2;
+    }
+
     function positionStateHash() public view returns (bytes32) {
         CspFundAdapterStorageLayout storage $ = _getCspFundAdapterStorage();
         return keccak256(
@@ -133,6 +136,7 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
                 $.activePositionCount,
                 $.accountedUsdc,
                 $.accountedWeth,
+                $.releasablePrincipal,
                 IERC20($.accountingAsset).balanceOf(address(this)),
                 IERC20($.weth).balanceOf(address(this))
             )
@@ -217,7 +221,7 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
         opened.lifecycle = Lifecycle.Open;
         ++$.activePositionCount;
         _validateOpenLedger($, positionId, opened);
-        _checkpointPosition($, positionId, opened);
+        CspFundAdapterOperations.checkpointPosition($, positionId, opened);
 
         emit PositionOpened(
             positionId,
@@ -234,7 +238,7 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
     function deallocate(uint256 targetValue, uint256 minAccountingAssetsOut, bytes calldata data)
         external
         onlyStrategyManager
-        returns (uint256 accountingAssetsOut)
+        returns (uint256 accountingAssetsOut, uint256 principalReleased)
     {
         CspFundAdapterStorageLayout storage $ = _getCspFundAdapterStorage();
         if (targetValue == 0) revert InvalidAmount();
@@ -242,14 +246,18 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
         DeallocateData memory deallocation = abi.decode(data, (DeallocateData));
 
         bool returnAll;
+        bool principalReleaseEligible;
         if (deallocation.action == DeallocateAction.ReturnIdle) {
             if (targetValue > $.accountedUsdc) revert InvalidAmount();
             _checkpointGlobal($, keccak256(abi.encode("RETURN_IDLE", targetValue)));
+            principalReleaseEligible = $.accountedWeth == 0;
         } else if (deallocation.action == DeallocateAction.Settle) {
-            _settlePosition($, deallocation.positionId);
+            CspFundAdapterOperations.settlePosition($, deallocation.positionId);
+            principalReleaseEligible = $.accountedWeth == 0;
         } else if (deallocation.action == DeallocateAction.SwapAssignedWeth) {
             CspFundAdapterOperations.swapAssignedWeth($, minAccountingAssetsOut, deallocation);
             returnAll = true;
+            principalReleaseEligible = true;
         } else {
             revert InvalidAmount();
         }
@@ -261,6 +269,9 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
         }
         if (accountingAssetsOut != 0) {
             $.accountedUsdc -= accountingAssetsOut;
+            if (principalReleaseEligible) {
+                principalReleased = _consumeReleasablePrincipal($, targetValue);
+            }
             IERC20($.accountingAsset).safeTransfer($.fund, accountingAssetsOut);
             emit AccountingAssetsReturned(accountingAssetsOut);
         }
@@ -302,134 +313,11 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
         amounts[1] = Math.mulDiv($.accountedWeth, fractionWad, FundConstants.WAD);
         $.accountedUsdc -= amounts[0];
         $.accountedWeth -= amounts[1];
+        $.releasablePrincipal -= Math.mulDiv($.releasablePrincipal, fractionWad, FundConstants.WAD);
         _checkpointGlobal($, keccak256(abi.encode("RAW_RECOVERY", fractionWad, escrow, amounts, emergency)));
         if (amounts[0] != 0) IERC20(assets[0]).safeTransfer(escrow, amounts[0]);
         if (amounts[1] != 0) IERC20(assets[1]).safeTransfer(escrow, amounts[1]);
         emit RawAssetsRecovered(escrow, assets, amounts, emergency);
-    }
-
-    function _settlePosition(CspFundAdapterStorageLayout storage $, uint256 positionId) private {
-        Position storage current = $.positions[positionId];
-        if (current.protocolVaultId == 0) revert InvalidPosition(positionId);
-        if (current.lifecycle == Lifecycle.Open) {
-            _prepareSettlement($, positionId, current);
-            return;
-        }
-        if (current.lifecycle == Lifecycle.AwaitingPhysicalDelivery) {
-            _completePhysicalOrFallback($, positionId, current);
-            return;
-        }
-        revert InvalidLifecycle(positionId, current.lifecycle);
-    }
-
-    function _prepareSettlement(CspFundAdapterStorageLayout storage $, uint256 positionId, Position storage current)
-        private
-    {
-        OToken oToken = OToken(current.oToken);
-        if (block.timestamp < oToken.expiry()) revert SettlementNotReady(positionId);
-        AddressBook book = AddressBook($.addressBook);
-        Controller controller = Controller(book.controller());
-        BatchSettler settler = BatchSettler(book.batchSettler());
-        uint256 usdcBefore = IERC20($.accountingAsset).balanceOf(address(this));
-        controller.settleVault(address(this), current.protocolVaultId);
-        uint256 collateralReturned = IERC20($.accountingAsset).balanceOf(address(this)) - usdcBefore;
-        if (collateralReturned > current.collateral) revert LedgerMismatch(positionId);
-        $.accountedUsdc += collateralReturned;
-        current.collateralReturned = collateralReturned;
-
-        (uint256 expiryPrice, bool isSet) = Oracle(book.oracle()).getExpiryPrice($.weth, oToken.expiry());
-        if (!isSet) revert SettlementNotReady(positionId);
-        if (expiryPrice >= oToken.strikePrice()) {
-            uint256 payout = settler.settleReservedPhysicalDelivery(current.protocolVaultId, current.marketMaker, 0);
-            if (payout != 0 || collateralReturned != current.collateral) revert LedgerMismatch(positionId);
-            current.lifecycle = Lifecycle.SettledOtm;
-            --$.activePositionCount;
-            _validateTerminalLedger($, positionId, current);
-            _checkpointPosition($, positionId, current);
-            emit PositionTransitioned(
-                positionId, current.protocolVaultId, current.lifecycle, collateralReturned, 0, 0, current.lifecycleHash
-            );
-            return;
-        }
-
-        settler.releasePhysicalDelivery(current.protocolVaultId);
-        current.wethBalanceBeforeDelivery = IERC20($.weth).balanceOf(address(this));
-        current.fallbackEligibleAt = uint64(block.timestamp + $.riskConfig.settlementDefaultDelay);
-        current.lifecycle = Lifecycle.AwaitingPhysicalDelivery;
-        _checkpointPosition($, positionId, current);
-        emit PositionTransitioned(
-            positionId, current.protocolVaultId, current.lifecycle, collateralReturned, 0, 0, current.lifecycleHash
-        );
-    }
-
-    function _completePhysicalOrFallback(
-        CspFundAdapterStorageLayout storage $,
-        uint256 positionId,
-        Position storage current
-    ) private {
-        AddressBook book = AddressBook($.addressBook);
-        BatchSettler settler = BatchSettler(book.batchSettler());
-        uint256 remainingLedger = settler.vaultOTokenBalance(address(this), current.protocolVaultId);
-        if (remainingLedger == 0) {
-            if (settler.physicalDeliveryReservedVault(address(this), current.protocolVaultId)) {
-                revert LedgerMismatch(positionId);
-            }
-            uint256 expectedWeth = current.optionAmount * 1e10;
-            uint256 wethBalance = IERC20($.weth).balanceOf(address(this));
-            if (wethBalance < current.wethBalanceBeforeDelivery) revert LedgerMismatch(positionId);
-            uint256 deliveredWeth = wethBalance - current.wethBalanceBeforeDelivery;
-            if (deliveredWeth < expectedWeth) revert LedgerMismatch(positionId);
-            $.accountedWeth += expectedWeth;
-            current.assignedWeth = expectedWeth;
-            current.lifecycle = Lifecycle.Assigned;
-            --$.activePositionCount;
-            _checkpointPosition($, positionId, current);
-            if (deliveredWeth > expectedWeth) {
-                emit UnaccountedAssetIsolated($.weth, deliveredWeth - expectedWeth);
-            }
-            emit PositionTransitioned(
-                positionId, current.protocolVaultId, current.lifecycle, 0, 0, expectedWeth, current.lifecycleHash
-            );
-            return;
-        }
-
-        if (block.timestamp < current.fallbackEligibleAt) revert SettlementNotReady(positionId);
-        if (!settler.physicalDeliveryReservedVault(address(this), current.protocolVaultId)) {
-            settler.reservePhysicalDelivery(current.protocolVaultId);
-        }
-        (uint256 redemptionPayout, uint256 mmCashPayout) = _putCashPayouts($, current);
-        uint256 usdcBefore = IERC20($.accountingAsset).balanceOf(address(this));
-        uint256 payout =
-            settler.settleReservedPhysicalDelivery(current.protocolVaultId, address(this), redemptionPayout);
-        uint256 observedPayout = IERC20($.accountingAsset).balanceOf(address(this)) - usdcBefore;
-        if (payout != redemptionPayout || observedPayout != redemptionPayout || mmCashPayout > payout) {
-            revert LedgerMismatch(positionId);
-        }
-        $.accountedUsdc += payout;
-        if (mmCashPayout != 0) {
-            $.accountedUsdc -= mmCashPayout;
-            IERC20($.accountingAsset).safeTransfer(current.marketMaker, mmCashPayout);
-        }
-        current.lifecycle = Lifecycle.CashFallback;
-        --$.activePositionCount;
-        _validateTerminalLedger($, positionId, current);
-        _checkpointPosition($, positionId, current);
-        emit PositionTransitioned(
-            positionId, current.protocolVaultId, current.lifecycle, payout, mmCashPayout, 0, current.lifecycleHash
-        );
-    }
-
-    function _putCashPayouts(CspFundAdapterStorageLayout storage $, Position storage current)
-        private
-        view
-        returns (uint256 redemptionPayout, uint256 mmCashPayout)
-    {
-        OToken oToken = OToken(current.oToken);
-        (uint256 expiryPrice, bool isSet) =
-            Oracle(AddressBook($.addressBook).oracle()).getExpiryPrice($.weth, oToken.expiry());
-        if (!isSet || expiryPrice >= oToken.strikePrice()) revert SettlementNotReady(current.protocolVaultId);
-        redemptionPayout = Math.mulDiv(current.optionAmount, oToken.strikePrice(), 1e10);
-        mmCashPayout = Math.mulDiv(current.optionAmount, oToken.strikePrice() - expiryPrice, 1e10);
     }
 
     function _validatePut(CspFundAdapterStorageLayout storage $, OpenPositionData memory openData) private view {
@@ -468,20 +356,6 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
         ) revert LedgerMismatch(positionId);
     }
 
-    function _validateTerminalLedger(
-        CspFundAdapterStorageLayout storage $,
-        uint256 positionId,
-        Position storage current
-    ) private view {
-        AddressBook book = AddressBook($.addressBook);
-        if (
-            !Controller(book.controller()).vaultSettled(address(this), current.protocolVaultId)
-                || BatchSettler(book.batchSettler()).vaultOTokenBalance(address(this), current.protocolVaultId) != 0
-                || BatchSettler(book.batchSettler())
-                    .physicalDeliveryReservedVault(address(this), current.protocolVaultId)
-        ) revert LedgerMismatch(positionId);
-    }
-
     function _requireNoDeficit(CspFundAdapterStorageLayout storage $) private view {
         uint256 rawUsdc = IERC20($.accountingAsset).balanceOf(address(this));
         uint256 rawWeth = IERC20($.weth).balanceOf(address(this));
@@ -489,27 +363,12 @@ contract CspFundAdapter is FundUpgradeable, CspFundAdapterStorage, ICspFundAdapt
         if (rawWeth < $.accountedWeth) revert AccountingDeficit($.weth, $.accountedWeth, rawWeth);
     }
 
-    function _checkpointPosition(CspFundAdapterStorageLayout storage $, uint256 positionId, Position storage current)
+    function _consumeReleasablePrincipal(CspFundAdapterStorageLayout storage $, uint256 targetValue)
         private
+        returns (uint256 principalReleased)
     {
-        uint64 nextNonce = ++$.stateNonce;
-        current.lifecycleHash = keccak256(
-            abi.encode(
-                current.lifecycleHash,
-                nextNonce,
-                positionId,
-                current.protocolVaultId,
-                current.oToken,
-                current.marketMaker,
-                current.optionAmount,
-                current.collateral,
-                current.premiumEarned,
-                current.collateralReturned,
-                current.assignedWeth,
-                current.lifecycle
-            )
-        );
-        $.positionsHash = keccak256(abi.encode($.positionsHash, nextNonce, positionId, current.lifecycleHash));
+        principalReleased = Math.min($.releasablePrincipal, targetValue);
+        $.releasablePrincipal -= principalReleased;
     }
 
     function _checkpointGlobal(CspFundAdapterStorageLayout storage $, bytes32 operationHash) private {

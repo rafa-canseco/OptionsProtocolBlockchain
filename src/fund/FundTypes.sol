@@ -75,6 +75,9 @@ library FundTypes {
         uint256 pendingMinAssetsOut;
         uint16 indexPlusOne;
         address refundOwner;
+        // Transient allocation fixed at round start and consumed during paginated processing.
+        uint256 roundProcessableShares;
+        uint256 roundProcessableAssets;
     }
 
     struct RedemptionBatch {

@@ -130,6 +130,10 @@ contract CoveredCallFundAdapter is FundUpgradeable, CoveredCallFundAdapterStorag
         return 1;
     }
 
+    function deallocationInterfaceVersion() external pure returns (uint64) {
+        return 2;
+    }
+
     function positionStateHash() public view returns (bytes32) {
         CoveredCallFundAdapterStorageLayout storage $ = _getCoveredCallFundAdapterStorage();
         return keccak256(
@@ -143,6 +147,7 @@ contract CoveredCallFundAdapter is FundUpgradeable, CoveredCallFundAdapterStorag
                 $.activeCollateral,
                 $.accountedWeth,
                 $.accountedUsdc,
+                $.releasablePrincipal,
                 IERC20($.accountingAsset).balanceOf(address(this)),
                 IERC20($.usdc).balanceOf(address(this))
             )
@@ -254,7 +259,7 @@ contract CoveredCallFundAdapter is FundUpgradeable, CoveredCallFundAdapterStorag
     function deallocate(uint256 targetValue, uint256 minAccountingAssetsOut, bytes calldata data)
         external
         onlyStrategyManager
-        returns (uint256 accountingAssetsOut)
+        returns (uint256 accountingAssetsOut, uint256 principalReleased)
     {
         CoveredCallFundAdapterStorageLayout storage $ = _getCoveredCallFundAdapterStorage();
         if (targetValue == 0) revert InvalidAmount();
@@ -284,6 +289,7 @@ contract CoveredCallFundAdapter is FundUpgradeable, CoveredCallFundAdapterStorag
         }
         if (accountingAssetsOut != 0) {
             $.accountedWeth -= accountingAssetsOut;
+            principalReleased = _consumeReleasablePrincipal($, targetValue);
             IERC20($.accountingAsset).safeTransfer($.fund, accountingAssetsOut);
             emit AccountingAssetsReturned(accountingAssetsOut);
         }
@@ -307,6 +313,7 @@ contract CoveredCallFundAdapter is FundUpgradeable, CoveredCallFundAdapterStorag
         assets[0] = $.accountingAsset;
         amounts[0] = Math.mulDiv($.accountedWeth, fractionWad, FundConstants.WAD);
         $.accountedWeth -= amounts[0];
+        $.releasablePrincipal -= Math.mulDiv($.releasablePrincipal, fractionWad, FundConstants.WAD);
         _checkpointGlobal($, keccak256(abi.encode("WETH_ONLY_IN_KIND", fractionWad, escrow, amounts[0])));
         if (amounts[0] != 0) IERC20(assets[0]).safeTransfer(escrow, amounts[0]);
         emit RawAssetsRecovered(escrow, assets, amounts, false);
@@ -330,6 +337,7 @@ contract CoveredCallFundAdapter is FundUpgradeable, CoveredCallFundAdapterStorag
         amounts[1] = $.accountedUsdc;
         $.accountedWeth = 0;
         $.accountedUsdc = 0;
+        $.releasablePrincipal = 0;
         _checkpointGlobal($, keccak256(abi.encode("EMERGENCY_RECOVERY", escrow, amounts)));
         if (amounts[0] != 0) IERC20(assets[0]).safeTransfer(escrow, amounts[0]);
         if (amounts[1] != 0) IERC20(assets[1]).safeTransfer(escrow, amounts[1]);
@@ -395,6 +403,14 @@ contract CoveredCallFundAdapter is FundUpgradeable, CoveredCallFundAdapterStorag
             revert AccountingDeficit($.accountingAsset, $.accountedWeth, rawWeth);
         }
         if (rawUsdc < $.accountedUsdc) revert AccountingDeficit($.usdc, $.accountedUsdc, rawUsdc);
+    }
+
+    function _consumeReleasablePrincipal(CoveredCallFundAdapterStorageLayout storage $, uint256 targetValue)
+        private
+        returns (uint256 principalReleased)
+    {
+        principalReleased = Math.min($.releasablePrincipal, targetValue);
+        $.releasablePrincipal -= principalReleased;
     }
 
     function _checkpointPosition(

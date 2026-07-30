@@ -47,7 +47,6 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
     uint64 public immutable maxSpotStaleness;
     uint64 public immutable maxObservationWindow;
     uint8 public immutable observationQuorum;
-    uint16 public immutable liabilityBufferBps;
     mapping(address observer => bool approved) public isApprovedObserver;
     address[] private _approvedObservers;
 
@@ -57,7 +56,6 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
         uint64 maxSpotStaleness_,
         uint64 maxObservationWindow_,
         uint8 observationQuorum_,
-        uint16 liabilityBufferBps_,
         address[] memory approvedObservers_
     ) {
         if (
@@ -65,14 +63,12 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
                 || maxObservationWindow_ == 0 || observationQuorum_ < 2
                 || observationQuorum_ > approvedObservers_.length
         ) revert InvalidSpotObservation();
-        if (liabilityBufferBps_ != 0) revert InvalidFairValuePolicy();
         if (IChainlinkSpotFeed(spotFeed_).decimals() != spotFeedDecimals_) revert InvalidSpotObservation();
         spotFeed = spotFeed_;
         spotFeedDecimals = spotFeedDecimals_;
         maxSpotStaleness = maxSpotStaleness_;
         maxObservationWindow = maxObservationWindow_;
         observationQuorum = observationQuorum_;
-        liabilityBufferBps = liabilityBufferBps_;
         for (uint256 i; i < approvedObservers_.length; ++i) {
             address observer = approvedObservers_[i];
             if (observer == address(0) || isApprovedObserver[observer]) revert DuplicateObserver(observer);
@@ -153,8 +149,11 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
             revert AccountingDeficit(wethAddress, accountedWethValue, rawWeth);
         }
 
-        positionValue.grossAssets = accountedUsdcValue + _wethValue(accountedWethValue, spotPrice, usdcAddress);
+        uint256 accountedWethFairValue = _wethValue(accountedWethValue, spotPrice, usdcAddress);
+        ICspFundAdapter.AdapterConfig memory config = csp.adapterConfig();
+        positionValue.grossAssets = accountedUsdcValue + accountedWethFairValue;
         positionValue.liquidAccountingAssets = accountedUsdcValue;
+        positionValue.baseExitCost = _swapExitCost(accountedWethFairValue, config.riskConfig.maxSwapSlippageBps);
         uint256 usedObservations;
         uint256 count = adapterState_.positionCount;
         for (uint256 positionId = 1; positionId <= count; ++positionId) {
@@ -164,7 +163,7 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
                 _validateOpenProtocolState(adapter, positionId, strategyPosition, csp);
                 positionValue.grossAssets += strategyPosition.collateral;
                 if (block.timestamp >= OToken(strategyPosition.oToken).expiry()) {
-                    positionValue.liabilities += _expiredPutLiability(strategyPosition, csp, spotPrice);
+                    positionValue.liabilities += _expiredPutLiability(positionId, strategyPosition, csp);
                 } else {
                     (uint256 liability, uint256 exitCost, uint256 used) = _preExpiryLiability(
                         adapter, positionId, snapshotBlock, strategyPosition, valuationData.optionObservations
@@ -175,9 +174,10 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
                 }
             } else if (strategyPosition.lifecycle == ICspFundAdapter.Lifecycle.AwaitingPhysicalDelivery) {
                 _validateAwaitingDelivery(adapter, positionId, strategyPosition, csp);
-                // Once Controller has settled the vault, the strike collateral is committed to redeeming the
-                // custodied oTokens and is no longer a fund asset. The fund's asset is the fixed WETH receivable.
-                positionValue.grossAssets += _wethValue(strategyPosition.optionAmount * 1e10, spotPrice, usdcAddress);
+                uint256 pendingDeliveryValue =
+                    _pendingDeliveryValue(positionId, strategyPosition, csp, spotPrice, usdcAddress);
+                positionValue.grossAssets += pendingDeliveryValue;
+                positionValue.baseExitCost += _swapExitCost(pendingDeliveryValue, config.riskConfig.maxSwapSlippageBps);
             } else {
                 _validateTerminalProtocolState(adapter, positionId, strategyPosition, csp);
             }
@@ -259,25 +259,38 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
     }
 
     function _expiredPutLiability(
+        uint256 positionId,
         ICspFundAdapter.Position memory strategyPosition,
-        ICspFundAdapter csp,
-        uint256 currentSpotPrice
+        ICspFundAdapter csp
     ) private view returns (uint256) {
         OToken oToken = OToken(strategyPosition.oToken);
         (uint256 expiryPrice, bool isSet) =
             Oracle(AddressBook(csp.addressBook()).oracle()).getExpiryPrice(csp.weth(), oToken.expiry());
-        // The protocol expiry price is authoritative once finalized. Before finalization, use the same fresh
-        // approved spot observation already bound into this valuation instead of mapping uncertainty to max loss.
-        if (!isSet) expiryPrice = _toOTokenPrice(currentSpotPrice);
+        if (!isSet) revert ExpiryPriceUnavailable(positionId, oToken.expiry());
         uint256 strike = oToken.strikePrice();
         if (expiryPrice >= strike) return 0;
         return Math.mulDiv(strategyPosition.optionAmount, strike - expiryPrice, 1e10);
     }
 
-    function _toOTokenPrice(uint256 spotPrice) private view returns (uint256) {
-        if (spotFeedDecimals == 8) return spotPrice;
-        if (spotFeedDecimals < 8) return spotPrice * (10 ** (8 - spotFeedDecimals));
-        return spotPrice / (10 ** (spotFeedDecimals - 8));
+    function _pendingDeliveryValue(
+        uint256 positionId,
+        ICspFundAdapter.Position memory strategyPosition,
+        ICspFundAdapter csp,
+        uint256 spotPrice,
+        address usdcAddress
+    ) private view returns (uint256) {
+        OToken oToken = OToken(strategyPosition.oToken);
+        (uint256 expiryPrice, bool isSet) =
+            Oracle(AddressBook(csp.addressBook()).oracle()).getExpiryPrice(csp.weth(), oToken.expiry());
+        if (!isSet) revert ExpiryPriceUnavailable(positionId, oToken.expiry());
+
+        uint256 strike = oToken.strikePrice();
+        if (expiryPrice >= strike) revert LedgerMismatch(positionId);
+        uint256 redemptionPayout = Math.mulDiv(strategyPosition.optionAmount, strike, 1e10);
+        uint256 mmCashPayout = Math.mulDiv(strategyPosition.optionAmount, strike - expiryPrice, 1e10);
+        uint256 fallbackRecoverable = redemptionPayout - mmCashPayout;
+        uint256 liveReceivable = _wethValue(strategyPosition.optionAmount * 1e10, spotPrice, usdcAddress);
+        return Math.min(liveReceivable, fallbackRecoverable);
     }
 
     function _validateDivergence(uint256 positionId, uint256 minimum, uint256 maximum, uint256 median) private pure {
@@ -377,5 +390,9 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
         uint8 usdcDecimals = IERC20Metadata(usdcAddress).decimals();
         if (usdcDecimals > 18) revert InvalidSpotObservation();
         return valueAtWad / (10 ** (18 - usdcDecimals));
+    }
+
+    function _swapExitCost(uint256 fairValue, uint16 maxSwapSlippageBps) private pure returns (uint256) {
+        return Math.mulDiv(fairValue, maxSwapSlippageBps, FundConstants.BPS, Math.Rounding.Ceil);
     }
 }

@@ -22,6 +22,7 @@ abstract contract CoveredCallFundAdapterStorage {
         bytes32 positionsHash;
         ICoveredCallFundAdapter.RiskConfig riskConfig;
         mapping(uint256 positionId => ICoveredCallFundAdapter.Position position) positions;
+        uint256 releasablePrincipal;
     }
 
     bytes32 internal constant COVERED_CALL_FUND_ADAPTER_STORAGE_LOCATION =

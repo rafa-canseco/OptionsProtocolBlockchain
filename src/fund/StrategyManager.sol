@@ -34,8 +34,13 @@ interface IFlowProcessingState {
 
 /// @notice Adapter registry and bounded allocation authority for one fund.
 contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyManager {
+    uint64 private constant DEALLOCATION_INTERFACE_VERSION = 2;
+
     error InvalidAddress();
     error InvalidBps(uint256 bps);
+    error InvalidStrategyReturn(
+        address adapter, uint256 reportedAssetsOut, uint256 principalReleased, uint256 observedAssetsOut
+    );
     error UnsupportedAsset(address asset);
     error StrategyCooldown(address adapter, uint256 availableAt);
     error StrategyLossExceeded(address adapter, uint256 minimum, uint256 actual);
@@ -167,20 +172,33 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
         StrategyManagerStorageLayout storage $ = _getStrategyManagerStorage();
         FundTypes.StrategyConfig storage config = $.strategies[adapter];
         if (config.interfaceVersion == 0 || targetValue == 0) revert AdapterNotActive(adapter);
+        uint64 deallocationVersion = _deallocationInterfaceVersion(adapter);
+        if (deallocationVersion != DEALLOCATION_INTERFACE_VERSION) {
+            revert InvalidAdapterVersion(DEALLOCATION_INTERFACE_VERSION, deallocationVersion);
+        }
         IFundVaultStrategy vault = IFundVaultStrategy($.fund);
         address accountingAsset = vault.asset();
 
         uint256 lockId = vault.beginModuleExecution($.compatibilityVersion);
         vault.invalidateNav();
         uint256 balanceBefore = IERC20Balance(accountingAsset).balanceOf($.fund);
-        IFundStrategyAdapter(adapter).deallocate(targetValue, minAssetsOut, data);
+        (uint256 reportedAssetsOut, uint256 principalReleased) =
+            IFundStrategyAdapter(adapter).deallocate(targetValue, minAssetsOut, data);
         assetsOut = vault.recordStrategyReturn(accountingAsset, balanceBefore);
+        if (reportedAssetsOut != assetsOut) {
+            revert InvalidStrategyReturn(adapter, reportedAssetsOut, principalReleased, assetsOut);
+        }
         if (assetsOut < minAssetsOut) revert StrategyLossExceeded(adapter, minAssetsOut, assetsOut);
         uint256 minimumAfterLoss = Math.mulDiv(targetValue, FundConstants.BPS - config.maxLossBps, FundConstants.BPS);
         if (assetsOut < minimumAfterLoss) revert StrategyLossExceeded(adapter, minimumAfterLoss, assetsOut);
+        uint256 minimumAfterPrincipalLoss =
+            Math.mulDiv(principalReleased, FundConstants.BPS - config.maxLossBps, FundConstants.BPS);
+        if (assetsOut < minimumAfterPrincipalLoss) {
+            revert StrategyLossExceeded(adapter, minimumAfterPrincipalLoss, assetsOut);
+        }
 
         uint256 allocated = $.adapterAllocated[adapter][accountingAsset];
-        uint256 reduction = Math.min(allocated, targetValue);
+        uint256 reduction = Math.min(allocated, principalReleased);
         $.adapterAllocated[adapter][accountingAsset] = allocated - reduction;
         $.totalAllocated[accountingAsset] -= reduction;
         $.lastOperationAt[adapter] = uint48(block.timestamp);
@@ -267,6 +285,10 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
             strategy.fund() != $.fund || strategy.accountingAsset() != vault.asset()
                 || actualVersion != config.interfaceVersion
         ) revert InvalidAdapterVersion(config.interfaceVersion, actualVersion);
+        uint64 deallocationVersion = _deallocationInterfaceVersion(adapter);
+        if (deallocationVersion != DEALLOCATION_INTERFACE_VERSION) {
+            revert InvalidAdapterVersion(DEALLOCATION_INTERFACE_VERSION, deallocationVersion);
+        }
         if (
             config.valuator == address(0) || config.valuator.code.length == 0
                 || IPositionValuator(config.valuator).interfaceVersion() != config.interfaceVersion
@@ -326,6 +348,15 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
         nonce = ++$.positionNonces[adapter];
         stateHash = IFundStrategyAdapter(adapter).positionStateHash();
         $.positionsHash = keccak256(abi.encode($.positionsHash, adapter, nonce, stateHash));
+    }
+
+    function _deallocationInterfaceVersion(address adapter) private view returns (uint64 version) {
+        (bool success, bytes memory result) =
+            adapter.staticcall(abi.encodeCall(IFundStrategyAdapter.deallocationInterfaceVersion, ()));
+        if (!success || result.length < 32) return 0;
+        uint256 rawVersion = abi.decode(result, (uint256));
+        if (rawVersion > type(uint64).max) return 0;
+        version = uint64(rawVersion);
     }
 
     function _syncAccounting(address accounting, address adapter, uint64 nonce, bytes32 stateHash) private {

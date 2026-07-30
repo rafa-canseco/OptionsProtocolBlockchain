@@ -292,6 +292,7 @@ library CoveredCallFundAdapterOperations {
         }
         --$.activePositionCount;
         $.activeCollateral -= current.collateral;
+        $.releasablePrincipal += current.collateral;
     }
 
     function _validateTerminalLedger(

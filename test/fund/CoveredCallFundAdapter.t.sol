@@ -36,6 +36,16 @@ contract CoveredCallStrategyManagerCaller {
         external
         returns (uint256)
     {
+        (uint256 accountingAssetsOut,) = adapter.deallocate(targetValue, minimumOut, data);
+        return accountingAssetsOut;
+    }
+
+    function deallocateWithPrincipal(
+        CoveredCallFundAdapter adapter,
+        uint256 targetValue,
+        uint256 minimumOut,
+        bytes calldata data
+    ) external returns (uint256 accountingAssetsOut, uint256 principalReleased) {
         return adapter.deallocate(targetValue, minimumOut, data);
     }
 
@@ -169,7 +179,7 @@ contract CoveredCallFundAdapterTest is Test {
         address[] memory observers = new address[](2);
         observers[0] = mm;
         observers[1] = observer;
-        valuator = new CoveredCallFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, 0, observers);
+        valuator = new CoveredCallFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, observers);
 
         expiry = _nextEightAm();
         weth.mint(address(strategyManager), 20e18);
@@ -266,9 +276,11 @@ contract CoveredCallFundAdapterTest is Test {
         spotFeed.setPrice(1_800e8);
         oracle.setExpiryPrice(address(weth), expiry, 1_800e8);
 
-        uint256 settlementReturn = strategyManager.deallocate(adapter, 1, 0, _settleData());
+        (uint256 settlementReturn, uint256 settlementPrincipal) =
+            strategyManager.deallocateWithPrincipal(adapter, 1, 0, _settleData());
         ICoveredCallFundAdapter.Position memory settled = adapter.position(1);
         assertEq(settlementReturn, 0);
+        assertEq(settlementPrincipal, 0);
         assertEq(uint256(settled.lifecycle), uint256(ICoveredCallFundAdapter.Lifecycle.SettledOtm));
         assertEq(settled.collateralReturned, COLLATERAL);
         assertEq(adapter.adapterState().activePositionCount, 0);
@@ -280,7 +292,7 @@ contract CoveredCallFundAdapterTest is Test {
         strategyManager.deallocateInKind(adapter, 0.5e18, escrow);
 
         uint256 normalizedWeth = _expectedWeth(PREMIUM, 1_800e8);
-        uint256 returned = strategyManager.deallocate(
+        (uint256 returned, uint256 principalReleased) = strategyManager.deallocateWithPrincipal(
             adapter,
             COLLATERAL + normalizedWeth,
             COLLATERAL + normalizedWeth,
@@ -288,6 +300,7 @@ contract CoveredCallFundAdapterTest is Test {
         );
 
         assertEq(returned, COLLATERAL + normalizedWeth);
+        assertEq(principalReleased, COLLATERAL);
         assertEq(weth.balanceOf(address(fund)), returned);
         assertEq(usdc.balanceOf(address(fund)), 0);
         assertEq(adapter.adapterState().accountedWeth, 0);
@@ -302,7 +315,8 @@ contract CoveredCallFundAdapterTest is Test {
         spotFeed.setPrice(2_200e8);
         oracle.setExpiryPrice(address(weth), expiry, 2_200e8);
 
-        strategyManager.deallocate(adapter, 1, 0, _settleData());
+        (, uint256 awaitingPrincipal) = strategyManager.deallocateWithPrincipal(adapter, 1, 0, _settleData());
+        assertEq(awaitingPrincipal, 0);
         assertEq(
             uint256(adapter.position(1).lifecycle), uint256(ICoveredCallFundAdapter.Lifecycle.AwaitingPhysicalDelivery)
         );
@@ -316,7 +330,10 @@ contract CoveredCallFundAdapterTest is Test {
 
         uint256 mmBeforeDelivery = usdc.balanceOf(mm);
         settler.operatorPhysicalRedeemVault(address(adapter), 1, 2_000e6);
-        strategyManager.deallocate(adapter, 1, 0, _settleData());
+        (uint256 deliveryReturn, uint256 deliveryPrincipal) =
+            strategyManager.deallocateWithPrincipal(adapter, 1, 0, _settleData());
+        assertEq(deliveryReturn, 0);
+        assertEq(deliveryPrincipal, 0);
 
         ICoveredCallFundAdapter.Position memory calledAway = adapter.position(1);
         assertEq(uint256(calledAway.lifecycle), uint256(ICoveredCallFundAdapter.Lifecycle.CalledAway));
@@ -332,13 +349,11 @@ contract CoveredCallFundAdapterTest is Test {
         assertEq(calledAwayValue.liquidAccountingAssets, 0);
         assertEq(calledAwayValue.baseExitCost, Math.mulDiv(expectedWethValue, 100, 10_000, Math.Rounding.Ceil));
 
-        uint256 returned = strategyManager.deallocate(
-            adapter,
-            expectedWethValue,
-            expectedWethValue,
-            _normalizeData(PREMIUM + 2_000e6, _policyMinimum(expectedWethValue))
+        (uint256 returned, uint256 principalReleased) = strategyManager.deallocateWithPrincipal(
+            adapter, COLLATERAL, expectedWethValue, _normalizeData(PREMIUM + 2_000e6, _policyMinimum(expectedWethValue))
         );
         assertEq(returned, expectedWethValue);
+        assertEq(principalReleased, COLLATERAL);
         assertEq(weth.balanceOf(address(fund)), expectedWethValue);
         assertEq(usdc.balanceOf(address(fund)), 0);
         assertEq(adapter.adapterState().accountedUsdc, 0);
@@ -349,12 +364,16 @@ contract CoveredCallFundAdapterTest is Test {
         vm.warp(expiry + 1);
         spotFeed.setPrice(2_200e8);
         oracle.setExpiryPrice(address(weth), expiry, 2_200e8);
-        strategyManager.deallocate(adapter, 1, 0, _settleData());
+        (, uint256 awaitingPrincipal) = strategyManager.deallocateWithPrincipal(adapter, 1, 0, _settleData());
+        assertEq(awaitingPrincipal, 0);
 
         vm.warp(block.timestamp + _riskConfig().settlementDefaultDelay);
         spotFeed.setPrice(2_200e8);
         uint256 mmWethBefore = weth.balanceOf(mm);
-        strategyManager.deallocate(adapter, 1, 0, _settleData());
+        (uint256 fallbackSettlementReturn, uint256 fallbackSettlementPrincipal) =
+            strategyManager.deallocateWithPrincipal(adapter, 1, 0, _settleData());
+        assertEq(fallbackSettlementReturn, 0);
+        assertEq(fallbackSettlementPrincipal, 0);
 
         uint256 expectedMmPayout = Math.mulDiv(COLLATERAL, 2_200e8 - STRIKE, 2_200e8, Math.Rounding.Ceil);
         ICoveredCallFundAdapter.Position memory fallbackPosition = adapter.position(1);
@@ -367,10 +386,11 @@ contract CoveredCallFundAdapterTest is Test {
 
         uint256 normalizedPremium = _expectedWeth(PREMIUM, 2_200e8);
         uint256 expectedReturn = COLLATERAL - expectedMmPayout + normalizedPremium;
-        uint256 returned = strategyManager.deallocate(
-            adapter, expectedReturn, expectedReturn, _normalizeData(PREMIUM, _policyMinimum(normalizedPremium))
+        (uint256 returned, uint256 principalReleased) = strategyManager.deallocateWithPrincipal(
+            adapter, COLLATERAL, expectedReturn, _normalizeData(PREMIUM, _policyMinimum(normalizedPremium))
         );
         assertEq(returned, expectedReturn);
+        assertEq(principalReleased, COLLATERAL);
         assertEq(usdc.balanceOf(address(fund)), 0);
         assertEq(weth.balanceOf(address(fund)), expectedReturn);
     }
@@ -507,14 +527,6 @@ contract CoveredCallFundAdapterTest is Test {
             )
         );
         valuator.value(address(adapter), snapshot, abi.encode(valuationData));
-    }
-
-    function test_valuatorV2RejectsOneSidedTransactionalNavBuffer() public {
-        address[] memory observers = new address[](2);
-        observers[0] = mm;
-        observers[1] = observer;
-        vm.expectRevert(ICoveredCallFundValuator.InvalidFairValuePolicy.selector);
-        new CoveredCallFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, 1, observers);
     }
 
     function test_expiredOpenCallFailsClosedUntilOracleExpiryPriceExists() public {

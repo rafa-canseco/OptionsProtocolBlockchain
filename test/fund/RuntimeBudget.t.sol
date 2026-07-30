@@ -16,7 +16,6 @@ import {CspFundValuator} from "../../src/fund/CspFundValuator.sol";
 import {CspFundValuatorV2} from "../../src/fund/CspFundValuatorV2.sol";
 import {CspFundAdapterOperations} from "../../src/fund/libraries/CspFundAdapterOperations.sol";
 import {CoveredCallFundAdapter} from "../../src/fund/CoveredCallFundAdapter.sol";
-import {CoveredCallFundValuator} from "../../src/fund/CoveredCallFundValuator.sol";
 import {CoveredCallFundValuatorV2} from "../../src/fund/CoveredCallFundValuatorV2.sol";
 import {CoveredCallFundAdapterOperations} from "../../src/fund/libraries/CoveredCallFundAdapterOperations.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
@@ -49,15 +48,11 @@ contract RuntimeBudgetTest is Test {
             EIP170_RUNTIME_LIMIT
         );
         assertLt(
-            address(new CoveredCallFundValuator(address(spotFeed), 8, 1 hours, 10, 2, 1_000, observers)).code.length,
+            address(new CspFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, observers)).code.length,
             EIP170_RUNTIME_LIMIT
         );
         assertLt(
-            address(new CspFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, 0, observers)).code.length,
-            EIP170_RUNTIME_LIMIT
-        );
-        assertLt(
-            address(new CoveredCallFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, 0, observers)).code.length,
+            address(new CoveredCallFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, observers)).code.length,
             EIP170_RUNTIME_LIMIT
         );
     }
