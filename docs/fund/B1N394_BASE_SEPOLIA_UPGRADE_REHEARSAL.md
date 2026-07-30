@@ -6,7 +6,7 @@ This rehearsal proves that the Fund V2 changes from B1N-392 can be applied to
 the currently deployed CSP and Covered Call proxies without first closing their
 active positions. It does not broadcast any transaction.
 
-The fork is pinned to Base Sepolia block `44,811,440`. At that block:
+The fork is pinned to Base Sepolia block `44,835,826`. At that block:
 
 - CSP position `3` is open with `3,142.399992 USDC` of collateral.
 - Covered Call position `1` is open with `1.25 WETH` of collateral and
@@ -94,7 +94,7 @@ forge test --match-contract B1N394ActivePositionUpgradeForkTest -vv
 ```
 
 `BASE_SEPOLIA_RPC_URL` is optional. The test defaults to
-`https://sepolia.base.org` and always pins block `44,811,440`.
+`https://sepolia.base.org` and always pins block `44,835,826`.
 
 ## Production prerequisites not performed by this rehearsal
 

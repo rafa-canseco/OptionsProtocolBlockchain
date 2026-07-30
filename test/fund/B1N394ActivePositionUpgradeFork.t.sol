@@ -35,7 +35,7 @@ interface ISettablePriceFeed {
 /// @dev No broadcast is performed. The test upgrades fork-local proxy state only.
 contract B1N394ActivePositionUpgradeForkTest is Test {
     uint256 private constant BASE_SEPOLIA_CHAIN_ID = 84_532;
-    uint256 private constant SNAPSHOT_BLOCK = 44_811_440;
+    uint256 private constant SNAPSHOT_BLOCK = 44_835_826;
     uint256 private constant SETTLEMENT_PRICE = 1_800e8;
     uint256 private constant NEXT_STRIKE = 1_800e8;
     uint256 private constant NEXT_OPTION_AMOUNT = 0.5e8;
