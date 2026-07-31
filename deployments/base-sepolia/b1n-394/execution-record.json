@@ -1,0 +1,125 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-394",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532
+  },
+  "executedAtUtc": "2026-07-31",
+  "proxies": {
+    "csp": {
+      "vault": "0x53e38Baf2fC55259729085b7542BFF066F6a509e",
+      "accounting": "0x21d3acc5a2c64666dA93ABC8c77AB483b96836a3",
+      "flow": "0x0206C0A5050b09B7A2AD4E8CbF83a06ae2193080",
+      "manager": "0xfC28237145596D4E1dfD28B80e186EFC09A1F988",
+      "adapter": "0x68e5C9f55201a4fa87040830b1A53A4B6E26b0e3"
+    },
+    "coveredCall": {
+      "vault": "0x9060946E6ACC4E430A823E90120743c7305EE2CA",
+      "accounting": "0x9a112A65FE8510bCf5DC894fFBf06aEa8d12d311",
+      "flow": "0x59fc0d88aAF3D14b82696cc7E91ea37b629E48cc",
+      "manager": "0x745422dd14E84ee27C2E56D2845C3BB1658027d9",
+      "adapter": "0x0BF96C5cE0D637d4D686d342aE42Bc00fDa19De9"
+    }
+  },
+  "implementations": {
+    "fundAccounting": "0xF50FFFB05B554082d73B5cdce54199856b42B291",
+    "fundFlowManager": "0xfc80b881f282EFC91B06fF5Fdb7F24F19D835d32",
+    "strategyManager": "0xe8b39130E2aB6A8FfeCAc29e86A7A8092F2A953F",
+    "cspAdapter": "0x7D641877ED4E2c5f5ccb00727a4f7b43c28ad996",
+    "coveredCallAdapter": "0x4e5154F49920d7BcE3953FC75a99d7A2831711C9"
+  },
+  "valuators": {
+    "csp": {
+      "address": "0x8ecBA81832a9B6Bb07cd41bd098CaE3b883d5A17",
+      "runtimeCodehash": "0xd4ffc1131aa527b1132aa7e4d31bfda7b4fd3314b0b4e7f0bf98fce940c5f12a",
+      "deploymentTransaction": "0x4fdda03d88162567e689f476e4ff4aa2db41af6d0f349d75802c2c1cff38819b",
+      "deploymentBlock": 44845837
+    },
+    "coveredCall": {
+      "address": "0x720e50472eb7AB5e4D57A54D6610Cb3f4A29d023",
+      "runtimeCodehash": "0x9b2caf4ec46a9a8203146d548e1d06a6ead7bc140ee4a60fa13aea4c384a36a2",
+      "deploymentTransaction": "0x60010aafe6122d97c879cb7f06701cb8420a0ff19d37d69fa753ae6886a61818",
+      "deploymentBlock": 44845838
+    }
+  },
+  "transactions": {
+    "initialUpgrade": {
+      "csp": {
+        "hash": "0x971583b36cbbafbebc35ff7fb7b0e03daf53392f2976c84c1a478643b79ebd84",
+        "block": 44840103
+      },
+      "coveredCall": {
+        "hash": "0xc62d5e6efebfa8b91478f56fc04ef1bc8890bd674ef6e064da9376f6e17b49ed",
+        "block": 44840104
+      },
+      "premiumFee": {
+        "hash": "0x0f8446036f9cbcc1bdacdd3822bd7fc99940d05f9b21c78e7b29aea6e4960dd9",
+        "block": 44840105
+      }
+    },
+    "positionHashMigration": {
+      "csp": {
+        "hash": "0x5a01d5ecc782e453eda89bc66afc9ff0ac34b8c3ff0cf4251e756e0837ad2246",
+        "block": 44845370
+      },
+      "coveredCall": {
+        "hash": "0x45eb27ac5eeab905a3f24784c47c4e4970868e49381d55159bc67c095de34c9d",
+        "block": 44845371
+      }
+    },
+    "valuatorRebind": {
+      "csp": {
+        "hash": "0x66cfaa658db5f14fecf5d4142e034bd323daf590cd7b128926912331b3096f8c",
+        "block": 44845886
+      },
+      "coveredCall": {
+        "hash": "0x8ee0737dd80bf655ae82caaa1e4dc28382e5f2b3fe28dd86414413691bbc9043",
+        "block": 44845887
+      }
+    },
+    "finalize": {
+      "csp": {
+        "hash": "0x8f50d8b5307cd0340a63cfcb15f13c21b5ad4227c3961a10735925edab963c83",
+        "block": 44845964
+      },
+      "coveredCall": {
+        "hash": "0xce8e8edd7b15fcd24c97606034cdafd558e27f815943009e299cd4ba7837eb72",
+        "block": 44845965
+      }
+    },
+    "reporterAndFeeRotation": {
+      "csp": {
+        "hash": "0x843db3bdb1da93d461813b022d95a8edb36fa588a19eb602d357208e93f72fda",
+        "block": 44846363
+      },
+      "coveredCall": {
+        "hash": "0xc22d6c362b53eb9f79e1ea4362e9053f873b58d0ca43c52e316f7f1d6be33719",
+        "block": 44846364
+      }
+    },
+    "routerRebind": {
+      "csp": {
+        "hash": "0x676f0c7b0d2a9239dacfdbbd1ddb6f92ebe0561658b2456f14db774edba85e71",
+        "block": 44846475
+      },
+      "coveredCall": {
+        "hash": "0x904d05707b1ba33aef98002a704ca345a048a6c3bc1c16c008a55c5ca5d7cfff",
+        "block": 44846476
+      }
+    }
+  },
+  "authority": {
+    "retired": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "governance": "0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D",
+    "navReporter": "0x4EF525Ca8B42580782A12229df210eC8eee49E7b",
+    "operator": "0xEa99E3C48D68D1614d6454643135FD93e5cD18cE",
+    "reporterSetVersion": 2
+  },
+  "shared": {
+    "batchSettler": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
+    "premiumFeeBps": 1000,
+    "replacementSwapRouter": "0x0Cd738d1F80FaDBbF6171280eD01Cfa33F8E17b3",
+    "replacementSwapRouterCodehash": "0x7ad71c01485a58d4bdb499162fdd1a28c93f56426043e069a0acb18a298b07ec"
+  }
+}

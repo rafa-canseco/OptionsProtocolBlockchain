@@ -3,6 +3,26 @@
 This runbook is testnet-only. It upgrades the live CSP and Covered Call Fund V2 proxies without
 rewriting proxy storage and applies the B1N-393 fee policy.
 
+## Execution status
+
+Completed on Base Sepolia on 2026-07-31 UTC. The deployed state is recorded in
+`execution-record.json`.
+
+- CSP and Covered Call use the audited B1N-392 implementations.
+- A one-shot `FundAccounting` reinitializer reconciled the V2 adapter position-hash domain at the
+  unchanged component nonce. Positions, allocation, idle assets, committed NAV, share supply, fee
+  high-water marks, and pause state were preserved.
+- Both V2 valuators expose the legacy `liabilityBufferBps() == 0` policy getter required by the
+  staging reporter. This changes no valuation arithmetic or storage.
+- The reporter committed post-upgrade NAVs for both funds before the finalizer reopened them.
+- Deposits, redemptions, and allocation are active and both execution locks are clear.
+- Governance, NAV reporting, and transaction operation now use three distinct credentials. The
+  retired signer has no role in either AccessManager, is not a NAV reporter, is not a connected
+  core owner/operator, and has no remaining USDC, WETH, CSP-share, or Covered-Call-share balance.
+- The immutable-owner test router was replaced and both adapter configurations retain the same risk
+  limits, fee tiers, position hashes, and manager positions hashes.
+- Railway staging is healthy and has confirmed NAV reports signed by reporter-set version 2.
+
 ## Safety model
 
 The execution phase uses one `AccessManager.multicall` per fund. Each multicall:
@@ -57,3 +77,29 @@ manual order path that uses the same settler.
    allocations, NAVs, fee recipients, high-water marks, treasury, and the shared premium fee.
 
 No command in this directory authorizes a mainnet transaction.
+
+## Post-execution implementation set
+
+| Component | Implementation / contract |
+| --- | --- |
+| FundAccounting, both proxies | `0xF50FFFB05B554082d73B5cdce54199856b42B291` |
+| FundFlowManager, both proxies | `0xfc80b881f282EFC91B06fF5Fdb7F24F19D835d32` |
+| StrategyManager, both proxies | `0xe8b39130E2aB6A8FfeCAc29e86A7A8092F2A953F` |
+| CSP adapter implementation | `0x7D641877ED4E2c5f5ccb00727a4f7b43c28ad996` |
+| Covered Call adapter implementation | `0x4e5154F49920d7BcE3953FC75a99d7A2831711C9` |
+| CSP valuator | `0x8ecBA81832a9B6Bb07cd41bd098CaE3b883d5A17` |
+| Covered Call valuator | `0x720e50472eb7AB5e4D57A54D6610Cb3f4A29d023` |
+| Base Sepolia test swap router | `0x0Cd738d1F80FaDBbF6171280eD01Cfa33F8E17b3` |
+
+## Authority split
+
+| Purpose | Address | Access |
+| --- | --- | --- |
+| Governance | `0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D` | Admin, upgrader, curator, guardian, adapter-upgrader; core/factory ownership; fee recipient |
+| NAV reporter | `0x4EF525Ca8B42580782A12229df210eC8eee49E7b` | Reporter-set version 2 only |
+| Operator | `0xEa99E3C48D68D1614d6454643135FD93e5cD18cE` | Core operator/partial-pauser and CSP accounting/allocator/processor roles |
+
+The governance credential is stored in the ignored `.secrets/` keystore directory with its
+password in the local macOS Keychain. Reporter and operator credentials are also backed by local
+encrypted keystores; their active staging values are stored in Railway. No private key is recorded
+in this directory.
