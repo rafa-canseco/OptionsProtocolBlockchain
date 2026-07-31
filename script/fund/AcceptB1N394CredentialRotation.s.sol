@@ -3,12 +3,14 @@ pragma solidity 0.8.24;
 
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {console2} from "forge-std/console2.sol";
+import {BatchSettler} from "../../src/core/BatchSettler.sol";
+import {Oracle} from "../../src/core/Oracle.sol";
 import {MockSwapRouter} from "../../src/mocks/MockSwapRouter.sol";
 import {CspFundAdapter} from "../../src/fund/CspFundAdapter.sol";
 import {CoveredCallFundAdapter} from "../../src/fund/CoveredCallFundAdapter.sol";
 import {FundConstants} from "../../src/fund/FundConstants.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
-import {B1N394Base} from "./B1N394Base.sol";
+import {B1N394Base, IB1N394ValuatorPolicy} from "./B1N394Base.sol";
 
 interface IB1N394AcceptOwner {
     function owner() external view returns (address);
@@ -16,8 +18,13 @@ interface IB1N394AcceptOwner {
     function acceptOwnership() external;
 }
 
+interface IB1N394AcceptOwnedFeed {
+    function owner() external view returns (address);
+}
+
 /// @notice Accepts core ownership and replaces the immutable-owner test router under the new governance key.
 contract AcceptB1N394CredentialRotation is B1N394Base {
+    address private constant RETIRING_SIGNER = 0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382;
     address private constant ADDRESS_BOOK = 0x033d9d37Baf83dBc71935239b6fA22a6905dbaa0;
     address private constant CONTROLLER = 0xD52EFbBaA1b02BA65A7f0A1604A5dFb4C4dB1572;
     address private constant ORACLE = 0xF95CC4aED4a0bD68e0F1BE7c779BC281189F8187;
@@ -29,11 +36,16 @@ contract AcceptB1N394CredentialRotation is B1N394Base {
     function run() external returns (address replacementRouter) {
         _requireBaseSepolia();
         address governance = vm.envAddress("B1N394_NEW_GOVERNANCE");
-        address spotFeed = MockSwapRouter(PRIOR_ROUTER).priceFeeds(WETH);
+        address spotFeed =
+            IB1N394ValuatorPolicy(StrategyManager(CSP_MANAGER).strategyConfig(CSP_ADAPTER).valuator).spotFeed();
+        address ccSpotFeed =
+            IB1N394ValuatorPolicy(StrategyManager(CC_MANAGER).strategyConfig(CC_ADAPTER).valuator).spotFeed();
         require(
-            governance != address(0) && spotFeed != address(0) && MockSwapRouter(PRIOR_ROUTER).usdc() == USDC,
+            governance != address(0) && spotFeed != address(0) && spotFeed == ccSpotFeed
+                && MockSwapRouter(PRIOR_ROUTER).usdc() == USDC,
             "B1N394: router boundary"
         );
+        require(IB1N394AcceptOwnedFeed(spotFeed).owner() != RETIRING_SIGNER, "B1N394: retired feed owner");
         _requirePending(governance);
 
         CspFundAdapter.AdapterConfig memory cspBefore = CspFundAdapter(CSP_ADAPTER).adapterConfig();
@@ -52,6 +64,12 @@ contract AcceptB1N394CredentialRotation is B1N394Base {
         IB1N394AcceptOwner(BATCH_SETTLER).acceptOwnership();
         replacementRouter = address(new MockSwapRouter(USDC));
         MockSwapRouter(replacementRouter).setPriceFeed(WETH, spotFeed);
+        Oracle(ORACLE).setPriceFeed(WETH, spotFeed);
+        BatchSettler(BATCH_SETTLER).setSwapRouter(replacementRouter);
+        BatchSettler(BATCH_SETTLER).setTreasury(governance);
+        if (BatchSettler(BATCH_SETTLER).whitelistedMMs(RETIRING_SIGNER)) {
+            BatchSettler(BATCH_SETTLER).setWhitelistedMM(RETIRING_SIGNER, false);
+        }
         _setCspRouter(AccessManager(CSP_ACCESS), governance, cspBefore, replacementRouter);
         _setCcRouter(AccessManager(CC_ACCESS), governance, ccBefore, replacementRouter);
         vm.stopBroadcast();
@@ -59,6 +77,10 @@ contract AcceptB1N394CredentialRotation is B1N394Base {
         _requireOwned(governance);
         require(MockSwapRouter(replacementRouter).owner() == governance, "B1N394: router owner");
         require(MockSwapRouter(replacementRouter).priceFeeds(WETH) == spotFeed, "B1N394: router feed");
+        require(Oracle(ORACLE).priceFeed(WETH) == spotFeed, "B1N394: oracle feed");
+        require(BatchSettler(BATCH_SETTLER).swapRouter() == replacementRouter, "B1N394: settler router");
+        require(BatchSettler(BATCH_SETTLER).treasury() == governance, "B1N394: treasury");
+        require(!BatchSettler(BATCH_SETTLER).whitelistedMMs(RETIRING_SIGNER), "B1N394: retired MM");
         CspFundAdapter.AdapterConfig memory cspAfter = CspFundAdapter(CSP_ADAPTER).adapterConfig();
         CoveredCallFundAdapter.AdapterConfig memory ccAfter = CoveredCallFundAdapter(CC_ADAPTER).adapterConfig();
         require(

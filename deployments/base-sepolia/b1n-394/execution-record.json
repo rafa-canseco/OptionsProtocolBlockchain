@@ -107,6 +107,28 @@
         "hash": "0x904d05707b1ba33aef98002a704ca345a048a6c3bc1c16c008a55c5ca5d7cfff",
         "block": 44846476
       }
+    },
+    "authorityCompletion": {
+      "routerFeed": {
+        "hash": "0x6512dc1b9e6ea9fbd8dfed4b7c9bce22c92b2d57e6d2a9534b2f4781440feaa9",
+        "block": 44847405
+      },
+      "oracleFeed": {
+        "hash": "0x68eb3b56031b9cac2380ce18be41a7894e537836cd95eb6c828f2a523df7ba6d",
+        "block": 44847406
+      },
+      "settlerRouter": {
+        "hash": "0x7e0ad07c3f532199bb2b6aadc5222c45b98586430036aafd93ab321d211be54f",
+        "block": 44847407
+      },
+      "treasury": {
+        "hash": "0xf5bb955355e3f0749e0b1071e5159a81b9c7fea795e1aa9bf0f84a07e7ddec03",
+        "block": 44847408
+      },
+      "retiredMarketMaker": {
+        "hash": "0x11a811b6f8bc3217bb314e69b21a47cbb6d271674d4ee3f6ae0bff3d93e9988c",
+        "block": 44847409
+      }
     }
   },
   "authority": {
@@ -120,6 +142,10 @@
     "batchSettler": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
     "premiumFeeBps": 1000,
     "replacementSwapRouter": "0x0Cd738d1F80FaDBbF6171280eD01Cfa33F8E17b3",
-    "replacementSwapRouterCodehash": "0x7ad71c01485a58d4bdb499162fdd1a28c93f56426043e069a0acb18a298b07ec"
+    "replacementSwapRouterCodehash": "0x7ad71c01485a58d4bdb499162fdd1a28c93f56426043e069a0acb18a298b07ec",
+    "trustedSpotFeed": "0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1",
+    "treasury": "0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D",
+    "retiredMarketMakerWhitelisted": false,
+    "retiredMakerNonce": 7
   }
 }

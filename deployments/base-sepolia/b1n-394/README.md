@@ -18,9 +18,12 @@ Completed on Base Sepolia on 2026-07-31 UTC. The deployed state is recorded in
 - Deposits, redemptions, and allocation are active and both execution locks are clear.
 - Governance, NAV reporting, and transaction operation now use three distinct credentials. The
   retired signer has no role in either AccessManager, is not a NAV reporter, is not a connected
-  core owner/operator, and has no remaining USDC, WETH, CSP-share, or Covered-Call-share balance.
-- The immutable-owner test router was replaced and both adapter configurations retain the same risk
-  limits, fee tiers, position hashes, and manager positions hashes.
+  core owner/operator, treasury recipient, or whitelisted market maker, and has no remaining USDC,
+  WETH, CSP-share, or Covered-Call-share balance.
+- The immutable-owner test router was replaced across both adapters and the shared BatchSettler.
+  The replacement router and Oracle use the same Base Sepolia Chainlink feed already pinned by both
+  V2 valuators. The legacy router and test feed are disconnected. Both adapter configurations
+  retain the same risk limits, fee tiers, position hashes, and manager positions hashes.
 - Railway staging is healthy and has confirmed NAV reports signed by reporter-set version 2.
 
 ## Safety model
@@ -90,6 +93,7 @@ No command in this directory authorizes a mainnet transaction.
 | CSP valuator | `0x8ecBA81832a9B6Bb07cd41bd098CaE3b883d5A17` |
 | Covered Call valuator | `0x720e50472eb7AB5e4D57A54D6610Cb3f4A29d023` |
 | Base Sepolia test swap router | `0x0Cd738d1F80FaDBbF6171280eD01Cfa33F8E17b3` |
+| Shared ETH/USD feed | `0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1` |
 
 ## Authority split
 
