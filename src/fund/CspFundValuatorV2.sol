@@ -41,6 +41,9 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
     uint64 public constant requiredModelVersion = 1;
     uint64 public constant valuationPolicyVersion = 2;
     uint16 public constant maxObservationDivergenceBps = 500;
+    /// @notice Compatibility getter for the off-chain fair-value policy gate.
+    /// @dev V2 applies the signed fair liability exactly and therefore fixes the buffer at zero.
+    uint16 public constant liabilityBufferBps = 0;
 
     address public immutable spotFeed;
     uint8 public immutable spotFeedDecimals;

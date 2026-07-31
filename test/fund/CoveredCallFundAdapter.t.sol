@@ -180,6 +180,7 @@ contract CoveredCallFundAdapterTest is Test {
         observers[0] = mm;
         observers[1] = observer;
         valuator = new CoveredCallFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, observers);
+        assertEq(valuator.liabilityBufferBps(), 0);
 
         expiry = _nextEightAm();
         weth.mint(address(strategyManager), 20e18);

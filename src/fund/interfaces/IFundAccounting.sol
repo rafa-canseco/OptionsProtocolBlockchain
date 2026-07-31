@@ -37,6 +37,7 @@ interface IFundAccounting {
     ) external returns (FundTypes.NavCommit memory nav);
     function setReporterSet(address[] calldata reporters, uint16 threshold, uint64 version) external;
     function setComponent(bytes32 componentId, address valuator, uint64 interfaceVersion, bool active) external;
+    function reinitializePositionHashDomain(address adapter) external;
     function setFeeConfig(FundTypes.FeeConfig calldata config) external;
     function accrueManagementFee() external returns (uint256 feeShares);
 }

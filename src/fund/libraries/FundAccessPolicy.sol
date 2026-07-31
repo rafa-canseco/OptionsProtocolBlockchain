@@ -34,13 +34,14 @@ library FundAccessPolicy {
     }
 
     function accountingRules() internal pure returns (Rule[] memory rules) {
-        rules = new Rule[](5);
+        rules = new Rule[](6);
         rules[0] = Rule(UPGRADE_TO_AND_CALL_SELECTOR, FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
         rules[1] = Rule(IFundAccounting.submitNav.selector, FundConstants.ACCOUNTING_ROLE, 0);
         rules[2] =
             Rule(IFundAccounting.setReporterSet.selector, FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
         rules[3] = Rule(IFundAccounting.setComponent.selector, FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
-        rules[4] = Rule(IFundAccounting.setFeeConfig.selector, FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
+        rules[4] = Rule(IFundAccounting.reinitializePositionHashDomain.selector, FundConstants.UPGRADER_ROLE, 0);
+        rules[5] = Rule(IFundAccounting.setFeeConfig.selector, FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
     }
 
     function flowRules() internal pure returns (Rule[] memory rules) {

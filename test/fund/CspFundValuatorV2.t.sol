@@ -166,6 +166,7 @@ contract CspFundValuatorV2Test is Test {
         observers[0] = mm;
         observers[1] = observer;
         valuator = new CspFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, observers);
+        assertEq(valuator.liabilityBufferBps(), 0);
 
         expiry = _nextEightAm();
         usdc.mint(address(strategyManager), 20_000e6);

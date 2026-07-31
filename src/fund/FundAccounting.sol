@@ -9,6 +9,7 @@ import {FundTypes} from "./FundTypes.sol";
 import {FundMath} from "./libraries/FundMath.sol";
 import {FundAccountingStorage} from "./storage/FundAccountingStorage.sol";
 import {IFundAccounting} from "./interfaces/IFundAccounting.sol";
+import {IFundStrategyAdapter} from "./interfaces/IFundStrategyAdapter.sol";
 import {IFundVault} from "./interfaces/IFundVault.sol";
 import {IFundVaultModuleCallbacks} from "./interfaces/IFundModuleCallbacks.sol";
 import {IPositionValuator} from "./interfaces/IPositionValuator.sol";
@@ -23,6 +24,10 @@ interface IFundVaultAccounting is IFundVault {
 
 interface IFlowProcessingState {
     function hasActiveProcessing() external view returns (bool);
+}
+
+interface IStrategyPositionNonce {
+    function positionNonce(address adapter) external view returns (uint64);
 }
 
 /// @notice Component NAV verification, reporter quorum, and fee crystallization.
@@ -42,6 +47,7 @@ contract FundAccounting is FundUpgradeable, FundAccountingStorage, IFundAccounti
     error LiabilityExceedsAssets(bytes32 componentId);
     error InvalidFeeConfig();
     error InvalidValuator(address valuator);
+    error UnauthorizedHashDomainMigration(address caller);
     error UnauthorizedStrategyManager(address caller);
     error UnauthorizedFeeAccrual(address caller);
 
@@ -262,6 +268,36 @@ contract FundAccounting is FundUpgradeable, FundAccountingStorage, IFundAccounti
         state.interfaceVersion = interfaceVersion;
         state.active = active;
         emit ComponentUpdated(componentId, valuator, interfaceVersion, active);
+    }
+
+    /// @notice One-time V2 migration for adapters whose position hash domain changed without a state transition.
+    /// @dev Must be invoked atomically through upgradeToAndCall after the selector is assigned to UPGRADER_ROLE.
+    function reinitializePositionHashDomain(address adapter) external reinitializer(2) {
+        if (msg.sender != authority()) revert UnauthorizedHashDomainMigration(msg.sender);
+
+        FundAccountingStorageLayout storage $ = _getFundAccountingStorage();
+        IFundVaultAccounting vault = IFundVaultAccounting($.fund);
+        IFundStrategyAdapter strategy = IFundStrategyAdapter(adapter);
+        if (
+            adapter == address(0) || adapter.code.length == 0 || strategy.fund() != $.fund
+                || strategy.accountingAsset() != vault.asset()
+        ) revert InvalidAddress();
+
+        bytes32 componentId = strategyComponentId(adapter);
+        ComponentState storage state = $.components[componentId];
+        uint64 nonce = IStrategyPositionNonce(vault.strategyManager()).positionNonce(adapter);
+        (bool success, bytes memory result) = adapter.staticcall(abi.encodeWithSignature("adapterState()"));
+        if (
+            !state.active || state.interfaceVersion != strategy.interfaceVersion() || state.nonce != nonce || !success
+                || result.length < 32 || abi.decode(result, (uint256)) != nonce
+        ) revert InvalidPositionState(componentId);
+
+        bytes32 migratedHash = strategy.positionStateHash();
+        if (migratedHash == bytes32(0) || migratedHash == state.positionStateHash) {
+            revert InvalidPositionState(componentId);
+        }
+        state.positionStateHash = migratedHash;
+        emit ComponentStateUpdated(componentId, nonce, migratedHash);
     }
 
     function setComponentState(bytes32 componentId, uint64 nonce, bytes32 positionStateHash) external restricted {
