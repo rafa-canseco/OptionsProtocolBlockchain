@@ -266,6 +266,10 @@ abstract contract B1N360Operations is B1N360Base {
 
         CoveredCallFundAdapter.AdapterConfig memory actual =
             CoveredCallFundAdapter(policyConfig.adapter).adapterConfig();
+        require(
+            CoveredCallFundAdapter(policyConfig.adapter).deallocationInterfaceVersion() == 2,
+            "B1N360: adapter deallocation interface"
+        );
         ICoveredCallFundAdapter.AdapterConfig memory expected = ICoveredCallFundAdapter.AdapterConfig({
             riskConfig: deployConfig.adapterRiskConfig,
             swapRouter: deployConfig.adapterSwapRouter,
@@ -279,7 +283,6 @@ abstract contract B1N360Operations is B1N360Base {
                 && valuator.maxSpotStaleness() == deployConfig.maxSpotStaleness
                 && valuator.maxObservationWindow() == deployConfig.maxObservationWindow
                 && valuator.observationQuorum() == deployConfig.observationQuorum
-                && valuator.liabilityBufferBps() == deployConfig.liabilityBufferBps
                 && valuator.valuationPolicyVersion() == 2 && valuator.requiredModelVersion() == 1
                 && valuator.maxObservationDivergenceBps() == 500,
             "B1N360: valuator config"

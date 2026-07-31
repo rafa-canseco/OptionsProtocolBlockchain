@@ -33,6 +33,16 @@ contract CspStrategyManagerCaller {
         external
         returns (uint256)
     {
+        (uint256 accountingAssetsOut,) = adapter.deallocate(targetValue, minimumOut, data);
+        return accountingAssetsOut;
+    }
+
+    function deallocateWithPrincipal(
+        CspFundAdapter adapter,
+        uint256 targetValue,
+        uint256 minimumOut,
+        bytes calldata data
+    ) external returns (uint256 accountingAssetsOut, uint256 principalReleased) {
         return adapter.deallocate(targetValue, minimumOut, data);
     }
 
@@ -241,12 +251,41 @@ contract CspFundAdapterTest is Test {
         assertEq(adapter.adapterState().stateNonce, 2);
     }
 
+    function test_returningPremiumDoesNotReportPrincipalUntilCollateralSettles() public {
+        _authorizeAndOpen();
+
+        (uint256 premiumReturned, uint256 premiumPrincipalReleased) = strategyManager.deallocateWithPrincipal(
+            adapter,
+            PREMIUM,
+            PREMIUM,
+            abi.encode(
+                ICspFundAdapter.DeallocateData({
+                    action: ICspFundAdapter.DeallocateAction.ReturnIdle, positionId: 0, amount: 0, minAmountOut: 0
+                })
+            )
+        );
+
+        assertEq(premiumReturned, PREMIUM);
+        assertEq(premiumPrincipalReleased, 0);
+        assertEq(adapter.adapterState().activePositionCount, 1);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 2_100e8);
+        (uint256 collateralReturned, uint256 collateralPrincipalReleased) =
+            strategyManager.deallocateWithPrincipal(adapter, COLLATERAL, COLLATERAL, _settleData());
+
+        assertEq(collateralReturned, COLLATERAL);
+        assertEq(collateralPrincipalReleased, COLLATERAL);
+        assertEq(adapter.adapterState().activePositionCount, 0);
+    }
+
     function test_itmPhysicalDeliveryBecomesCollectiveWethThenSwapsBackToUsdc() public {
         _authorizeAndOpen();
         vm.warp(expiry + 1);
         oracle.setExpiryPrice(address(weth), expiry, 1_800e8);
 
-        strategyManager.deallocate(adapter, 1, 0, _settleData());
+        (, uint256 awaitingPrincipal) = strategyManager.deallocateWithPrincipal(adapter, 1, 0, _settleData());
+        assertEq(awaitingPrincipal, 0);
         assertEq(uint256(adapter.position(1).lifecycle), uint256(ICspFundAdapter.Lifecycle.AwaitingPhysicalDelivery));
         assertFalse(settler.physicalDeliveryReservedVault(address(adapter), 1));
 
@@ -258,7 +297,10 @@ contract CspFundAdapterTest is Test {
         settler.operatorPhysicalRedeemVault(address(adapter), 1, COLLATERAL);
         vm.expectRevert(abi.encodeWithSelector(ICspFundValuator.LedgerMismatch.selector, 1));
         valuator.value(address(adapter), uint64(block.number), abi.encode(emptyData));
-        strategyManager.deallocate(adapter, 1, 0, _settleData());
+        (uint256 assignmentReturn, uint256 assignmentPrincipal) =
+            strategyManager.deallocateWithPrincipal(adapter, 1, 0, _settleData());
+        assertEq(assignmentReturn, 1);
+        assertEq(assignmentPrincipal, 0);
 
         ICspFundAdapter.Position memory assigned = adapter.position(1);
         assertEq(uint256(assigned.lifecycle), uint256(ICspFundAdapter.Lifecycle.Assigned));
@@ -274,9 +316,9 @@ contract CspFundAdapterTest is Test {
         assertEq(assignedValue.liabilities, 0);
         assertEq(assignedValue.liquidAccountingAssets, assignedUsdc);
 
-        uint256 returned = strategyManager.deallocate(
+        (uint256 returned, uint256 swapPrincipal) = strategyManager.deallocateWithPrincipal(
             adapter,
-            COLLATERAL - 2,
+            COLLATERAL,
             1_782e6,
             abi.encode(
                 ICspFundAdapter.DeallocateData({
@@ -289,6 +331,7 @@ contract CspFundAdapterTest is Test {
         );
 
         assertEq(returned, PREMIUM - 2 + 1_800e6);
+        assertEq(swapPrincipal, COLLATERAL);
         assertEq(adapter.adapterState().accountedWeth, 0);
         assertEq(adapter.adapterState().accountedUsdc, 0);
         assertEq(weth.balanceOf(address(adapter)), 0);
@@ -341,13 +384,16 @@ contract CspFundAdapterTest is Test {
         oracle.setExpiryPrice(address(weth), expiry, 1_800e8);
         uint256 mmBalanceAfterPremium = usdc.balanceOf(mm);
 
-        strategyManager.deallocate(adapter, 1, 0, _settleData());
+        (, uint256 awaitingPrincipal) = strategyManager.deallocateWithPrincipal(adapter, 1, 0, _settleData());
+        assertEq(awaitingPrincipal, 0);
         vm.warp(block.timestamp + _riskConfig().settlementDefaultDelay);
-        uint256 returned = strategyManager.deallocate(adapter, PREMIUM - 1 + 1_800e6, 0, _settleData());
+        (uint256 returned, uint256 fallbackPrincipal) =
+            strategyManager.deallocateWithPrincipal(adapter, COLLATERAL, 0, _settleData());
 
         ICspFundAdapter.Position memory fallbackPosition = adapter.position(1);
         assertEq(uint256(fallbackPosition.lifecycle), uint256(ICspFundAdapter.Lifecycle.CashFallback));
         assertEq(returned, PREMIUM - 1 + 1_800e6);
+        assertEq(fallbackPrincipal, COLLATERAL);
         assertEq(usdc.balanceOf(mm) - mmBalanceAfterPremium, 200e6);
         assertEq(weth.balanceOf(address(adapter)), 0);
         assertEq(adapter.adapterState().accountedUsdc, 0);

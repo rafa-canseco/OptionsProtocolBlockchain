@@ -288,7 +288,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         if (marginalExitCost != authorizedExitCost) {
             revert InvalidMarginalExitCost(authorizedExitCost, marginalExitCost);
         }
-        (, uint256 roundAssetBudget,) = FundMath.redemptionPayout(
+        (, uint256 requestedAssetBudget,) = FundMath.redemptionPayout(
             shares,
             processingNav,
             eligibleSupply,
@@ -297,7 +297,9 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
             marginalExitCost,
             $.maxExitFeeBps
         );
-        _validateBatchMinimums($, batchId, shares, redeemBatch.totalPendingShares, roundAssetBudget);
+        (uint256 roundTargetShares, uint256 roundAssetBudget, uint256 roundMarginalExitCost) = _prepareRoundAllocations(
+            $, batchId, shares, redeemBatch.totalPendingShares, requestedAssetBudget, marginalExitCost
+        );
 
         uint256 lockId = vault.beginModuleExecution($.compatibilityVersion);
         vault.invalidateNav();
@@ -309,7 +311,7 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         redeemBatch.processingNav = processingNav;
         redeemBatch.eligibleSupply = eligibleSupply;
         redeemBatch.roundPendingShares = redeemBatch.totalPendingShares;
-        redeemBatch.roundTargetShares = shares;
+        redeemBatch.roundTargetShares = roundTargetShares;
         redeemBatch.roundCumulativeShares = 0;
         redeemBatch.roundAllocatedShares = 0;
         redeemBatch.roundAssetBudget = roundAssetBudget;
@@ -319,12 +321,12 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         redeemBatch.processingReportNonce = nav.reportNonce;
         redeemBatch.processingValidUntilBlock = nav.validUntilBlock;
         redeemBatch.processingCursor = 0;
-        redeemBatch.marginalExitCost = marginalExitCost;
+        redeemBatch.marginalExitCost = roundMarginalExitCost;
         redeemBatch.reservedAssets += roundAssetBudget;
         $.totalReservedAssets += roundAssetBudget;
 
         vault.endModuleExecution(lockId);
-        emit RedeemBatchStarted(batchId, shares, processingNav, roundAssetBudget, marginalExitCost);
+        emit RedeemBatchStarted(batchId, roundTargetShares, processingNav, roundAssetBudget, roundMarginalExitCost);
     }
 
     function processRedeemBatch(uint64 batchId, uint16 maxControllers)
@@ -346,16 +348,16 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         for (uint256 i = redeemBatch.processingCursor; i < end; ++i) {
             address controller = controllers[i];
             FundTypes.RedemptionAccount storage account = $.batchAccounts[batchId][controller];
-            uint256 accountShares = account.pendingShares;
-            uint256 newCumulativeShares = redeemBatch.roundCumulativeShares + accountShares;
-            uint256 newAllocatedShares =
-                Math.mulDiv(newCumulativeShares, redeemBatch.roundTargetShares, redeemBatch.roundPendingShares);
-            uint256 allocatedShares = newAllocatedShares - redeemBatch.roundAllocatedShares;
+            uint256 allocatedShares = account.roundProcessableShares;
 
             if (allocatedShares != 0) {
+                uint256 accountShares = account.pendingShares;
                 uint256 minimumAssets =
                     Math.mulDiv(account.pendingMinAssetsOut, allocatedShares, accountShares, Math.Rounding.Ceil);
-                uint256 assets = _processedAssets(redeemBatch, redeemBatch.roundAllocatedShares, newAllocatedShares);
+                uint256 assets = account.roundProcessableAssets;
+                if (assets < minimumAssets) revert BatchNotProcessable(batchId);
+                account.roundProcessableShares = 0;
+                account.roundProcessableAssets = 0;
                 account.pendingShares -= allocatedShares;
                 account.pendingMinAssetsOut -= minimumAssets;
                 FundTypes.RedemptionState storage state = $.redemptions[controller];
@@ -365,12 +367,11 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
                 state.claimableAssets += assets;
                 $.totalPendingShares -= allocatedShares;
                 $.totalClaimableShares += allocatedShares;
+                redeemBatch.roundAllocatedShares += allocatedShares;
                 redeemBatch.roundAllocatedAssets += assets;
                 if (account.pendingShares == 0) state.latestBatchId = 0;
                 vault.processAccountingAssetClaim(controller, allocatedShares, assets);
             }
-            redeemBatch.roundCumulativeShares = newCumulativeShares;
-            redeemBatch.roundAllocatedShares = newAllocatedShares;
             ++processedControllers;
         }
 
@@ -536,19 +537,25 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
         delete $.batchAccounts[batchId][controller];
     }
 
-    function _validateBatchMinimums(
+    function _prepareRoundAllocations(
         FundFlowManagerStorageLayout storage $,
         uint64 batchId,
         uint256 roundTargetShares,
         uint256 roundPendingShares,
-        uint256 roundAssetBudget
-    ) private view {
+        uint256 roundAssetBudget,
+        uint256 marginalExitCost
+    ) private returns (uint256 processableShares, uint256 processableAssets, uint256 processableMarginalExitCost) {
         address[] storage controllers = $.batchControllers[batchId];
         uint256 cumulativeShares;
         uint256 allocatedShares;
+        address firstUnmetController;
+        uint256 firstUnmetMinimum;
+        uint256 firstUnmetAssets;
         for (uint256 i; i < controllers.length; ++i) {
             address controller = controllers[i];
             FundTypes.RedemptionAccount storage account = $.batchAccounts[batchId][controller];
+            account.roundProcessableShares = 0;
+            account.roundProcessableAssets = 0;
             cumulativeShares += account.pendingShares;
             uint256 newAllocatedShares = Math.mulDiv(cumulativeShares, roundTargetShares, roundPendingShares);
             uint256 controllerShares = newAllocatedShares - allocatedShares;
@@ -559,21 +566,29 @@ contract FundFlowManager is FundUpgradeable, FundFlowManagerStorage, IFundFlowMa
                 uint256 assets =
                     _processedAssets(roundAssetBudget, roundTargetShares, allocatedShares, newAllocatedShares);
                 if (assets < minimumAssets) {
-                    revert MinimumAssetsNotMet(controller, minimumAssets, assets);
+                    if (firstUnmetController == address(0)) {
+                        firstUnmetController = controller;
+                        firstUnmetMinimum = minimumAssets;
+                        firstUnmetAssets = assets;
+                    }
+                } else {
+                    account.roundProcessableShares = controllerShares;
+                    account.roundProcessableAssets = assets;
+                    processableShares += controllerShares;
+                    processableAssets += assets;
+                    processableMarginalExitCost += _processedAssets(
+                        marginalExitCost, roundTargetShares, allocatedShares, newAllocatedShares
+                    );
                 }
             }
             allocatedShares = newAllocatedShares;
         }
-    }
-
-    function _processedAssets(
-        FundTypes.RedemptionBatch storage redeemBatch,
-        uint256 priorAllocatedShares,
-        uint256 newAllocatedShares
-    ) private view returns (uint256) {
-        return _processedAssets(
-            redeemBatch.roundAssetBudget, redeemBatch.roundTargetShares, priorAllocatedShares, newAllocatedShares
-        );
+        if (processableShares == 0 || processableAssets == 0) {
+            if (firstUnmetController != address(0)) {
+                revert MinimumAssetsNotMet(firstUnmetController, firstUnmetMinimum, firstUnmetAssets);
+            }
+            revert BatchNotProcessable(batchId);
+        }
     }
 
     function _processedAssets(

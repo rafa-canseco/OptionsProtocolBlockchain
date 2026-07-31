@@ -13,7 +13,9 @@ import {
     StrategyManagerStorageHarnessV1,
     StrategyManagerStorageHarnessV2,
     CspFundAdapterStorageHarnessV1,
-    CoveredCallFundAdapterStorageHarnessV1
+    CspFundAdapterStorageHarnessV2,
+    CoveredCallFundAdapterStorageHarnessV1,
+    CoveredCallFundAdapterStorageHarnessV2
 } from "./harness/StorageLayoutHarnesses.sol";
 
 contract StorageLayoutSpecTest is Test {
@@ -43,8 +45,14 @@ contract StorageLayoutSpecTest is Test {
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV2"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV1"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV2"), options);
+    }
+
+    function test_adapterStorageHarnessImplementationsPassUpgradeSafetyValidation() public {
+        Options memory options;
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "CspFundAdapterStorageHarnessV1"), options);
+        Upgrades.validateImplementation(string.concat(HARNESS_PATH, "CspFundAdapterStorageHarnessV2"), options);
         Upgrades.validateImplementation(string.concat(HARNESS_PATH, "CoveredCallFundAdapterStorageHarnessV1"), options);
+        Upgrades.validateImplementation(string.concat(HARNESS_PATH, "CoveredCallFundAdapterStorageHarnessV2"), options);
     }
 
     function test_appendToNamespaceIsCompatible() public {
@@ -55,6 +63,10 @@ contract StorageLayoutSpecTest is Test {
         Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV2"), options);
         options.referenceContract = string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV1");
         Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "StrategyManagerStorageHarnessV2"), options);
+        options.referenceContract = string.concat(HARNESS_PATH, "CspFundAdapterStorageHarnessV1");
+        Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "CspFundAdapterStorageHarnessV2"), options);
+        options.referenceContract = string.concat(HARNESS_PATH, "CoveredCallFundAdapterStorageHarnessV1");
+        Upgrades.validateUpgrade(string.concat(HARNESS_PATH, "CoveredCallFundAdapterStorageHarnessV2"), options);
     }
 
     function test_compatibleUupsUpgradePreservesNamespacedState() public {
@@ -86,6 +98,64 @@ contract StorageLayoutSpecTest is Test {
         assertEq(upgradedStrategy.fund(), address(0xB1A352));
         upgradedStrategy.setAllocationPauseNonce(address(0xA11CE), 7);
         assertEq(upgradedStrategy.allocationPauseNonce(address(0xA11CE)), 7);
+
+        address flowProxy = Upgrades.deployUUPSProxy(
+            string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV1"),
+            abi.encodeCall(FundFlowManagerStorageHarnessV1.initialize, (address(this)))
+        );
+        address controller = address(0xC011EC70);
+        FundFlowManagerStorageHarnessV1(flowProxy).setRedemptionAccount(7, controller, 11, 22, 3, address(0xA11CE));
+        options.referenceContract = string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV1");
+        Upgrades.upgradeProxy(flowProxy, string.concat(HARNESS_PATH, "FundFlowManagerStorageHarnessV2"), "", options);
+        (
+            uint256 pendingShares,
+            uint256 pendingMinAssetsOut,
+            uint16 indexPlusOne,
+            address refundOwner,
+            uint256 roundProcessableShares,
+            uint256 roundProcessableAssets
+        ) = FundFlowManagerStorageHarnessV2(flowProxy).redemptionAccount(7, controller);
+        assertEq(pendingShares, 11);
+        assertEq(pendingMinAssetsOut, 22);
+        assertEq(indexPlusOne, 3);
+        assertEq(refundOwner, address(0xA11CE));
+        assertEq(roundProcessableShares, 0);
+        assertEq(roundProcessableAssets, 0);
+    }
+
+    function test_cspCompatibleUupsUpgradePreservesNamespacedState() public {
+        address cspProxy = Upgrades.deployUUPSProxy(
+            string.concat(HARNESS_PATH, "CspFundAdapterStorageHarnessV1"),
+            abi.encodeCall(CspFundAdapterStorageHarnessV1.initialize, (address(this)))
+        );
+        Options memory options;
+        CspFundAdapterStorageHarnessV1(cspProxy).setFund(address(0xC5F));
+        options.referenceContract = string.concat(HARNESS_PATH, "CspFundAdapterStorageHarnessV1");
+        Upgrades.upgradeProxy(cspProxy, string.concat(HARNESS_PATH, "CspFundAdapterStorageHarnessV2"), "", options);
+        CspFundAdapterStorageHarnessV2 upgradedCsp = CspFundAdapterStorageHarnessV2(cspProxy);
+        assertEq(upgradedCsp.fund(), address(0xC5F));
+        assertEq(upgradedCsp.releasablePrincipal(), 0);
+        upgradedCsp.setReleasablePrincipal(123);
+        assertEq(upgradedCsp.releasablePrincipal(), 123);
+    }
+
+    function test_coveredCallCompatibleUupsUpgradePreservesNamespacedState() public {
+        address coveredCallProxy = Upgrades.deployUUPSProxy(
+            string.concat(HARNESS_PATH, "CoveredCallFundAdapterStorageHarnessV1"),
+            abi.encodeCall(CoveredCallFundAdapterStorageHarnessV1.initialize, (address(this)))
+        );
+        Options memory options;
+        CoveredCallFundAdapterStorageHarnessV1(coveredCallProxy).setFund(address(0xCC));
+        options.referenceContract = string.concat(HARNESS_PATH, "CoveredCallFundAdapterStorageHarnessV1");
+        Upgrades.upgradeProxy(
+            coveredCallProxy, string.concat(HARNESS_PATH, "CoveredCallFundAdapterStorageHarnessV2"), "", options
+        );
+        CoveredCallFundAdapterStorageHarnessV2 upgradedCoveredCall =
+            CoveredCallFundAdapterStorageHarnessV2(coveredCallProxy);
+        assertEq(upgradedCoveredCall.fund(), address(0xCC));
+        assertEq(upgradedCoveredCall.releasablePrincipal(), 0);
+        upgradedCoveredCall.setReleasablePrincipal(456);
+        assertEq(upgradedCoveredCall.releasablePrincipal(), 456);
     }
 
     function test_namespaceLocationsMatchErc7201Derivations() public {

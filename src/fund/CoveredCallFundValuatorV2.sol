@@ -48,7 +48,6 @@ contract CoveredCallFundValuatorV2 is IPositionValuator, ICoveredCallFundValuato
     uint64 public immutable maxSpotStaleness;
     uint64 public immutable maxObservationWindow;
     uint8 public immutable observationQuorum;
-    uint16 public immutable liabilityBufferBps;
     mapping(address observer => bool approved) public isApprovedObserver;
     address[] private _approvedObservers;
 
@@ -58,7 +57,6 @@ contract CoveredCallFundValuatorV2 is IPositionValuator, ICoveredCallFundValuato
         uint64 maxSpotStaleness_,
         uint64 maxObservationWindow_,
         uint8 observationQuorum_,
-        uint16 liabilityBufferBps_,
         address[] memory approvedObservers_
     ) {
         if (
@@ -66,7 +64,6 @@ contract CoveredCallFundValuatorV2 is IPositionValuator, ICoveredCallFundValuato
                 || maxObservationWindow_ == 0 || observationQuorum_ < 2
                 || observationQuorum_ > approvedObservers_.length
         ) revert InvalidSpotObservation();
-        if (liabilityBufferBps_ != 0) revert InvalidFairValuePolicy();
         if (ICoveredCallChainlinkSpotFeedV2(spotFeed_).decimals() != spotFeedDecimals_) {
             revert InvalidSpotObservation();
         }
@@ -75,7 +72,6 @@ contract CoveredCallFundValuatorV2 is IPositionValuator, ICoveredCallFundValuato
         maxSpotStaleness = maxSpotStaleness_;
         maxObservationWindow = maxObservationWindow_;
         observationQuorum = observationQuorum_;
-        liabilityBufferBps = liabilityBufferBps_;
         for (uint256 i; i < approvedObservers_.length; ++i) {
             address observer = approvedObservers_[i];
             if (observer == address(0) || isApprovedObserver[observer]) revert DuplicateObserver(observer);

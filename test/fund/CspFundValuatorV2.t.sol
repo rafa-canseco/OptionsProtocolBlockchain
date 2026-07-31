@@ -33,7 +33,8 @@ contract CspStrategyManagerCaller {
         external
         returns (uint256)
     {
-        return adapter.deallocate(targetValue, minimumOut, data);
+        (uint256 accountingAssetsOut,) = adapter.deallocate(targetValue, minimumOut, data);
+        return accountingAssetsOut;
     }
 
     function deallocateInKind(CspFundAdapter adapter, uint256 fractionWad, address escrow)
@@ -164,7 +165,7 @@ contract CspFundValuatorV2Test is Test {
         address[] memory observers = new address[](2);
         observers[0] = mm;
         observers[1] = observer;
-        valuator = new CspFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, 0, observers);
+        valuator = new CspFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, observers);
 
         expiry = _nextEightAm();
         usdc.mint(address(strategyManager), 20_000e6);
@@ -257,6 +258,7 @@ contract CspFundValuatorV2Test is Test {
             valuator.value(address(adapter), uint64(block.number), abi.encode(emptyData));
         assertEq(pendingValue.grossAssets, PREMIUM - 1 + 1_800e6);
         assertEq(pendingValue.liabilities, 0);
+        assertEq(pendingValue.baseExitCost, 18e6);
 
         settler.operatorPhysicalRedeemVault(address(adapter), 1, COLLATERAL);
         vm.expectRevert(abi.encodeWithSelector(ICspFundValuator.LedgerMismatch.selector, 1));
@@ -276,6 +278,7 @@ contract CspFundValuatorV2Test is Test {
         assertEq(assignedValue.grossAssets, assignedUsdc + 1_800e6);
         assertEq(assignedValue.liabilities, 0);
         assertEq(assignedValue.liquidAccountingAssets, assignedUsdc);
+        assertEq(assignedValue.baseExitCost, 18e6);
 
         uint256 returned = strategyManager.deallocate(
             adapter,
@@ -316,6 +319,25 @@ contract CspFundValuatorV2Test is Test {
         assertEq(weth.balanceOf(address(adapter)), 0);
         assertEq(adapter.adapterState().accountedUsdc, 0);
         assertEq(settler.vaultOTokenBalance(address(adapter), 1), 0);
+    }
+
+    function test_pendingPhysicalDeliveryCapsHighLiveSpotAtFallbackRecovery() public {
+        _authorizeAndOpen();
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(weth), expiry, 1_800e8);
+
+        strategyManager.deallocate(adapter, 1, 0, _settleData());
+        spotFeed.setPrice(3_000e8);
+
+        ICspFundValuator.ValuationData memory emptyData =
+            ICspFundValuator.ValuationData({optionObservations: new ICspFundValuator.OptionObservation[](0)});
+        FundTypes.PositionValue memory pendingValue =
+            valuator.value(address(adapter), uint64(block.number), abi.encode(emptyData));
+
+        assertEq(uint256(adapter.position(1).lifecycle), uint256(ICspFundAdapter.Lifecycle.AwaitingPhysicalDelivery));
+        assertEq(pendingValue.grossAssets, PREMIUM - 1 + 1_800e6);
+        assertEq(pendingValue.liabilities, 0);
+        assertEq(pendingValue.baseExitCost, 18e6);
     }
 
     function test_physicalDeliveryIsolatesUnexpectedWethDonation() public {
@@ -396,23 +418,24 @@ contract CspFundValuatorV2Test is Test {
         valuator.value(address(adapter), snapshot, abi.encode(valuationData));
     }
 
-    function test_expiredOpenPutUsesSpotIntrinsicUntilExpiryPriceIsFinal() public {
+    function test_expiredOpenPutFailsClosedUntilAuthoritativeExpiryPriceRegardlessOfSpotMovement() public {
         _authorizeAndOpen();
         vm.warp(expiry + 1);
         ICspFundValuator.ValuationData memory emptyData =
             ICspFundValuator.ValuationData({optionObservations: new ICspFundValuator.OptionObservation[](0)});
 
-        FundTypes.PositionValue memory provisional =
-            valuator.value(address(adapter), uint64(block.number), abi.encode(emptyData));
-        assertEq(provisional.grossAssets, COLLATERAL + PREMIUM);
-        assertEq(provisional.liabilities, 200e6);
-        assertEq(provisional.grossAssets - provisional.liabilities, 1_870e6);
+        vm.expectRevert(abi.encodeWithSelector(ICspFundValuator.ExpiryPriceUnavailable.selector, 1, expiry));
+        valuator.value(address(adapter), uint64(block.number), abi.encode(emptyData));
+
+        spotFeed.setPrice(2_100e8);
+        vm.expectRevert(abi.encodeWithSelector(ICspFundValuator.ExpiryPriceUnavailable.selector, 1, expiry));
+        valuator.value(address(adapter), uint64(block.number), abi.encode(emptyData));
 
         oracle.setExpiryPrice(address(weth), expiry, 1_800e8);
         FundTypes.PositionValue memory finalized =
             valuator.value(address(adapter), uint64(block.number), abi.encode(emptyData));
-        assertEq(finalized.grossAssets, provisional.grossAssets);
-        assertEq(finalized.liabilities, provisional.liabilities);
+        assertEq(finalized.grossAssets, COLLATERAL + PREMIUM);
+        assertEq(finalized.liabilities, 200e6);
     }
 
     function test_expiredOtmOpenPutHasZeroLiability() public {
@@ -476,14 +499,6 @@ contract CspFundValuatorV2Test is Test {
                 riskConfig: _riskConfig()
             })
         );
-    }
-
-    function test_valuatorRejectsOneSidedTransactionalNavBuffer() public {
-        address[] memory observers = new address[](2);
-        observers[0] = mm;
-        observers[1] = observer;
-        vm.expectRevert(ICspFundValuator.InvalidFairValuePolicy.selector);
-        new CspFundValuatorV2(address(spotFeed), 8, 1 hours, 10, 2, 1, observers);
     }
 
     function test_inKindAndEmergencyRecoveryExposeOnlyAccountedUsdcAndWeth() public {

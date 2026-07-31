@@ -36,6 +36,10 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         return 1;
     }
 
+    function deallocationInterfaceVersion() external pure returns (uint64) {
+        return 2;
+    }
+
     function positionStateHash() external view returns (bytes32) {
         return keccak256(abi.encode(IERC20(accountingAsset).balanceOf(address(this)), positionNonce));
     }
@@ -50,12 +54,17 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         ++positionNonce;
     }
 
-    function deallocate(uint256 targetValue, uint256 minAccountingAssetsOut, bytes calldata)
+    function deallocate(uint256 targetValue, uint256 minAccountingAssetsOut, bytes calldata data)
         external
-        returns (uint256 accountingAssetsOut)
+        returns (uint256 accountingAssetsOut, uint256 principalReleased)
     {
         require(msg.sender == FundVault(fund).strategyManager(), "ONLY_MANAGER");
-        accountingAssetsOut = targetValue;
+        if (data.length == 64) {
+            (accountingAssetsOut, principalReleased) = abi.decode(data, (uint256, uint256));
+        } else {
+            accountingAssetsOut = targetValue;
+            principalReleased = data.length == 0 ? targetValue : abi.decode(data, (uint256));
+        }
         require(accountingAssetsOut >= minAccountingAssetsOut, "MIN_OUT");
         IERC20(accountingAsset).transfer(fund, accountingAssetsOut);
         ++positionNonce;
@@ -87,6 +96,27 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         ++positionNonce;
     }
 }
+
+    contract LegacyProductionStrategyAdapter {
+        address public immutable fund;
+        address public immutable accountingAsset;
+
+        constructor(address fund_, address accountingAsset_) {
+            fund = fund_;
+            accountingAsset = accountingAsset_;
+        }
+
+        function interfaceVersion() external pure returns (uint64) {
+            return 1;
+        }
+
+        function deallocate(uint256 targetValue, uint256, bytes calldata)
+            external
+            returns (uint256 accountingAssetsOut)
+        {
+            accountingAssetsOut = targetValue;
+        }
+    }
 
     contract ProductionAssetEscrow {}
 
@@ -821,6 +851,122 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(vault.pendingRedeemRequest(0, alice), 40e18);
         }
 
+        function test_unmetMinimumDoesNotBlockOtherControllerOrConsumeSkippedRequest() public {
+            _depositForAlice(50e6);
+            _depositForBob(50e6);
+
+            vm.prank(alice);
+            vault.requestRedeemWithMinAssets(40e18, alice, alice, 41e6);
+            vm.prank(bob);
+            vault.requestRedeemWithMinAssets(40e18, bob, bob, 40e6);
+            flow.sealRedeemBatch(1);
+
+            flow.startRedeemBatch(1, 80e18, 0);
+            assertEq(asset.balanceOf(vault.claimEscrow()), 40e6);
+            assertEq(vault.reservedClaimAssets(), 40e6);
+            FundTypes.RedemptionBatch memory startedBatch = flow.batch(1);
+            assertEq(startedBatch.roundTargetShares, 40e18);
+            assertEq(startedBatch.roundAssetBudget, 40e6);
+
+            (uint16 processed, bool complete) = flow.processRedeemBatch(1, 16);
+            assertEq(processed, 2);
+            assertTrue(complete);
+            FundTypes.RedemptionBatch memory processedBatch = flow.batch(1);
+            assertEq(processedBatch.totalPendingShares, 40e18);
+            assertEq(processedBatch.processedShares, 40e18);
+
+            assertEq(vault.pendingRedeemRequest(0, alice), 40e18);
+            assertEq(flow.pendingMinimumAssets(alice), 41e6);
+            assertEq(vault.claimableRedeemRequest(0, alice), 0);
+            assertEq(vault.pendingRedeemRequest(0, bob), 0);
+            assertEq(vault.claimableRedeemRequest(0, bob), 40e18);
+            assertEq(flow.claimableAssets(bob), 40e6);
+            assertEq(flow.totalPendingShares(), 40e18);
+            assertEq(flow.totalClaimableShares(), 40e18);
+            assertEq(flow.totalReservedAssets(), 40e6);
+            assertEq(share.totalSupply(), 60e18);
+            assertEq(share.balanceOf(address(vault)), 40e18);
+
+            uint256 bobAssetsBefore = asset.balanceOf(bob);
+            vm.prank(bob);
+            assertEq(vault.redeem(40e18, bob, bob), 40e6);
+            assertEq(asset.balanceOf(bob) - bobAssetsBefore, 40e6);
+            assertEq(flow.totalClaimableShares(), 0);
+            assertEq(flow.totalReservedAssets(), 0);
+
+            assertTrue(flow.isCancellationAvailable(alice));
+            vm.prank(alice);
+            vault.cancelPending(40e18);
+
+            assertEq(vault.pendingRedeemRequest(0, alice), 0);
+            assertEq(flow.pendingMinimumAssets(alice), 0);
+            assertEq(flow.totalPendingShares(), 0);
+            assertEq(flow.nextProcessBatchId(), 2);
+            assertEq(share.balanceOf(alice), 50e18);
+            assertEq(share.balanceOf(bob), 10e18);
+            assertEq(share.balanceOf(address(vault)), 0);
+            assertEq(share.totalSupply(), 60e18);
+            assertEq(asset.balanceOf(address(vault)), 60e6);
+            assertEq(asset.balanceOf(vault.claimEscrow()), 0);
+            assertEq(vault.totalAssets(), 60e6);
+        }
+
+        function test_unmetMinimumRemainsIsolatedAcrossPagesAndSucceedsInFreshRound() public {
+            _depositForAlice(50e6);
+            _depositForBob(50e6);
+
+            vm.prank(bob);
+            vault.requestRedeemWithMinAssets(40e18, bob, bob, 40e6);
+            vm.prank(alice);
+            vault.requestRedeemWithMinAssets(40e18, alice, alice, 41e6);
+            flow.sealRedeemBatch(1);
+
+            uint64 firstReportNonce = vault.activeNavWindow().reportNonce;
+            flow.startRedeemBatch(1, 80e18, 0);
+
+            (uint16 processed, bool complete) = flow.processRedeemBatch(1, 1);
+            assertEq(processed, 1);
+            assertFalse(complete);
+            assertEq(vault.claimableRedeemRequest(0, bob), 40e18);
+            assertEq(vault.pendingRedeemRequest(0, alice), 40e18);
+            assertEq(flow.pendingMinimumAssets(alice), 41e6);
+            assertEq(vault.reservedClaimAssets(), 40e6);
+
+            uint256 bobAssetsBefore = asset.balanceOf(bob);
+            vm.prank(bob);
+            assertEq(vault.redeem(40e18, bob, bob), 40e6);
+            assertEq(asset.balanceOf(bob) - bobAssetsBefore, 40e6);
+            assertEq(vault.reservedClaimAssets(), 0);
+            assertEq(flow.totalReservedAssets(), 0);
+
+            (processed, complete) = flow.processRedeemBatch(1, 1);
+            assertEq(processed, 1);
+            assertTrue(complete);
+            assertEq(vault.pendingRedeemRequest(0, alice), 40e18);
+            assertEq(flow.pendingMinimumAssets(alice), 41e6);
+            assertEq(vault.claimableRedeemRequest(0, alice), 0);
+            assertEq(flow.totalPendingShares(), 40e18);
+            assertEq(share.totalSupply(), 60e18);
+            (uint256 firstEligibleSupply, uint256 firstProcessedShares) = flow.windowOutflow(firstReportNonce);
+            assertEq(firstEligibleSupply, 100e18);
+            assertEq(firstProcessedShares, 40e18);
+
+            asset.mint(address(vault), 2e6);
+            _submitNav(62e6, 62e6);
+
+            flow.startRedeemBatch(1, 40e18, 0);
+            (processed, complete) = flow.processRedeemBatch(1, 16);
+            assertEq(processed, 2);
+            assertTrue(complete);
+            assertEq(vault.pendingRedeemRequest(0, alice), 0);
+            assertEq(flow.pendingMinimumAssets(alice), 0);
+            assertEq(vault.claimableRedeemRequest(0, alice), 40e18);
+            assertGe(flow.claimableAssets(alice), 41e6);
+            assertEq(flow.totalPendingShares(), 0);
+            assertEq(flow.nextProcessBatchId(), 2);
+            assertEq(share.totalSupply(), 20e18);
+        }
+
         function test_strategyCapsIdleFloorAndRoundTripAreEnforced() public {
             _depositForAlice(100e6);
             ProductionStrategyAdapter adapter = new ProductionStrategyAdapter(address(vault), address(asset));
@@ -860,6 +1006,83 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(asset.balanceOf(address(adapter)), 25e6 + 1);
             assertEq(vault.accountedIdleAssets(), 75e6 - 1);
             assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 25e6 + 1);
+        }
+
+        function test_returnedPremiumDoesNotReopenPrincipalAllocationCap() public {
+            _depositForAlice(100e6);
+            (ProductionStrategyAdapter adapter,) = _configureProductionStrategy(50e6, 0);
+
+            strategy.allocate(address(adapter), address(asset), 50e6, "");
+            asset.mint(address(adapter), 5e6);
+
+            assertEq(strategy.deallocate(address(adapter), 5e6, 5e6, abi.encode(uint256(0))), 5e6);
+            assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 50e6);
+
+            vm.expectRevert(abi.encodeWithSelector(IStrategyManager.AllocationCapExceeded.selector, address(adapter)));
+            strategy.allocate(address(adapter), address(asset), 1, "");
+
+            assertEq(strategy.deallocate(address(adapter), 10e6, 10e6, abi.encode(uint256(10e6))), 10e6);
+            assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 40e6);
+
+            strategy.allocate(address(adapter), address(asset), 1, "");
+            assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 40e6 + 1);
+        }
+
+        function test_principalReleaseUsesItsOwnConfiguredLossBound() public {
+            _depositForAlice(100e6);
+            (ProductionStrategyAdapter adapter,) = _configureProductionStrategy(50e6, 1_000);
+            strategy.allocate(address(adapter), address(asset), 50e6, "");
+
+            assertEq(strategy.deallocate(address(adapter), 50e6, 0, abi.encode(uint256(45e6), uint256(50e6))), 45e6);
+            assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 0);
+        }
+
+        function test_smallTargetCannotReleasePrincipalOutsideConfiguredLossBound() public {
+            _depositForAlice(100e6);
+            (ProductionStrategyAdapter adapter,) = _configureProductionStrategy(50e6, 1_000);
+            strategy.allocate(address(adapter), address(asset), 50e6, "");
+
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    StrategyManager.StrategyLossExceeded.selector, address(adapter), uint256(45e6), uint256(1)
+                )
+            );
+            strategy.deallocate(address(adapter), 1, 0, abi.encode(uint256(1), uint256(50e6)));
+
+            assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 50e6);
+            assertEq(asset.balanceOf(address(adapter)), 50e6);
+        }
+
+        function test_legacyOneWordAdapterIsRejectedBeforeStrategyConfiguration() public {
+            LegacyProductionStrategyAdapter legacy = new LegacyProductionStrategyAdapter(address(vault), address(asset));
+            ProductionPositionValuator valuator = new ProductionPositionValuator();
+            _scheduleAndCall(
+                address(accounting),
+                abi.encodeCall(
+                    accounting.setComponent,
+                    (accounting.strategyComponentId(address(legacy)), address(valuator), uint64(1), true)
+                )
+            );
+            FundTypes.StrategyConfig memory config = FundTypes.StrategyConfig({
+                active: true,
+                maxAllocationBps: 5_000,
+                maxLossBps: 1_000,
+                cooldown: 0,
+                interfaceVersion: 1,
+                valuator: address(valuator),
+                absoluteCap: 50e6
+            });
+            bytes memory configure = abi.encodeCall(strategy.setStrategyConfig, (address(legacy), config));
+            manager.schedule(address(strategy), configure, 0);
+            vm.warp(block.timestamp + FundConstants.CURATOR_DELAY);
+
+            vm.expectRevert(
+                abi.encodeWithSelector(IStrategyManager.InvalidAdapterVersion.selector, uint64(2), uint64(0))
+            );
+            strategy.setStrategyConfig(address(legacy), config);
+
+            assertEq(strategy.strategyConfig(address(legacy)).interfaceVersion, 0);
+            assertEq(strategy.activeAdapterCount(), 0);
         }
 
         function test_strategyInKindExitSynchronizesNonceAndAccountingHash() public {
@@ -968,6 +1191,7 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             _scheduleAndCall(address(accounting), abi.encodeCall(accounting.setFeeConfig, (config)));
             uint256 rawAssetsBefore = asset.balanceOf(address(vault));
 
+            vm.warp(block.timestamp + 1 days);
             _submitNav(110e6, 100e6);
 
             assertGt(share.balanceOf(feeRecipient), 0);
@@ -976,6 +1200,123 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             uint256 postFeePps = Math.mulDiv(110e6, FundConstants.SHARE_SCALE, share.totalSupply());
             assertEq(accounting.feeState().highWaterMark, postFeePps);
             assertLt(postFeePps, 1.1e6);
+        }
+
+        function test_performanceFeeWaitsForConfiguredCrystallizationPeriod() public {
+            _depositForAlice(100e6);
+            FundTypes.FeeConfig memory config = FundTypes.FeeConfig({
+                managementFeeWad: 0,
+                performanceFeeBps: 1_000,
+                maxManagementFeeBps: 200,
+                maxPerformanceFeeBps: 2_000,
+                maxAccrualInterval: 30 days,
+                crystallizationPeriod: 1 days,
+                feeRecipient: feeRecipient
+            });
+            _scheduleAndCall(address(accounting), abi.encodeCall(accounting.setFeeConfig, (config)));
+
+            vm.warp(block.timestamp + 1 days);
+            _submitNav(110e6, 100e6);
+            uint256 firstCrystallizationShares = share.balanceOf(feeRecipient);
+            uint48 firstCrystallizationAt = accounting.feeState().lastCrystallization;
+            uint256 firstHighWaterMark = accounting.feeState().highWaterMark;
+            assertGt(firstCrystallizationShares, 0);
+
+            _submitNav(120e6, 100e6);
+            assertEq(share.balanceOf(feeRecipient), firstCrystallizationShares);
+            assertEq(accounting.feeState().lastCrystallization, firstCrystallizationAt);
+            assertEq(accounting.feeState().highWaterMark, firstHighWaterMark);
+
+            vm.warp(block.timestamp + 1 days);
+            _submitNav(120e6, 100e6);
+            assertGt(share.balanceOf(feeRecipient), firstCrystallizationShares);
+            assertEq(accounting.feeState().lastCrystallization, uint48(block.timestamp));
+            assertGt(accounting.feeState().highWaterMark, firstHighWaterMark);
+        }
+
+        function test_depositCrystallizesPerformanceFeeBeforePricingNewShares() public {
+            _depositForAlice(100e6);
+            FundTypes.FeeConfig memory config = FundTypes.FeeConfig({
+                managementFeeWad: 0,
+                performanceFeeBps: 2_000,
+                maxManagementFeeBps: 0,
+                maxPerformanceFeeBps: 2_000,
+                maxAccrualInterval: 0,
+                crystallizationPeriod: 30 days,
+                feeRecipient: feeRecipient
+            });
+            _scheduleAndCall(address(accounting), abi.encodeCall(accounting.setFeeConfig, (config)));
+            _submitNav(120e6, 100e6);
+            assertEq(share.balanceOf(feeRecipient), 0);
+
+            uint256 expectedFeeShares = Math.mulDiv(4e6, 100e18, 116e6, Math.Rounding.Ceil);
+            uint256 expectedBobShares = Math.mulDiv(
+                120e6, 100e18 + expectedFeeShares + vault.virtualShares(), 120e6 + FundConstants.VIRTUAL_ASSETS
+            );
+
+            _depositForBob(120e6);
+
+            assertEq(share.balanceOf(feeRecipient), expectedFeeShares);
+            assertEq(share.balanceOf(bob), expectedBobShares);
+            uint256 feesAfterEntry = share.balanceOf(feeRecipient);
+
+            vm.warp(block.timestamp + 30 days);
+            _submitNav(240e6, 220e6);
+            assertEq(share.balanceOf(feeRecipient), feesAfterEntry);
+        }
+
+        function test_redemptionCrystallizesPerformanceFeeBeforeReservingAssets() public {
+            _depositForAlice(100e6);
+            FundTypes.FeeConfig memory config = FundTypes.FeeConfig({
+                managementFeeWad: 0,
+                performanceFeeBps: 2_000,
+                maxManagementFeeBps: 0,
+                maxPerformanceFeeBps: 2_000,
+                maxAccrualInterval: 0,
+                crystallizationPeriod: 30 days,
+                feeRecipient: feeRecipient
+            });
+            _scheduleAndCall(address(accounting), abi.encodeCall(accounting.setFeeConfig, (config)));
+            _submitNav(120e6, 100e6);
+
+            vm.prank(alice);
+            vault.requestRedeem(50e18, alice, alice);
+            flow.sealRedeemBatch(1);
+            flow.startRedeemBatch(1, 50e18, 0);
+
+            uint256 expectedFeeShares = Math.mulDiv(4e6, 100e18, 116e6, Math.Rounding.Ceil);
+            uint256 expectedAssets = Math.mulDiv(
+                50e18, 120e6 + FundConstants.VIRTUAL_ASSETS, 100e18 + expectedFeeShares + vault.virtualShares()
+            );
+            assertEq(share.balanceOf(feeRecipient), expectedFeeShares);
+            assertEq(asset.balanceOf(vault.claimEscrow()), expectedAssets);
+            assertLt(expectedAssets, 60e6);
+        }
+
+        function test_feeConfigCrystallizesPerformanceFeeUnderPriorConfig() public {
+            _depositForAlice(100e6);
+            FundTypes.FeeConfig memory oldConfig = FundTypes.FeeConfig({
+                managementFeeWad: 0,
+                performanceFeeBps: 2_000,
+                maxManagementFeeBps: 0,
+                maxPerformanceFeeBps: 2_000,
+                maxAccrualInterval: 0,
+                crystallizationPeriod: 30 days,
+                feeRecipient: feeRecipient
+            });
+            _scheduleAndCall(address(accounting), abi.encodeCall(accounting.setFeeConfig, (oldConfig)));
+            _submitNav(120e6, 100e6);
+
+            address newRecipient = makeAddr("new-performance-fee-recipient");
+            FundTypes.FeeConfig memory newConfig = oldConfig;
+            newConfig.performanceFeeBps = 0;
+            newConfig.feeRecipient = newRecipient;
+            _scheduleAndCall(address(accounting), abi.encodeCall(accounting.setFeeConfig, (newConfig)));
+
+            uint256 expectedFeeShares = Math.mulDiv(4e6, 100e18, 116e6, Math.Rounding.Ceil);
+            assertEq(share.balanceOf(feeRecipient), expectedFeeShares);
+            assertEq(share.balanceOf(newRecipient), 0);
+            assertEq(accounting.feeConfig().performanceFeeBps, 0);
         }
 
         function test_managementFeeCrystallizesBeforeRedemptionProcessing() public {

@@ -23,6 +23,10 @@ contract MockFundStrategyAdapter is IFundStrategyAdapter {
         return 1;
     }
 
+    function deallocationInterfaceVersion() external pure returns (uint64) {
+        return 2;
+    }
+
     function positionStateHash() external view returns (bytes32) {
         return keccak256(abi.encode(positionNonce, IERC20(accountingAsset).balanceOf(address(this))));
     }
@@ -41,9 +45,10 @@ contract MockFundStrategyAdapter is IFundStrategyAdapter {
 
     function deallocate(uint256 targetValue, uint256 minAccountingAssetsOut, bytes calldata)
         external
-        returns (uint256 accountingAssetsOut)
+        returns (uint256 accountingAssetsOut, uint256 principalReleased)
     {
         accountingAssetsOut = targetValue;
+        principalReleased = targetValue;
         require(accountingAssetsOut >= minAccountingAssetsOut);
         ++positionNonce;
     }

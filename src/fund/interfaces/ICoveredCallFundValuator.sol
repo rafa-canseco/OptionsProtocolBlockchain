@@ -21,7 +21,6 @@ interface ICoveredCallFundValuator {
     error ExpiryPriceUnavailable(uint256 positionId, uint256 expiry);
     error InsufficientObservationQuorum(uint256 positionId, uint256 required, uint256 actual);
     error InvalidAdapter(address adapter);
-    error InvalidFairValuePolicy();
     error InvalidModelVersion(uint256 positionId, uint64 expected, uint64 actual);
     error InvalidObservation(uint256 positionId);
     error InvalidSnapshotBlock(uint64 expected, uint64 actual);

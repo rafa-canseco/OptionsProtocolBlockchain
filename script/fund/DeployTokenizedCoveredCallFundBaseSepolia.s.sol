@@ -118,7 +118,6 @@ contract DeployTokenizedCoveredCallFundBaseSepolia is B1N360Base {
                 config.maxSpotStaleness,
                 config.maxObservationWindow,
                 config.observationQuorum,
-                config.liabilityBufferBps,
                 config.approvedObservers
             )
         );

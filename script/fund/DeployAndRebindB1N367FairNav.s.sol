@@ -27,7 +27,6 @@ contract DeployB1N367FairNavValuator is B1N367Base {
                 config.maxSpotStaleness,
                 config.maxObservationWindow,
                 config.observationQuorum,
-                config.liabilityBufferBps,
                 config.approvedObservers
             )
         );
@@ -42,7 +41,6 @@ contract DeployB1N367FairNavValuator is B1N367Base {
         require(config.maxSpotStaleness == 1 hours, "B1N367: staleness");
         require(config.maxObservationWindow == 120, "B1N367: window");
         require(config.observationQuorum == 2, "B1N367: quorum");
-        require(config.liabilityBufferBps == 0, "B1N367: buffer");
         require(config.approvedObservers.length == 2, "B1N367: observers");
     }
 
@@ -51,7 +49,6 @@ contract DeployB1N367FairNavValuator is B1N367Base {
         require(valuator.valuationPolicyVersion() == 2, "B1N367: policy");
         require(valuator.requiredModelVersion() == 1, "B1N367: model");
         require(valuator.maxObservationDivergenceBps() == 500, "B1N367: divergence");
-        require(valuator.liabilityBufferBps() == 0, "B1N367: buffer");
         require(valuator.observationQuorum() == config.observationQuorum, "B1N367: quorum");
         require(valuator.approvedObserverCount() == config.approvedObservers.length, "B1N367: observers");
         for (uint256 i; i < config.approvedObservers.length; ++i) {
@@ -131,7 +128,6 @@ contract RebindB1N367FairNavValuator is B1N367Base {
         require(valuator.valuationPolicyVersion() == 2, "B1N367: policy");
         require(valuator.requiredModelVersion() == 1, "B1N367: model");
         require(valuator.maxObservationDivergenceBps() == 500, "B1N367: divergence");
-        require(valuator.liabilityBufferBps() == 0, "B1N367: buffer");
         require(valuator.observationQuorum() == config.observationQuorum, "B1N367: quorum");
         require(valuator.spotFeed() == config.spotFeed, "B1N367: spot feed");
         require(valuator.spotFeedDecimals() == config.spotFeedDecimals, "B1N367: spot decimals");

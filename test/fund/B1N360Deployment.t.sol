@@ -236,11 +236,7 @@ contract B1N360DeploymentTest is Test {
         operationsHarness.requireOpenDepositsReadiness(vault, strategyManager, deployed.coveredCallFundAdapterProxy);
 
         vm.setEnv("FUND_BACKEND_NAV_RECONCILED", "true");
-        FundTypes.NavCommit memory activeNav;
-        activeNav.reportNonce = 1;
-        activeNav.validAfterBlock = uint64(block.number);
-        activeNav.validUntilBlock = uint64(block.number + 10);
-        vm.mockCall(address(vault), abi.encodeCall(vault.activeNavWindow, ()), abi.encode(activeNav));
+        _commitZeroNav(vault, deployed.fundAccountingProxy);
         operationsHarness.requireOpenDepositsReadiness(vault, strategyManager, deployed.coveredCallFundAdapterProxy);
 
         B1N360Operations.Operation memory open = operationsHarness.openDepositsOperation(address(vault));
@@ -424,9 +420,36 @@ contract B1N360DeploymentTest is Test {
             maxSpotStaleness: 1 hours,
             maxObservationWindow: 120,
             observationQuorum: 2,
-            liabilityBufferBps: 0,
             approvedObservers: observers
         });
+    }
+
+    function _commitZeroNav(FundVault vault, address accounting) private {
+        vm.roll(block.number + 2);
+        FundTypes.NavCommit memory current = vault.activeNavWindow();
+        FundTypes.NavCommit memory nav = FundTypes.NavCommit({
+            grossAssets: 0,
+            liabilities: 0,
+            netAssets: 0,
+            liquidAccountingAssets: 0,
+            baseExitCost: 0,
+            snapshotBlock: uint64(block.number - 1),
+            validAfterBlock: uint64(block.number),
+            validUntilBlock: uint64(block.number + 10),
+            reporterSetVersion: 1,
+            reportNonce: current.reportNonce + 1,
+            positionsHash: current.positionsHash,
+            reportHash: keccak256("B1N360_TEST_NAV"),
+            signaturesHash: keccak256("B1N360_TEST_SIGNATURES"),
+            fundFlowNonce: vault.fundFlowNonce(),
+            idleStateHash: vault.idleStateHash()
+        });
+
+        vm.startPrank(accounting);
+        uint256 lockId = vault.beginModuleExecution(vault.compatibilityVersion());
+        vault.commitNav(nav, 0, address(0));
+        vault.endModuleExecution(lockId);
+        vm.stopPrank();
     }
 
     function _policyConfig(B1N360Base.DeploymentAddresses memory deployed)

@@ -226,6 +226,7 @@ contract B1N352DeploymentTest is Test {
     B1N352OperationsHarness internal operationsHarness;
 
     function setUp() public {
+        vm.chainId(84_532);
         usdc = new MockERC20("USD Coin", "USDC", 6);
         weth = new MockERC20("Wrapped Ether", "WETH", 18);
         spotFeed = new MockChainlinkFeed(2_500e8);
@@ -299,6 +300,7 @@ contract B1N352DeploymentTest is Test {
         assertTrue(StrategyManager(deployed.strategyManagerProxy).strategyConfig(policy.adapter).active);
         assertTrue(vault.depositsPaused());
 
+        _commitZeroNav(vault, deployed.fundAccountingProxy);
         B1N352Operations.Operation[] memory open = new B1N352Operations.Operation[](1);
         open[0] = B1N352Operations.Operation({
             target: address(vault),
@@ -828,6 +830,34 @@ contract B1N352DeploymentTest is Test {
             liabilityBufferBps: 1_000,
             approvedObservers: observers
         });
+    }
+
+    function _commitZeroNav(FundVault vault, address accounting) private {
+        vm.roll(block.number + 2);
+        FundTypes.NavCommit memory current = vault.activeNavWindow();
+        FundTypes.NavCommit memory nav = FundTypes.NavCommit({
+            grossAssets: 0,
+            liabilities: 0,
+            netAssets: 0,
+            liquidAccountingAssets: 0,
+            baseExitCost: 0,
+            snapshotBlock: uint64(block.number - 1),
+            validAfterBlock: uint64(block.number),
+            validUntilBlock: uint64(block.number + 10),
+            reporterSetVersion: 1,
+            reportNonce: current.reportNonce + 1,
+            positionsHash: current.positionsHash,
+            reportHash: keccak256("B1N352_TEST_NAV"),
+            signaturesHash: keccak256("B1N352_TEST_SIGNATURES"),
+            fundFlowNonce: vault.fundFlowNonce(),
+            idleStateHash: vault.idleStateHash()
+        });
+
+        vm.startPrank(accounting);
+        uint256 lockId = vault.beginModuleExecution(vault.compatibilityVersion());
+        vault.commitNav(nav, 0, address(0));
+        vault.endModuleExecution(lockId);
+        vm.stopPrank();
     }
 
     function _policyConfig(B1N352Base.DeploymentAddresses memory deployed)

@@ -16,7 +16,6 @@ abstract contract B1N367Base is Script {
         uint64 maxSpotStaleness;
         uint64 maxObservationWindow;
         uint8 observationQuorum;
-        uint16 liabilityBufferBps;
         address[] approvedObservers;
     }
 
@@ -36,7 +35,6 @@ abstract contract B1N367Base is Script {
         config.maxSpotStaleness = _approvedUint("FUND_CSP_MAX_SPOT_STALENESS_SECONDS").toUint64();
         config.maxObservationWindow = _approvedUint("FUND_CSP_MAX_OBSERVATION_WINDOW_BLOCKS").toUint64();
         config.observationQuorum = _approvedUint("FUND_CSP_OBSERVATION_QUORUM").toUint8();
-        config.liabilityBufferBps = _approvedUint("FUND_CSP_LIABILITY_BUFFER_BPS").toUint16();
         config.approvedObservers =
             vm.parseJsonAddressArray(_approvedInputs(), _approvedJsonKey("FUND_CSP_APPROVED_OBSERVERS"));
     }

@@ -304,6 +304,7 @@ abstract contract B1N352Operations is B1N352Base {
     }
 
     function _verifyAdapterPolicy(DeployConfig memory deployConfig, address adapter_) private view {
+        require(CspFundAdapter(adapter_).deallocationInterfaceVersion() == 2, "B1N352: adapter deallocation interface");
         ICspFundAdapter.AdapterConfig memory actual = CspFundAdapter(adapter_).adapterConfig();
         ICspFundAdapter.AdapterConfig memory expected = ICspFundAdapter.AdapterConfig({
             riskConfig: deployConfig.adapterRiskConfig,

@@ -21,6 +21,7 @@ abstract contract CspFundAdapterStorage {
         bytes32 positionsHash;
         ICspFundAdapter.RiskConfig riskConfig;
         mapping(uint256 positionId => ICspFundAdapter.Position position) positions;
+        uint256 releasablePrincipal;
     }
 
     bytes32 internal constant CSP_FUND_ADAPTER_STORAGE_LOCATION =

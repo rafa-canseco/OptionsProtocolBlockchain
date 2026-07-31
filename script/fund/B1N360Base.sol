@@ -46,7 +46,6 @@ abstract contract B1N360Base is Script {
         uint64 maxSpotStaleness;
         uint64 maxObservationWindow;
         uint8 observationQuorum;
-        uint16 liabilityBufferBps;
         address[] approvedObservers;
     }
 
@@ -143,7 +142,6 @@ abstract contract B1N360Base is Script {
         config.maxSpotStaleness = _approvedUint64("FUND_CC_MAX_SPOT_STALENESS_SECONDS");
         config.maxObservationWindow = _approvedUint64("FUND_CC_MAX_OBSERVATION_WINDOW_BLOCKS");
         config.observationQuorum = _approvedUint8("FUND_CC_OBSERVATION_QUORUM");
-        config.liabilityBufferBps = _approvedUint16("FUND_CC_LIABILITY_BUFFER_BPS");
         config.approvedObservers = _approvedAddressArray("FUND_CC_APPROVED_OBSERVERS");
     }
 
@@ -159,7 +157,6 @@ abstract contract B1N360Base is Script {
         require(config.maxSpotStaleness == 1 hours, "B1N360: spot staleness");
         require(config.maxObservationWindow == 120, "B1N360: observation window");
         require(config.observationQuorum == 2, "B1N360: observation quorum");
-        require(config.liabilityBufferBps == 0, "B1N360: liability buffer");
         require(IERC20Metadata(config.weth).decimals() == 18, "B1N360: WETH decimals");
         require(IERC20Metadata(config.usdc).decimals() == 6, "B1N360: USDC decimals");
         require(config.weth != config.usdc, "B1N360: distinct assets");

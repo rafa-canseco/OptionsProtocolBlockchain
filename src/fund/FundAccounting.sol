@@ -209,7 +209,7 @@ contract FundAccounting is FundUpgradeable, FundAccountingStorage, IFundAccounti
                 signatures
             );
 
-        uint256 feeShares = _crystallizeFees($, nav.netAssets);
+        uint256 feeShares = _crystallizeFees($, nav.netAssets, false, true);
         $.lastReportNonce = reportNonce;
         uint256 lockId = vault.beginModuleExecution($.compatibilityVersion);
         vault.commitNav(nav, feeShares, $.feeConfig.feeRecipient);
@@ -293,16 +293,16 @@ contract FundAccounting is FundUpgradeable, FundAccountingStorage, IFundAccounti
 
     function setFeeConfig(FundTypes.FeeConfig calldata config) external restricted {
         FundAccountingStorageLayout storage $ = _getFundAccountingStorage();
-        _checkpointManagementFee($);
+        _checkpointFees($, true, false);
         _setFeeConfig($, config);
     }
 
+    /// @notice Checkpoints management fees and forces performance-fee crystallization before fund flows.
     function accrueManagementFee() external returns (uint256 feeShares) {
         FundAccountingStorageLayout storage $ = _getFundAccountingStorage();
         IFundVaultAccounting vault = IFundVaultAccounting($.fund);
         if (msg.sender != $.fund && msg.sender != vault.flowManager()) revert UnauthorizedFeeAccrual(msg.sender);
-        feeShares = _accrueManagementFee($, vault.totalAssets(), vault.shareSupply(), true);
-        _mintCheckpointShares($, feeShares);
+        feeShares = _checkpointFees($, true, true);
     }
 
     function _setFeeConfig(FundAccountingStorageLayout storage $, FundTypes.FeeConfig calldata config) private {
@@ -318,16 +318,22 @@ contract FundAccounting is FundUpgradeable, FundAccountingStorage, IFundAccounti
         emit FeeConfigUpdated(config.feeRecipient, config.managementFeeWad, config.performanceFeeBps);
     }
 
-    function _crystallizeFees(FundAccountingStorageLayout storage $, uint256 preFeeNav)
-        private
-        returns (uint256 feeShares)
-    {
+    function _crystallizeFees(
+        FundAccountingStorageLayout storage $,
+        uint256 preFeeNav,
+        bool forcePerformanceFee,
+        bool capManagementElapsed
+    ) private returns (uint256 feeShares) {
         IFundVaultAccounting vault = IFundVaultAccounting($.fund);
         uint256 supply = vault.shareSupply();
         FundTypes.FeeConfig storage config = $.feeConfig;
         FundTypes.FeeState storage state = $.feeState;
 
-        feeShares = _accrueManagementFee($, preFeeNav, supply, true);
+        feeShares = _accrueManagementFee($, preFeeNav, supply, capManagementElapsed);
+
+        bool crystallizationDue = forcePerformanceFee || config.crystallizationPeriod == 0
+            || block.timestamp >= uint256(state.lastCrystallization) + config.crystallizationPeriod;
+        if (!crystallizationDue) return feeShares;
 
         if (supply != 0 && preFeeNav != 0) {
             (, uint256 performanceShares, uint256 preFeePps) = FundMath.performanceFeeShares(
@@ -341,10 +347,13 @@ contract FundAccounting is FundUpgradeable, FundAccountingStorage, IFundAccounti
         state.lastCrystallization = uint48(block.timestamp);
     }
 
-    function _checkpointManagementFee(FundAccountingStorageLayout storage $) private {
+    function _checkpointFees(FundAccountingStorageLayout storage $, bool forcePerformanceFee, bool capManagementElapsed)
+        private
+        returns (uint256 feeShares)
+    {
         IFundVaultAccounting vault = IFundVaultAccounting($.fund);
         if (IFlowProcessingState(vault.flowManager()).hasActiveProcessing()) revert InvalidReportWindow();
-        uint256 feeShares = _accrueManagementFee($, vault.totalAssets(), vault.shareSupply(), false);
+        feeShares = _crystallizeFees($, vault.totalAssets(), forcePerformanceFee, capManagementElapsed);
         _mintCheckpointShares($, feeShares);
     }
 

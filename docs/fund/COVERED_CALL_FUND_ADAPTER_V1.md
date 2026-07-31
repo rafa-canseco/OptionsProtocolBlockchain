@@ -19,11 +19,13 @@ claim.
 - `CoveredCallFundAdapter`: upgradeable strategy boundary owned by one fund.
 - `CoveredCallFundAdapterOperations`: linked execution module for settlement,
   onboarding checks, and bounded USDC-to-WETH normalization.
-- `CoveredCallFundValuator`: immutable WETH-denominated valuation policy.
+- `CoveredCallFundValuatorV2`: immutable WETH-denominated fair-value policy.
 - `ICoveredCallFundAdapter`: allocator and backend ABI.
 - `ICoveredCallFundValuator`: signed option-liability observation ABI.
 
 `interfaceVersion()` returns `1` on both adapter and valuator.
+`deallocationInterfaceVersion()` returns `2` on the adapter and identifies the
+two-word `deallocate` return ABI.
 
 ## Allocator calls
 
@@ -135,7 +137,7 @@ All `FundTypes.PositionValue` amounts are WETH-denominated:
 
 - `grossAssets`: accounted idle WETH, accounted USDC converted at fresh spot,
   and locked WETH collateral
-- `liabilities`: conservative signed option liability with configured buffer
+- `liabilities`: quorum-approved fair option liability
 - `liquidAccountingAssets`: nonzero only when no active position and no
   accounted USDC remain
 - `baseExitCost`: signed close cost plus conservative USDC normalization cost
@@ -144,3 +146,8 @@ Pre-expiry active positions require the configured quorum of unique approved
 observers, including at least one observer other than the position market maker.
 The valuator rejects stale spot data, stale or mismatched observations, ledger
 inconsistency, accounting deficits, and pending physical delivery.
+
+Terminal settlement credits principal as releasable but does not by itself
+reduce the StrategyManager allocation counter. Principal is reported as released
+only as WETH is actually transferred back to the fund. Normalization, return-idle,
+in-kind, and emergency flows consume the corresponding releasable balance.
