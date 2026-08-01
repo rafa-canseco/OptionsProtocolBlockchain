@@ -96,6 +96,8 @@ settler_owner=$(cast call "$batch_settler" 'owner()(address)' --rpc-url "$rpc_ur
   == "$(tr '[:upper:]' '[:lower:]' <<<"$expected_settler_owner")" ]] \
   || die "BatchSettler onboarding owner mismatch"
 
+script/fund/test-meta-wheel-input-generator-fixture.sh
+script/fund/test-meta-wheel-finalizer-live-fixture.sh
 forge clean
 forge build "${link_arguments[@]}"
 script/fund/validate-meta-wheel-upgrades.sh

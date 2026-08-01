@@ -2,7 +2,7 @@
 # shellcheck disable=SC2129
 set -euo pipefail
 
-for command_name in jq cast shasum python3; do
+for command_name in jq cast shasum python3 rg; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "missing fixture command: $command_name" >&2
     exit 1
@@ -19,8 +19,13 @@ source_commit=1111111111111111111111111111111111111111
 deployment_id=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 bootstrap=0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425
 settler_owner=0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D
-curator=0x0000000000000000000000000000000000000050
-guardian=0x0000000000000000000000000000000000000051
+final_admin=0x0000000000000000000000000000000000000050
+final_upgrader=0x0000000000000000000000000000000000000051
+final_accounting=0x0000000000000000000000000000000000000052
+final_allocator=0x0000000000000000000000000000000000000053
+final_processor=0x0000000000000000000000000000000000000054
+curator=0x0000000000000000000000000000000000000055
+guardian=0x0000000000000000000000000000000000000056
 batch_settler=0x000000000000000000000000000000000000005a
 runtime_code=0x6000
 runtime_codehash=$($real_cast keccak "$runtime_code")
@@ -120,13 +125,18 @@ jq -n --arg sourceCommit "$source_commit" --arg broadcaster "$bootstrap" \
 ' >"$fixture_dir/libraries.json"
 
 jq -n --arg sourceCommit "$source_commit" --arg bootstrap "$bootstrap" --arg feeRecipient "$settler_owner" \
-  --arg curator "$curator" --arg guardian "$guardian" --arg batchSettler "$batch_settler" \
+  --arg finalAdmin "$final_admin" --arg finalUpgrader "$final_upgrader" \
+  --arg finalAccounting "$final_accounting" --arg finalAllocator "$final_allocator" \
+  --arg finalProcessor "$final_processor" --arg curator "$curator" --arg guardian "$guardian" \
+  --arg batchSettler "$batch_settler" \
   --slurpfile libraries "$fixture_dir/libraries.json" '
   {approval: "APPROVED_BASE_SEPOLIA_LIVE", environment: {
     SOURCE_COMMIT: $sourceCommit, BATCH_SETTLER: $batchSettler, FEE_RECIPIENT: $feeRecipient,
     ROLE_ADMIN: $bootstrap, ROLE_UPGRADER: $bootstrap, ROLE_ACCOUNTING: $bootstrap,
     ROLE_ALLOCATOR: $bootstrap, ROLE_PROCESSOR: $bootstrap, ROLE_CURATOR: $bootstrap, ROLE_GUARDIAN: $bootstrap,
-    FINAL_ROLE_CURATOR: $curator, FINAL_ROLE_GUARDIAN: $guardian,
+    FINAL_ROLE_ADMIN: $finalAdmin, FINAL_ROLE_UPGRADER: $finalUpgrader,
+    FINAL_ROLE_ACCOUNTING: $finalAccounting, FINAL_ROLE_ALLOCATOR: $finalAllocator,
+    FINAL_ROLE_PROCESSOR: $finalProcessor, FINAL_ROLE_CURATOR: $curator, FINAL_ROLE_GUARDIAN: $guardian,
     APPROVED_OBSERVERS: [
       "0x0000000000000000000000000000000000000046", "0x0000000000000000000000000000000000000047",
       "0x0000000000000000000000000000000000000048", "0x0000000000000000000000000000000000000049"],
@@ -230,6 +240,9 @@ jq -n --arg sourceCommit "$source_commit" --arg deploymentId "$deployment_id" \
 
 transactions_jsonl="$fixture_dir/transactions.jsonl"
 : >"$transactions_jsonl"
+jq -c --arg from "$bootstrap" '
+  .orderedLibraries[] | {key: .receipt.transactionHash, value: {from: $from, to: null, input: "0x"}}
+' "$fixture_dir/libraries.json" >>"$transactions_jsonl"
 jq -c --arg from "$bootstrap" --arg to "$factory" '.[] | {key: .transactionHash, value: {from: $from, to: $to, input: "0x"}}' \
   "$fixture_dir/inventory.json" >>"$transactions_jsonl"
 jq -cn --arg key "$(hash_for 200)" --arg from "$bootstrap" --arg to "$access_manager" \
@@ -262,23 +275,54 @@ mkdir -p "$fixture_dir/bin"
 ln -s "$project_dir/test/fixtures/b1n419-finalizer/mock-cast.sh" "$fixture_dir/bin/cast"
 ln -s "$project_dir/test/fixtures/b1n419-finalizer/mock-forge.sh" "$fixture_dir/bin/forge"
 
-PATH="$fixture_dir/bin:$PATH" \
-PYTHONDONTWRITEBYTECODE=1 \
-BASE_SEPOLIA_RPC_URL=https://fixture.invalid \
-B1N419_MANIFEST_PATH="$fixture_dir/manifest.json" \
-B1N419_CANONICALIZATION_EVIDENCE_PATH="$fixture_dir/evidence.json" \
-B1N419_LIBRARY_EVIDENCE_PATH="$fixture_dir/libraries.json" \
-B1N419_CANONICAL_MANIFEST_PATH="$fixture_dir/canonical.json" \
-B1N419_APPROVED_INPUTS_PATH="$fixture_dir/inputs.json" \
-B1N419_APPROVED_INPUTS_SHA256="$inputs_digest" \
-B1N419_BACKEND_ROOT="$project_dir/test/fixtures/b1n419-finalizer/backend" \
-B1N419_BACKEND_PYTHON=$(command -v python3) \
-B1N419_FIXTURE_REAL_CAST="$real_cast" \
-B1N419_FIXTURE_EVIDENCE="$fixture_dir/evidence.json" \
-B1N419_FIXTURE_LIBRARIES="$fixture_dir/libraries.json" \
-B1N419_FIXTURE_TRANSACTIONS="$fixture_dir/transactions.json" \
-/bin/bash script/fund/finalize-meta-wheel-manifest.sh
+run_finalizer() {
+  local inputs=$1
+  local digest=$2
+  local transactions=$3
+  local canonical=$4
+  PATH="$fixture_dir/bin:$PATH" \
+  PYTHONDONTWRITEBYTECODE=1 \
+  BASE_SEPOLIA_RPC_URL=https://fixture.invalid \
+  B1N419_MANIFEST_PATH="$fixture_dir/manifest.json" \
+  B1N419_CANONICALIZATION_EVIDENCE_PATH="$fixture_dir/evidence.json" \
+  B1N419_LIBRARY_EVIDENCE_PATH="$fixture_dir/libraries.json" \
+  B1N419_CANONICAL_MANIFEST_PATH="$canonical" \
+  B1N419_APPROVED_INPUTS_PATH="$inputs" \
+  B1N419_APPROVED_INPUTS_SHA256="$digest" \
+  B1N419_BACKEND_ROOT="$project_dir/test/fixtures/b1n419-finalizer/backend" \
+  B1N419_BACKEND_PYTHON=$(command -v python3) \
+  B1N419_FIXTURE_REAL_CAST="$real_cast" \
+  B1N419_FIXTURE_EVIDENCE="$fixture_dir/evidence.json" \
+  B1N419_FIXTURE_LIBRARIES="$fixture_dir/libraries.json" \
+  B1N419_FIXTURE_TRANSACTIONS="$transactions" \
+  /bin/bash script/fund/finalize-meta-wheel-manifest.sh
+}
+
+run_finalizer "$fixture_dir/inputs.json" "$inputs_digest" "$fixture_dir/transactions.json" \
+  "$fixture_dir/canonical.json"
 
 jq -e '.status == "CONFIRMED_CANONICAL_RECEIPTS" and .deploymentStatus == "DEPLOYED" and .handoffReady == true' \
   "$fixture_dir/canonical.json" >/dev/null
+
+jq --arg feeRecipient "$settler_owner" '.environment.FINAL_ROLE_ADMIN = $feeRecipient' \
+  "$fixture_dir/inputs.json" >"$fixture_dir/inputs-overlap.json"
+overlap_digest="0x$(shasum -a 256 "$fixture_dir/inputs-overlap.json" | awk '{print $1}')"
+if run_finalizer "$fixture_dir/inputs-overlap.json" "$overlap_digest" "$fixture_dir/transactions.json" \
+  "$fixture_dir/canonical-overlap.json" >"$fixture_dir/overlap.log" 2>&1; then
+  echo "finalizer accepted fee recipient/final role overlap" >&2
+  exit 1
+fi
+rg -q 'approved identities do not bind inputs' "$fixture_dir/overlap.log"
+
+library_tx=$(jq -r '.orderedLibraries[0].receipt.transactionHash' "$fixture_dir/libraries.json")
+jq --arg tx "$library_tx" --arg from "$curator" '.[$tx].from = $from' \
+  "$fixture_dir/transactions.json" >"$fixture_dir/transactions-wrong-library-sender.json"
+if run_finalizer "$fixture_dir/inputs.json" "$inputs_digest" \
+  "$fixture_dir/transactions-wrong-library-sender.json" "$fixture_dir/canonical-sender.json" \
+  >"$fixture_dir/sender.log" 2>&1; then
+  echo "finalizer accepted a library receipt from the wrong sender" >&2
+  exit 1
+fi
+rg -q 'library sender does not match the approved bootstrap identity' "$fixture_dir/sender.log"
+
 echo "B1N-419 Bash 3.2 live finalizer fixture passed"

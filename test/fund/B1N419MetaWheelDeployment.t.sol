@@ -12,6 +12,7 @@ import {FundAccessManager} from "../../src/fund/FundAccessManager.sol";
 import {FundAccounting} from "../../src/fund/FundAccounting.sol";
 import {FundConstants} from "../../src/fund/FundConstants.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
+import {FundFlowManager} from "../../src/fund/FundFlowManager.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
 import {FundVault} from "../../src/fund/FundVault.sol";
 import {CspFundValuatorV2} from "../../src/fund/CspFundValuatorV2.sol";
@@ -50,6 +51,13 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
         _requireFactoryDeployment(deployed, expectedVersion);
     }
 
+    function validateCanonicalPolicyForTest(DeployConfig memory config, DeploymentAddresses memory deployed)
+        external
+        view
+    {
+        _requireCanonicalPolicyState(config, deployed);
+    }
+
     function setUp() public {
         vm.chainId(BASE_SEPOLIA_CHAIN_ID);
         usdc = new MockERC20("USD Coin", "USDC", 6);
@@ -67,7 +75,7 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
             address(
                 new ERC1967Proxy(
                     address(new BatchSettler()),
-                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), address(this), address(this)))
+                    abi.encodeCall(BatchSettler.initialize, (address(addressBook), address(this), address(0xFEE1)))
                 )
             )
         );
@@ -77,6 +85,7 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
         addressBook.setOracle(address(feed));
         addressBook.setWhitelist(address(weth));
         addressBook.setBatchSettler(address(settler));
+        vm.prank(address(0xFEE1));
         settler.setProtocolFeeBps(PREMIUM_FEE_BPS);
         standalone = _standaloneBaseline();
     }
@@ -252,6 +261,84 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
         this.validateForTest(config, address(this));
     }
 
+    function test_preflightRejectsFeeRecipientIdentityReuse() public {
+        DeployConfig memory config = _config();
+        config.finalRoles.upgrader = config.fund.feeRecipient;
+        vm.expectRevert(bytes("B1N419: fee recipient reuses role"));
+        this.validateForTest(config, address(this));
+
+        config = _config();
+        config.valuation.approvedObservers[0] = config.fund.feeRecipient;
+        vm.expectRevert(bytes("B1N419: observer reuses fee recipient"));
+        this.validateForTest(config, address(this));
+
+        config = _config();
+        config.valuation.navReporters[0] = config.fund.feeRecipient;
+        vm.expectRevert(bytes("B1N419: reporter reuses fee recipient"));
+        this.validateForTest(config, address(this));
+    }
+
+    function test_canonicalPolicyAcceptsExactConfiguredState() public {
+        (DeployConfig memory config, DeploymentAddresses memory deployed) = _configuredPolicyState();
+        this.validateCanonicalPolicyForTest(config, deployed);
+    }
+
+    function test_canonicalPolicyRejectsFeeAndSettlerOwnerDrift() public {
+        (DeployConfig memory config, DeploymentAddresses memory deployed) = _configuredPolicyState();
+        FundTypes.FeeConfig memory fees = FundAccounting(deployed.accounting).feeConfig();
+        fees.performanceFeeBps -= 1;
+        FundAccounting(deployed.accounting).setFeeConfig(fees);
+        vm.expectRevert(bytes("B1N419: fee config drift"));
+        this.validateCanonicalPolicyForTest(config, deployed);
+
+        vm.prank(config.fund.feeRecipient);
+        settler.transferOwnership(address(0xBAD));
+        vm.prank(address(0xBAD));
+        settler.acceptOwnership();
+        FundAccounting(deployed.accounting).setFeeConfig(_feeConfig(config.fund.feeRecipient));
+        vm.expectRevert(bytes("B1N419: settler owner drift"));
+        this.validateCanonicalPolicyForTest(config, deployed);
+    }
+
+    function test_canonicalPolicyRejectsStrategyAndMinimumIdleDrift() public {
+        (DeployConfig memory config, DeploymentAddresses memory deployed) = _configuredPolicyState();
+        StrategyManager strategy = StrategyManager(deployed.strategy);
+        FundTypes.StrategyConfig memory strategyConfig = strategy.strategyConfig(deployed.coordinator);
+        strategyConfig.maxLossBps -= 1;
+        strategy.setStrategyConfig(deployed.coordinator, strategyConfig);
+        vm.expectRevert(bytes("B1N419: strategy config drift"));
+        this.validateCanonicalPolicyForTest(config, deployed);
+
+        strategyConfig.maxLossBps = config.wheel.strategyMaxLossBps;
+        strategy.setStrategyConfig(deployed.coordinator, strategyConfig);
+        strategy.setMinimumIdleBps(config.fund.minimumIdleBps - 1);
+        vm.expectRevert(bytes("B1N419: minimum idle drift"));
+        this.validateCanonicalPolicyForTest(config, deployed);
+    }
+
+    function test_canonicalPolicyRejectsFlowEscrowDrift() public {
+        (DeployConfig memory config, DeploymentAddresses memory deployed) = _configuredPolicyState();
+        FundFlowManager(deployed.flow).setStrategyExitEscrows(deployed.emergencyEscrow, deployed.inKindEscrow);
+        vm.expectRevert(bytes("B1N419: strategy exit escrow drift"));
+        this.validateCanonicalPolicyForTest(config, deployed);
+    }
+
+    function test_canonicalPolicyRejectsLaneAndAdapterDrift() public {
+        (DeployConfig memory config, DeploymentAddresses memory deployed) = _configuredPolicyState();
+        WheelCspChildLane(deployed.cspLanes[0]).setMaxAssets(config.wheel.cspLaneMaxAssets - 1);
+        vm.expectRevert(bytes("B1N419: CSP lane max assets drift"));
+        this.validateCanonicalPolicyForTest(config, deployed);
+
+        WheelCspChildLane(deployed.cspLanes[0]).setMaxAssets(config.wheel.cspLaneMaxAssets);
+        ICoveredCallFundAdapter.AdapterConfig memory adapterConfig =
+            ICoveredCallFundAdapter(deployed.coveredCallAdapters[0]).adapterConfig();
+        adapterConfig.riskConfig.maxSwapSlippageBps -= 1;
+        ICoveredCallFundAdapter(deployed.coveredCallAdapters[0])
+            .setAdapterConfig(adapterConfig.riskConfig, adapterConfig.swapRouter, adapterConfig.swapFeeTier);
+        vm.expectRevert(bytes("B1N419: CC adapter config drift"));
+        this.validateCanonicalPolicyForTest(config, deployed);
+    }
+
     function test_rotationRevokesSharedBootstrapAndKeepsFundInactive() public {
         DeployConfig memory config = _config();
         DeploymentAddresses memory deployed = _deploy(config, address(this));
@@ -286,9 +373,33 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
 
     function test_preflightRejectsPremiumFeeDrift() public {
         DeployConfig memory config = _config();
+        vm.prank(config.fund.feeRecipient);
         settler.setProtocolFeeBps(PREMIUM_FEE_BPS - 1);
         vm.expectRevert(bytes("B1N419: premium fee"));
         this.validateForTest(config, address(this));
+    }
+
+    function _configuredPolicyState()
+        private
+        returns (DeployConfig memory config, DeploymentAddresses memory deployed)
+    {
+        config = _config();
+        deployed = _deploy(config, address(this));
+        FundTypes.StrategyConfig memory strategyConfig = FundTypes.StrategyConfig({
+            active: false,
+            maxAllocationBps: config.wheel.strategyMaxAllocationBps,
+            maxLossBps: config.wheel.strategyMaxLossBps,
+            cooldown: config.wheel.strategyCooldown,
+            interfaceVersion: 1,
+            valuator: deployed.metaWheelValuator,
+            absoluteCap: config.wheel.strategyAbsoluteCap
+        });
+        FundAccounting(deployed.accounting)
+            .setComponent(
+                keccak256(abi.encodePacked("STRATEGY", deployed.coordinator)), deployed.metaWheelValuator, 1, true
+            );
+        StrategyManager(deployed.strategy).setStrategyConfig(deployed.coordinator, strategyConfig);
+        FundFlowManager(deployed.flow).setStrategyExitEscrows(deployed.inKindEscrow, deployed.emergencyEscrow);
     }
 
     function _config() private view returns (DeployConfig memory config) {

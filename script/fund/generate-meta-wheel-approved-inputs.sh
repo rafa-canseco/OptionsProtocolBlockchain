@@ -65,9 +65,9 @@ jq -e --arg approval "$required_approval" --arg commit "$source_commit" \
   (.bootstrapBroadcaster | test("^0x[0-9a-fA-F]{40}$") and
     ascii_downcase != "0x0000000000000000000000000000000000000000") and
   .factoryOwner == .finalRoles.admin and
-  ([.finalRoles[], .bootstrapBroadcaster, .approvedObservers[], .navReporters[]] | length) == 14 and
-  ([.finalRoles[], .bootstrapBroadcaster, .approvedObservers[], .navReporters[] | ascii_downcase] | unique | length)
-    == 14 and
+  ([.finalRoles[], .bootstrapBroadcaster, .feeRecipient, .approvedObservers[], .navReporters[]] | length) == 15 and
+  ([.finalRoles[], .bootstrapBroadcaster, .feeRecipient, .approvedObservers[], .navReporters[] | ascii_downcase]
+    | unique | length) == 15 and
   (.approvedObservers | length) == 4 and (.navReporters | length) == 2 and
   all([.finalRoles[], .bootstrapBroadcaster, .feeRecipient, .approvedObservers[], .navReporters[]][];
     test("^0x[0-9a-fA-F]{40}$") and ascii_downcase != "0x0000000000000000000000000000000000000000") and

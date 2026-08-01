@@ -121,6 +121,10 @@ jq -n -e --slurpfile inputs "$B1N419_APPROVED_INPUTS_PATH" \
   --slurpfile libraries "$library_evidence_path" \
   --arg bootstrap "$expected_bootstrap_lower" --arg settlerOwner "$expected_settler_owner_lower" '
   $inputs[0].environment as $env |
+  [$env.FINAL_ROLE_ADMIN, $env.FINAL_ROLE_UPGRADER, $env.FINAL_ROLE_ACCOUNTING,
+   $env.FINAL_ROLE_ALLOCATOR, $env.FINAL_ROLE_PROCESSOR, $env.FINAL_ROLE_CURATOR,
+   $env.FINAL_ROLE_GUARDIAN, $env.ROLE_ADMIN, $env.FEE_RECIPIENT,
+   $env.APPROVED_OBSERVERS[], $env.NAV_REPORTERS[] | ascii_downcase] as $separatedIdentities |
   ($env.ROLE_ADMIN | ascii_downcase) == $bootstrap and
   all([$env.ROLE_UPGRADER, $env.ROLE_ACCOUNTING, $env.ROLE_ALLOCATOR, $env.ROLE_PROCESSOR,
        $env.ROLE_CURATOR, $env.ROLE_GUARDIAN][]; ascii_downcase == $bootstrap) and
@@ -130,7 +134,10 @@ jq -n -e --slurpfile inputs "$B1N419_APPROVED_INPUTS_PATH" \
   ([$env.APPROVED_OBSERVERS[] | ascii_downcase] | unique | length) == 4 and
   ($env.NAV_REPORTERS | length) == 2 and
   ([$env.NAV_REPORTERS[] | ascii_downcase] | unique | length) == 2 and
-  ([ $env.APPROVED_OBSERVERS[], $env.NAV_REPORTERS[] | ascii_downcase ] | unique | length) == 6
+  ($separatedIdentities | length) == 15 and
+  ($separatedIdentities | unique | length) == 15 and
+  all($separatedIdentities[];
+    test("^0x[0-9a-f]{40}$") and . != "0x0000000000000000000000000000000000000000")
 ' >/dev/null || die "approved identities do not bind inputs and library evidence"
 expected_curator=$(jq -r '.environment.FINAL_ROLE_CURATOR | ascii_downcase' "$B1N419_APPROVED_INPUTS_PATH")
 expected_guardian=$(jq -r '.environment.FINAL_ROLE_GUARDIAN | ascii_downcase' "$B1N419_APPROVED_INPUTS_PATH")
@@ -233,6 +240,14 @@ jq -c '[.canonicalReceipts[], (.phaseReceipts[] | .[]), .contractReceipts[]] | u
 jq -c '.orderedLibraries[].receipt' "$library_evidence_path" | while IFS= read -r receipt_json; do
   validate_receipt "$receipt_json"
 done
+
+while IFS= read -r library_record; do
+  library_tx=$(jq -r '.receipt.transactionHash' <<<"$library_record")
+  library_transaction=$(cast tx "$library_tx" --rpc-url "$BASE_SEPOLIA_RPC_URL" --json)
+  library_from=$(jq -r '.from | ascii_downcase' <<<"$library_transaction")
+  [[ "$library_from" == "$expected_bootstrap_lower" ]] \
+    || die "library sender does not match the approved bootstrap identity: $library_tx"
+done < <(jq -c '.orderedLibraries[]' "$library_evidence_path")
 
 require_phase_sender() {
   local phase_name=$1

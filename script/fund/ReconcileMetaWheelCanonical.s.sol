@@ -51,6 +51,7 @@ contract ReconcileMetaWheelCanonical is DeployMetaWheelBaseSepolia {
         _requireFactoryDeployment(deployed, config.fund.implementationVersion);
         _requireCanonicalCore(config, deployed, manifest);
         _requireCanonicalWheel(config, deployed, manifest);
+        _requireCanonicalPolicyState(config, deployed);
         _requireValuationIdentities(config, deployed);
         _requireFinalRoles(FundAccessManager(deployed.accessManager), config.finalRoles);
         _requireStandaloneBaseline(config.standalone);
@@ -121,6 +122,8 @@ contract ReconcileMetaWheelCanonical is DeployMetaWheelBaseSepolia {
         deployed.accessManager = vm.parseJsonAddress(manifest, ".contracts.accessManager.address");
         deployed.metaWheelValuator = vm.parseJsonAddress(manifest, ".contracts.metaWheelValuator.address");
         deployed.navVerifier = vm.parseJsonAddress(manifest, ".contracts.navReportVerifier.address");
+        deployed.inKindEscrow = vm.parseJsonAddress(manifest, ".inKindEscrow");
+        deployed.emergencyEscrow = vm.parseJsonAddress(manifest, ".emergencyEscrow");
         deployed.cspValuator = vm.parseJsonAddress(manifest, ".cspValuator");
         deployed.coveredCallValuator = vm.parseJsonAddress(manifest, ".coveredCallValuator");
         deployed.cspLanes = _fixed(vm.parseJsonAddressArray(manifest, ".cspLanes"));

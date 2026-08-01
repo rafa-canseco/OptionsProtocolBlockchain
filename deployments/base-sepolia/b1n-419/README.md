@@ -23,7 +23,8 @@ Covered Call proxy.
   but has no registered lanes, no configured strategy and no funds, so it has no useful execution route.
 - The approved Base Sepolia library/core/bootstrap broadcaster is
   `0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425`. Fee recipient and the current `BatchSettler` onboarding owner are
-  `0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D`; the generator and finalizer reject identity drift.
+  `0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D`; this identity cannot be a bootstrap/final role, observer or NAV
+  reporter, and the generator and finalizer reject any such overlap.
 - The four observer inputs are domain-separated: `[0,1]` are the complete CSP set and `[2,3]` are the complete
   Covered Call set, with quorum 2 in each valuator and no cross-authorization. The two NAV reporters are a separate
   exact set with threshold 2.
@@ -68,7 +69,8 @@ Start one persistent Anvil fork pinned to the reviewed Base Sepolia block with c
 2. Fill and approve a non-template `deployment-pins.json` with approval `APPROVED_BASE_SEPOLIA_DRY_RUN`, the full
    source commit, dependency/standalone pins, one bootstrap account, seven distinct final role accounts, four
    mutually distinct option observers and two NAV reporters. All six valuation keys must also be distinct from
-   every role account. Run `generate-meta-wheel-approved-inputs.sh` with `B1N419_INPUT_MODE=dry-run`; it verifies
+   every role account and from the fee recipient/settler owner. Run `generate-meta-wheel-approved-inputs.sh` with
+   `B1N419_INPUT_MODE=dry-run`; it verifies
    live fork code, implementation slots, library order/code hashes and writes both sorted JSON and its SHA-256.
 3. Run `rehearse-meta-wheel-base-sepolia.sh` with that same Anvil URL as `B1N419_FORK_RPC_URL`. It broadcasts locally
    (never live) and executes build, upgrade checks, tests, preflight, bootstrap, reconciliation, role rotation,
@@ -149,10 +151,13 @@ outside `fundFirst..fundLast`.
 1. the sidecar is explicitly approved and its manifest digest, `sourceCommit` and `deploymentId` match; the same
    `deploymentId` must resolve through `FundFactory.deployment(id)` to the exact eight Fund addresses and
    implementation version recorded by the manifest;
-2. RPC receipts, block hashes, success statuses, contract coverage and runtime code hashes all match;
+2. RPC receipts, block hashes, success statuses, contract coverage and runtime code hashes all match, and all five
+   library transactions were sent by the approved `0x097B…` bootstrap identity;
 3. the coordinator was configured inactive before managed lane setup, with all phase receipts ordered;
 4. Blockscout verification and bootstrap/final-role/standalone reconciliation are complete;
-5. `ReconcileMetaWheelCanonical` passes against live Base Sepolia state; and
+5. `ReconcileMetaWheelCanonical` passes against live Base Sepolia state, including exact fee/settler ownership,
+   complete inactive `StrategyConfig`, minimum idle, exit escrows, all 4+4 lane bounds, covered-call execution
+   buffers and every child adapter risk/router configuration; and
 6. the candidate is accepted by the backend's exact `parse_fund_deployment` implementation.
 
 Only after every gate passes does it write a new file with `status: CONFIRMED_CANONICAL_RECEIPTS`,
@@ -176,9 +181,10 @@ B1N419_BACKEND_PYTHON (optional; defaults to python3)
 A fork/dry-run manifest and sidecar can never be used as deployment truth. No address, block or receipt may be
 copied from fork output.
 
-The positive live-route fixture runs the full finalizer under the stock macOS `/bin/bash` 3.2 with deterministic
-receipts, transactions, linked calldata and backend parsing:
+The fixtures run the generator identity-overlap gates and the full finalizer under the stock macOS `/bin/bash` 3.2
+with deterministic receipts, transactions, linked calldata, negative identity/sender cases and backend parsing:
 
 ```text
+script/fund/test-meta-wheel-input-generator-fixture.sh
 script/fund/test-meta-wheel-finalizer-live-fixture.sh
 ```

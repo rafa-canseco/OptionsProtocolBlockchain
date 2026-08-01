@@ -6,9 +6,14 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {AddressBook} from "../../src/core/AddressBook.sol";
 import {BatchSettler} from "../../src/core/BatchSettler.sol";
 import {FundAccessManager} from "../../src/fund/FundAccessManager.sol";
+import {FundAccounting} from "../../src/fund/FundAccounting.sol";
 import {FundConstants} from "../../src/fund/FundConstants.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
+import {FundFlowManager} from "../../src/fund/FundFlowManager.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
+import {StrategyManager} from "../../src/fund/StrategyManager.sol";
+import {WheelCoveredCallChildLane} from "../../src/fund/WheelCoveredCallChildLane.sol";
+import {WheelCspChildLane} from "../../src/fund/WheelCspChildLane.sol";
 import {ICoveredCallFundAdapter} from "../../src/fund/interfaces/ICoveredCallFundAdapter.sol";
 import {ICspFundAdapter} from "../../src/fund/interfaces/ICspFundAdapter.sol";
 
@@ -231,6 +236,11 @@ abstract contract B1N419Base is Script {
         _requireDistinctRoles(config.finalRoles);
         require(config.fund.factoryOwner == config.finalRoles.admin, "B1N419: factory owner role");
         require(
+            !_isRoleAccount(config.fund.feeRecipient, config.fund.roles)
+                && !_isRoleAccount(config.fund.feeRecipient, config.finalRoles),
+            "B1N419: fee recipient reuses role"
+        );
+        require(
             config.finalRoles.admin != broadcaster && config.finalRoles.upgrader != broadcaster
                 && config.finalRoles.accounting != broadcaster && config.finalRoles.allocator != broadcaster
                 && config.finalRoles.processor != broadcaster && config.finalRoles.curator != broadcaster
@@ -247,6 +257,82 @@ abstract contract B1N419Base is Script {
     function _requireV1Policy(DeployConfig memory config) internal view {
         require(config.assets.batchSettler.code.length != 0, "B1N419: settler");
         require(BatchSettler(config.assets.batchSettler).protocolFeeBps() == PREMIUM_FEE_BPS, "B1N419: premium fee");
+    }
+
+    function _requireCanonicalPolicyState(DeployConfig memory config, DeploymentAddresses memory deployed)
+        internal
+        view
+    {
+        _requireCanonicalFeeState(config, deployed.accounting);
+
+        StrategyManager strategy = StrategyManager(deployed.strategy);
+        FundTypes.StrategyConfig memory expectedStrategy = FundTypes.StrategyConfig({
+            active: false,
+            maxAllocationBps: config.wheel.strategyMaxAllocationBps,
+            maxLossBps: config.wheel.strategyMaxLossBps,
+            cooldown: config.wheel.strategyCooldown,
+            interfaceVersion: 1,
+            valuator: deployed.metaWheelValuator,
+            absoluteCap: config.wheel.strategyAbsoluteCap
+        });
+        require(
+            keccak256(abi.encode(strategy.strategyConfig(deployed.coordinator)))
+                == keccak256(abi.encode(expectedStrategy)),
+            "B1N419: strategy config drift"
+        );
+        require(strategy.minimumIdleBps() == config.fund.minimumIdleBps, "B1N419: minimum idle drift");
+
+        (address inKindEscrow, address emergencyEscrow) = FundFlowManager(deployed.flow).strategyExitEscrows();
+        require(
+            inKindEscrow == deployed.inKindEscrow && emergencyEscrow == deployed.emergencyEscrow,
+            "B1N419: strategy exit escrow drift"
+        );
+
+        for (uint256 i; i < CSP_LANE_COUNT; ++i) {
+            require(
+                WheelCspChildLane(deployed.cspLanes[i]).maxAssets() == config.wheel.cspLaneMaxAssets,
+                "B1N419: CSP lane max assets drift"
+            );
+            WheelCoveredCallChildLane coveredCallLane = WheelCoveredCallChildLane(deployed.coveredCallLanes[i]);
+            require(
+                coveredCallLane.maxAssets() == config.wheel.coveredCallLaneMaxAssets, "B1N419: CC lane max assets drift"
+            );
+            require(
+                coveredCallLane.executionCostBuffer8() == config.wheel.floorBufferUsd8,
+                "B1N419: CC execution buffer drift"
+            );
+            _requireCspAdapterPolicy(config, deployed.cspAdapters[i]);
+            _requireCoveredCallAdapterPolicy(config, deployed.coveredCallAdapters[i]);
+        }
+    }
+
+    function _requireCanonicalFeeState(DeployConfig memory config, address accounting) internal view {
+        require(
+            keccak256(abi.encode(FundAccounting(accounting).feeConfig()))
+                == keccak256(abi.encode(_feeConfig(config.fund.feeRecipient))),
+            "B1N419: fee config drift"
+        );
+        require(
+            BatchSettler(config.assets.batchSettler).owner() == config.fund.feeRecipient, "B1N419: settler owner drift"
+        );
+    }
+
+    function _requireCspAdapterPolicy(DeployConfig memory config, address adapter) private view {
+        ICspFundAdapter.AdapterConfig memory actual = ICspFundAdapter(adapter).adapterConfig();
+        require(
+            keccak256(abi.encode(actual.riskConfig)) == keccak256(abi.encode(config.cspRisk))
+                && actual.swapRouter == config.assets.swapRouter && actual.swapFeeTier == config.assets.swapFeeTier,
+            "B1N419: CSP adapter config drift"
+        );
+    }
+
+    function _requireCoveredCallAdapterPolicy(DeployConfig memory config, address adapter) private view {
+        ICoveredCallFundAdapter.AdapterConfig memory actual = ICoveredCallFundAdapter(adapter).adapterConfig();
+        require(
+            keccak256(abi.encode(actual.riskConfig)) == keccak256(abi.encode(config.coveredCallRisk))
+                && actual.swapRouter == config.assets.swapRouter && actual.swapFeeTier == config.assets.swapFeeTier,
+            "B1N419: CC adapter config drift"
+        );
     }
 
     function _requireStandaloneBaseline(StandaloneBaseline memory baseline) internal view {
@@ -339,6 +425,7 @@ abstract contract B1N419Base is Script {
     function _requireValuationKeySeparation(DeployConfig memory config) private pure {
         for (uint256 i; i < config.valuation.approvedObservers.length; ++i) {
             address observer = config.valuation.approvedObservers[i];
+            require(observer != config.fund.feeRecipient, "B1N419: observer reuses fee recipient");
             require(
                 !_isRoleAccount(observer, config.fund.roles) && !_isRoleAccount(observer, config.finalRoles),
                 "B1N419: observer reuses role"
@@ -349,6 +436,7 @@ abstract contract B1N419Base is Script {
         }
         for (uint256 i; i < config.valuation.navReporters.length; ++i) {
             address reporter = config.valuation.navReporters[i];
+            require(reporter != config.fund.feeRecipient, "B1N419: reporter reuses fee recipient");
             require(
                 !_isRoleAccount(reporter, config.fund.roles) && !_isRoleAccount(reporter, config.finalRoles),
                 "B1N419: reporter reuses role"
