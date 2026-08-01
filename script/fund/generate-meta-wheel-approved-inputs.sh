@@ -6,6 +6,15 @@ die() {
   exit 1
 }
 
+runtime_codehash() {
+  local address=$1
+  local runtime_code
+
+  runtime_code=$(cast code "$address" --rpc-url "$BASE_SEPOLIA_RPC_URL")
+  [[ "$runtime_code" != "0x" ]] || die "address has no runtime code: $address"
+  cast keccak "$runtime_code"
+}
+
 for command_name in jq cast git shasum; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"
 done
@@ -100,7 +109,7 @@ for index in 0 1 2 3 4; do
   address=$(jq -r --argjson index "$index" '.orderedLibraries[$index].address' "$B1N419_LIBRARY_EVIDENCE_PATH")
   expected=$(jq -r --argjson index "$index" '.orderedLibraries[$index].runtimeCodehash' \
     "$B1N419_LIBRARY_EVIDENCE_PATH")
-  actual=$(cast codehash "$address" --rpc-url "$BASE_SEPOLIA_RPC_URL")
+  actual=$(runtime_codehash "$address")
   [[ "$(tr '[:upper:]' '[:lower:]' <<<"$actual")" == "$(tr '[:upper:]' '[:lower:]' <<<"$expected")" ]] \
     || die "library codehash drift at index $index"
 done
@@ -116,7 +125,7 @@ for prefix in CSP_VAULT CSP_ADAPTER CC_VAULT CC_ADAPTER; do
     "$(cast storage "$proxy" "$implementation_slot" --rpc-url "$BASE_SEPOLIA_RPC_URL")")
   [[ "$(tr '[:upper:]' '[:lower:]' <<<"$actual_implementation")" \
     == "$(tr '[:upper:]' '[:lower:]' <<<"$implementation")" ]] || die "$prefix implementation drift"
-  actual_codehash=$(cast codehash "$implementation" --rpc-url "$BASE_SEPOLIA_RPC_URL")
+  actual_codehash=$(runtime_codehash "$implementation")
   [[ "$(tr '[:upper:]' '[:lower:]' <<<"$actual_codehash")" \
     == "$(tr '[:upper:]' '[:lower:]' <<<"$expected_codehash")" ]] || die "$prefix codehash drift"
 done

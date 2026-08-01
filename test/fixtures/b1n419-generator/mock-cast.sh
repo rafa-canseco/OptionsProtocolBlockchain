@@ -3,7 +3,6 @@ set -euo pipefail
 
 real_cast=${B1N419_FIXTURE_REAL_CAST:?}
 settler_owner=${B1N419_FIXTURE_SETTLER_OWNER:?}
-runtime_codehash=${B1N419_FIXTURE_RUNTIME_CODEHASH:?}
 proxy_implementations=${B1N419_FIXTURE_PROXY_IMPLEMENTATIONS:?}
 
 case "${1:-}" in
@@ -21,7 +20,11 @@ case "${1:-}" in
     echo 0x6000
     ;;
   codehash)
-    echo "$runtime_codehash"
+    echo "generator fixture must derive codehash from runtime code" >&2
+    exit 1
+    ;;
+  keccak)
+    exec "$real_cast" "$@"
     ;;
   storage)
     jq -er --arg proxy "$2" '.[$proxy]' "$proxy_implementations"
