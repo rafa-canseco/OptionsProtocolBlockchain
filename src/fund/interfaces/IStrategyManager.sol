@@ -21,6 +21,10 @@ interface IStrategyManager {
     function deallocate(address adapter, uint256 targetValue, uint256 minAssetsOut, bytes calldata data)
         external
         returns (uint256 assetsOut);
+    function executeAdapterAllocationOperation(address adapter, bytes calldata data) external;
+    function executeAdapterProcessingOperation(address adapter, bytes calldata data) external;
+    function executeAdapterGuardianOperation(address adapter, bytes calldata data) external;
+    function executeAdapterConfigurationOperation(address adapter, bytes calldata data) external;
     function deallocateInKind(bytes32 batchId, address adapter, uint256 fractionWad, bytes calldata data)
         external
         returns (address[] memory assets, uint256[] memory amounts);

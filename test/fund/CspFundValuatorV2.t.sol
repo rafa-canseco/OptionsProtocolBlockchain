@@ -374,12 +374,22 @@ contract CspFundValuatorV2Test is Test {
             ICspFundValuator.ValuationData({optionObservations: observations});
 
         FundTypes.PositionValue memory value = valuator.value(address(adapter), snapshot, abi.encode(valuationData));
+        FundTypes.PositionValue memory bounded =
+            valuator.valuePosition(address(adapter), 1, snapshot, abi.encode(valuationData));
 
         assertEq(value.grossAssets, COLLATERAL + PREMIUM);
         assertEq(value.liabilities, 102e6);
         assertEq(value.liquidAccountingAssets, PREMIUM);
         assertEq(value.baseExitCost, 1e6);
         assertNotEq(value.dataHash, bytes32(0));
+        assertEq(bounded.grossAssets, value.grossAssets);
+        assertEq(bounded.liabilities, value.liabilities);
+        assertEq(bounded.liquidAccountingAssets, value.liquidAccountingAssets);
+        assertEq(bounded.baseExitCost, value.baseExitCost);
+        assertEq(bounded.dataHash, value.dataHash);
+
+        vm.expectRevert(abi.encodeWithSelector(ICspFundValuator.InvalidObservation.selector, uint256(2)));
+        valuator.valuePosition(address(adapter), 2, snapshot, abi.encode(valuationData));
 
         vm.expectRevert(abi.encodeWithSelector(ICspFundValuator.InvalidSnapshotBlock.selector, snapshot, snapshot - 1));
         valuator.value(address(adapter), snapshot - 1, abi.encode(valuationData));

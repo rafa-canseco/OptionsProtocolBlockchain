@@ -11,6 +11,7 @@ interface IWheelCoordinatorAdapter is IFundStrategyAdapter {
         uint256 assignmentLotCount;
         uint256 pendingCspUsdc;
         uint256 reservedRedemptionUsdc;
+        uint256 reservedPrincipalUsdc;
         uint256 transitionWeth;
         uint256 accountedUsdc;
         uint256 accountedWeth;

@@ -134,6 +134,25 @@ contract CoveredCallFundValuatorV2 is IPositionValuator, ICoveredCallFundValuato
         view
         returns (FundTypes.PositionValue memory positionValue)
     {
+        return _value(adapter, 0, snapshotBlock, data);
+    }
+
+    /// @notice Values one current position without traversing terminal adapter history.
+    /// @dev Intended for dedicated Wheel lanes whose adapter policy permits at most one active position.
+    function valuePosition(address adapter, uint256 positionId, uint64 snapshotBlock, bytes calldata data)
+        external
+        view
+        returns (FundTypes.PositionValue memory positionValue)
+    {
+        if (positionId == 0) revert InvalidObservation(0);
+        return _value(adapter, positionId, snapshotBlock, data);
+    }
+
+    function _value(address adapter, uint256 selectedPositionId, uint64 snapshotBlock, bytes calldata data)
+        private
+        view
+        returns (FundTypes.PositionValue memory positionValue)
+    {
         if (adapter == address(0) || adapter.code.length == 0) revert InvalidAdapter(adapter);
         ICoveredCallFundAdapter coveredCall = ICoveredCallFundAdapter(adapter);
         if (coveredCall.interfaceVersion() != 1 || !coveredCall.isOnboarded()) revert InvalidAdapter(adapter);
@@ -166,8 +185,13 @@ contract CoveredCallFundValuatorV2 is IPositionValuator, ICoveredCallFundValuato
         uint256 usedObservations;
         uint256 observedActiveCollateral;
         uint256 observedActivePositions;
-        uint256 count = adapterState_.positionCount;
-        for (uint256 positionId = 1; positionId <= count; ++positionId) {
+        uint256 firstPositionId = selectedPositionId == 0 ? 1 : selectedPositionId;
+        uint256 lastPositionId = selectedPositionId == 0 ? adapterState_.positionCount : selectedPositionId;
+        if (
+            lastPositionId > adapterState_.positionCount
+                || (selectedPositionId != 0 && selectedPositionId != adapterState_.positionCount)
+        ) revert InvalidObservation(lastPositionId);
+        for (uint256 positionId = firstPositionId; positionId <= lastPositionId; ++positionId) {
             ICoveredCallFundAdapter.Position memory strategyPosition = coveredCall.position(positionId);
             if (strategyPosition.lifecycle == ICoveredCallFundAdapter.Lifecycle.None) {
                 revert InvalidObservation(positionId);
@@ -188,6 +212,8 @@ contract CoveredCallFundValuatorV2 is IPositionValuator, ICoveredCallFundValuato
                     usedObservations += used;
                 }
             } else if (strategyPosition.lifecycle == ICoveredCallFundAdapter.Lifecycle.AwaitingPhysicalDelivery) {
+                ++observedActivePositions;
+                observedActiveCollateral += strategyPosition.collateral;
                 _validateAwaitingDelivery(adapter, positionId, strategyPosition, coveredCall);
             } else {
                 _validateTerminalProtocolState(adapter, positionId, strategyPosition, coveredCall);

@@ -40,7 +40,9 @@ contract MetaWheelCodeAddress {}
 contract MetaWheelStorageLayoutTest is Test {
     function test_newUupsImplementationsPassUpgradeSafetyValidation() public {
         Options memory options;
+        options.unsafeAllow = "external-library-linking";
         Upgrades.validateImplementation("src/fund/WheelCoordinatorAdapter.sol:WheelCoordinatorAdapter", options);
+        options.unsafeAllow = "";
         Upgrades.validateImplementation("src/fund/WheelCspChildLane.sol:WheelCspChildLane", options);
         Upgrades.validateImplementation("src/fund/WheelCoveredCallChildLane.sol:WheelCoveredCallChildLane", options);
         // The Wheel subtype intentionally reuses the inherited adapter initializer;

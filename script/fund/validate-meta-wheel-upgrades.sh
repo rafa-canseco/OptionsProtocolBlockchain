@@ -8,7 +8,8 @@ UPGRADES_CLI="node_modules/@openzeppelin/upgrades-core/dist/cli/cli.js"
 BUILD_INFO_DIR="out/build-info"
 
 node "$UPGRADES_CLI" validate "$BUILD_INFO_DIR" \
-  --contract src/fund/WheelCoordinatorAdapter.sol:WheelCoordinatorAdapter
+  --contract src/fund/WheelCoordinatorAdapter.sol:WheelCoordinatorAdapter \
+  --unsafeAllow external-library-linking
 node "$UPGRADES_CLI" validate "$BUILD_INFO_DIR" \
   --contract src/fund/WheelCspChildLane.sol:WheelCspChildLane
 node "$UPGRADES_CLI" validate "$BUILD_INFO_DIR" \

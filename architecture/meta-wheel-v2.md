@@ -22,6 +22,10 @@ active option and one assignment lot per lane. Different tranches can run in
 different legs concurrently. Adding multi-lot packing requires a later policy
 and contract version.
 
+Idle lanes can be removed and replaced through the managed configuration path;
+removal requires zero child shares and no active tranche. This is a maintenance
+fallback, not the primary valuation-scaling mechanism.
+
 If a child handoff returns USDC and WETH together, the WETH remains on the
 original tranche and the exact USDC becomes a new sibling `PendingCsp` tranche.
 The original tranche has `pendingUsdc == 0`, so the WETH can reopen a call while
@@ -40,9 +44,12 @@ WethTransition -> CallOpen -> CallSettling
 ```
 
 Each transition is bound to the coordinator chain ID, address, tranche, state
-nonce, lane and rolling position hash. Both coordinator and lane record the
-transition hash before assets can be reused. Every handoff reconciles receiver
-balance deltas and child shares.
+nonce, lane and rolling execution-state hash. The execution commitment contains
+only lane-controlled state, so a permissionless token transfer or protocol
+delivery cannot invalidate settlement. A separate balance-sensitive
+`positionStateHash()` binds NAV reconciliation. Both coordinator and lane
+record the transition hash before assets can be reused. Every handoff reconciles
+receiver balance deltas and child shares.
 
 ## Assignment lot invariant
 
@@ -70,13 +77,15 @@ removed before the basket re-enters coordinator custody. Donations remain
 unaccounted.
 
 `MetaWheelValuator` accepts one hash/share-bound child valuation input per
-active lane. It invokes the immutable canonical CSP or Covered Call valuator on
-the lane's adapter, adds only exact accounted idle lane balances, converts WETH
-components to USDC, and then adds coordinator USDC plus conservative
+active lane. It invokes the canonical CSP or Covered Call V2 valuator's bounded
+`valuePosition` entrypoint for the lane's exact latest position, adds only exact
+accounted idle lane balances, converts WETH components to USDC, and then adds coordinator USDC plus conservative
 spot-valued transition WETH. Reporter-supplied gross assets, liabilities or
 exit costs are never trusted. Child option liabilities already present in the
-canonical child value are not duplicated. The report must use the current
-block, exact lane position hashes and the full active lane set.
+canonical child value are not duplicated. Standalone `value()` behavior remains
+unchanged, while Wheel valuation is O(active lanes) rather than O(all historical
+positions). The report must use the current block, exact lane position hashes
+and the full active lane set.
 
 Canonical lane input ABI:
 
@@ -94,6 +103,15 @@ Parent FundAccounting is the sole authority for the 2% AUM and 10% HWM
 performance fees. Dedicated children are configured with zero management and
 performance fees. BatchSettler charges the gross-premium protocol fee once.
 
+Every lifecycle, reserve, split, lane-registry and policy mutation is dispatched
+through one of four role-separated StrategyManager managed-operation selectors.
+StrategyManager acquires the FundVault module lock, invalidates NAV, calls the
+coordinator's closed class/operation dispatcher, records the new adapter
+position hash, synchronizes FundAccounting and releases the lock. Direct calls
+to lifecycle selectors revert; the dispatcher cannot execute an operation from
+the wrong role class. Heavy dispatcher and position logic live in linked
+libraries to preserve coordinator EIP-170 upgrade headroom.
+
 Upgrade validation is reproducible after `forge clean && forge build` with
 `script/fund/validate-meta-wheel-upgrades.sh`. The Wheel Covered Call adapter
 reuses its inherited initializer; its added ERC-7201 namespace contains only an
@@ -101,7 +119,18 @@ empty-by-default replay-protection mapping.
 
 ## Redemptions and recovery
 
-Normal StrategyManager deallocation returns only pending/reserved USDC. It
+Normal StrategyManager deallocation returns only USDC already reserved from an
+exact pending tranche. `reserveRedemptionUsdc(trancheId, amount)` debits that
+tranche and moves the same proportional principal basis; a full debit moves all
+remaining basis even when loss makes principal greater than assets. Releasing a reserve creates a fresh
+`PendingCsp` tranche, so global pending USDC always equals the sum of pending
+tranche balances. Deallocation releases reserved basis proportionally, while a
+pure-premium redemption releases zero principal. Partial Covered Call assignment
+splits basis by collateral consumed, and returned premium remains basis-free.
+For a Covered Call cash fallback, any WETH reduction is a settlement loss rather
+than a sale: the full basis remains with the recovered WETH and premium USDC is
+queued with zero basis. Basis moves to USDC only for an actual call-away.
+Deallocation cannot consume the pending queue directly and
 cannot force a WETH sale. `deallocateInKind` is disabled for normal parent
 redemptions. Emergency recovery may move raw USDC/WETH in kind to the governed
 escrow only when no child lane has active shares; it never swaps WETH or weakens
@@ -130,3 +159,4 @@ the strike floor.
 - `WheelCoveredCallFloorEnforced`
 - `WheelLotStatusChanged`
 - `WheelRedemptionReserveChanged`
+- `WheelRedemptionUsdcReserved` / `WheelRedemptionUsdcReleased`

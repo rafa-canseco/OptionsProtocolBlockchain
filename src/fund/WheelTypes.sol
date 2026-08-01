@@ -43,11 +43,40 @@ library WheelTypes {
         WethFallback
     }
 
+    enum ManagedOperationClass {
+        None,
+        Allocation,
+        Processing,
+        Guardian,
+        Configuration
+    }
+
+    enum ManagedOperation {
+        None,
+        OpenCsp,
+        OpenCoveredCall,
+        SplitPendingCsp,
+        SettleCsp,
+        HandoffCsp,
+        SettleCoveredCall,
+        HandoffCoveredCall,
+        ReserveRedemption,
+        ReleaseRedemption,
+        PauseAllocations,
+        RegisterLane,
+        RemoveLane,
+        SetLaneActive,
+        SetPolicyHash,
+        SetFloorBuffer,
+        ResumeAllocations
+    }
+
     struct Tranche {
         TrancheLeg leg;
         address childLane;
         uint64 stateNonce;
         uint64 expiry;
+        uint256 principalUsdc;
         uint256 pendingUsdc;
         uint256 childShares;
         uint256 childPositionId;

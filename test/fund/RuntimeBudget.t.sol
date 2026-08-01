@@ -18,6 +18,7 @@ import {CspFundAdapterOperations} from "../../src/fund/libraries/CspFundAdapterO
 import {CoveredCallFundAdapter} from "../../src/fund/CoveredCallFundAdapter.sol";
 import {CoveredCallFundValuatorV2} from "../../src/fund/CoveredCallFundValuatorV2.sol";
 import {CoveredCallFundAdapterOperations} from "../../src/fund/libraries/CoveredCallFundAdapterOperations.sol";
+import {ManagedStrategyOperations} from "../../src/fund/libraries/ManagedStrategyOperations.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
 import {MockChainlinkFeed} from "../../src/mocks/MockChainlinkFeed.sol";
 
@@ -31,6 +32,7 @@ contract RuntimeBudgetTest is Test {
         assertLt(address(new NavReportVerifier()).code.length, EIP170_RUNTIME_LIMIT);
         assertLt(address(new FundFlowManager()).code.length, EIP170_RUNTIME_LIMIT);
         assertLt(address(new StrategyManager()).code.length, EIP170_RUNTIME_LIMIT);
+        assertLt(address(ManagedStrategyOperations).code.length, EIP170_RUNTIME_LIMIT);
         assertLt(address(new FundFactory(address(this))).code.length, EIP170_RUNTIME_LIMIT);
         assertLt(address(new FundAccessManagerDeployer()).code.length, EIP170_RUNTIME_LIMIT);
         MockERC20 asset = new MockERC20("Budget Asset", "BUD", 6);
@@ -78,7 +80,7 @@ contract RuntimeBudgetTest is Test {
     }
 
     function test_strategyManagerMeetsArchitecturalDesignTarget() public {
-        // The pause-generation binding is core safety state and still leaves more than 9 KiB below EIP-170.
-        assertLt(address(new StrategyManager()).code.length, 15 * 1024);
+        // Managed NAV synchronization still leaves more than 8 KiB below EIP-170.
+        assertLt(address(new StrategyManager()).code.length, 16 * 1024);
     }
 }

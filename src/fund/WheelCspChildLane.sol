@@ -148,7 +148,8 @@ contract WheelCspChildLane is FundUpgradeable, WheelCspChildLaneStorage, IWheelC
         return ($.accountedUsdc, $.accountedWeth);
     }
 
-    function positionStateHash() public view returns (bytes32) {
+    /// @notice Stable operational commitment; permissionless token transfers cannot invalidate it.
+    function executionStateHash() public view returns (bytes32) {
         WheelCspChildLaneStorageLayout storage $ = _getWheelCspChildLaneStorage();
         return keccak256(
             abi.encode(
@@ -164,7 +165,17 @@ contract WheelCspChildLane is FundUpgradeable, WheelCspChildLaneStorage, IWheelC
                 $.accountedWeth,
                 $.literalAssignmentStrike8,
                 $.expiry,
-                $.positionsHash,
+                $.positionsHash
+            )
+        );
+    }
+
+    /// @notice Balance-sensitive reconciliation commitment used by NAV reporters.
+    function positionStateHash() public view returns (bytes32) {
+        WheelCspChildLaneStorageLayout storage $ = _getWheelCspChildLaneStorage();
+        return keccak256(
+            abi.encode(
+                executionStateHash(),
                 ICspFundAdapter($.adapter).positionStateHash(),
                 IERC20($.usdc).balanceOf(address(this)),
                 IERC20($.weth).balanceOf(address(this))
@@ -215,7 +226,7 @@ contract WheelCspChildLane is FundUpgradeable, WheelCspChildLaneStorage, IWheelC
         $.expiry = expiry;
         _checkpoint($, transitionHash);
         mintedChildShares = received;
-        positionHash = positionStateHash();
+        positionHash = executionStateHash();
         emit CspOpened(
             trancheId, positionId, received, $.literalAssignmentStrike8, expiry, mintedChildShares, positionHash
         );
@@ -242,7 +253,7 @@ contract WheelCspChildLane is FundUpgradeable, WheelCspChildLaneStorage, IWheelC
             trancheId != $.activeTrancheId
                 || ($.state != WheelTypes.LaneState.Open && $.state != WheelTypes.LaneState.Settling)
         ) revert InvalidLaneState(WheelTypes.LaneState.Open, $.state);
-        bytes32 currentHash = positionStateHash();
+        bytes32 currentHash = executionStateHash();
         if (currentHash != expectedPositionHash) revert InvalidPositionHash(expectedPositionHash, currentHash);
 
         IERC20 usdcToken = IERC20($.usdc);
@@ -288,7 +299,7 @@ contract WheelCspChildLane is FundUpgradeable, WheelCspChildLaneStorage, IWheelC
         $.settlementKind = settlementKind;
         _checkpoint($, keccak256(abi.encode("SETTLE_CSP", trancheId, settled.lifecycleHash)));
         _requireNoDeficit($);
-        positionHash = positionStateHash();
+        positionHash = executionStateHash();
         emit CspSettlementAdvanced(
             trancheId, $.activePositionId, settlementKind, $.state, observedUsdc, observedWeth, positionHash
         );
@@ -303,7 +314,7 @@ contract WheelCspChildLane is FundUpgradeable, WheelCspChildLaneStorage, IWheelC
         if ($.state != WheelTypes.LaneState.ReadyForHandoff || trancheId != $.activeTrancheId) {
             revert InvalidLaneState(WheelTypes.LaneState.ReadyForHandoff, $.state);
         }
-        bytes32 currentHash = positionStateHash();
+        bytes32 currentHash = executionStateHash();
         if (currentHash != expectedPositionHash) revert InvalidPositionHash(expectedPositionHash, currentHash);
         if (receiver == address(0)) revert InvalidAddress();
         _consumeTransition($, transitionHash);

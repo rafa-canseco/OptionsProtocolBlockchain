@@ -4,19 +4,25 @@ pragma solidity 0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {OToken} from "../core/OToken.sol";
 import {FundUpgradeable} from "./FundUpgradeable.sol";
 import {WheelTypes} from "./WheelTypes.sol";
-import {ICoveredCallFundAdapter} from "./interfaces/ICoveredCallFundAdapter.sol";
 import {IWheelChildLane} from "./interfaces/IWheelChildLane.sol";
 import {IWheelCoordinatorAdapter} from "./interfaces/IWheelCoordinatorAdapter.sol";
 import {IWheelCoveredCallChildLane} from "./interfaces/IWheelCoveredCallChildLane.sol";
 import {IWheelCspChildLane} from "./interfaces/IWheelCspChildLane.sol";
+import {IManagedStrategyAdapter} from "./interfaces/IManagedStrategyAdapter.sol";
 import {WheelCoordinatorAdapterStorage} from "./storage/WheelCoordinatorAdapterStorage.sol";
+import {WheelManagedOperationDispatcher} from "./libraries/WheelManagedOperationDispatcher.sol";
+import {WheelCoordinatorPositionOperations} from "./libraries/WheelCoordinatorPositionOperations.sol";
 
 /// @notice USDC strategy/custody boundary for the Meta Wheel parent Fund stack.
 /// @dev It owns all dedicated child-lane positions; standalone CSP/CC funds cannot be registered.
-contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStorage, IWheelCoordinatorAdapter {
+contract WheelCoordinatorAdapter is
+    FundUpgradeable,
+    WheelCoordinatorAdapterStorage,
+    IWheelCoordinatorAdapter,
+    IManagedStrategyAdapter
+{
     using SafeERC20 for IERC20;
 
     bytes32 private constant INITIAL_POSITIONS_HASH = keccak256("b1nary Meta Wheel Positions");
@@ -51,6 +57,7 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
     error TransferMismatch();
 
     event WheelLaneRegistered(address indexed lane, WheelTypes.LaneKind indexed kind);
+    event WheelLaneRemoved(address indexed lane, WheelTypes.LaneKind indexed kind);
     event WheelLaneStatusSet(address indexed lane, bool active);
     event WheelTrancheQueued(
         uint256 indexed trancheId,
@@ -60,7 +67,11 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
         bytes32 stateHash
     );
     event WheelSiblingTrancheQueued(
-        uint256 indexed parentTrancheId, uint256 indexed siblingTrancheId, uint256 usdcAmount, bytes32 stateHash
+        uint256 indexed parentTrancheId,
+        uint256 indexed siblingTrancheId,
+        uint256 usdcAmount,
+        uint256 principalUsdc,
+        bytes32 stateHash
     );
     event WheelTrancheOpened(
         uint256 indexed trancheId,
@@ -108,6 +119,16 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
         uint256 indexed lotId, WheelTypes.LotStatus status, uint256 remainingWeth, uint256 trancheId
     );
     event WheelRedemptionReserveChanged(uint256 reservedRedemptionUsdc, uint256 pendingCspUsdc);
+    event WheelRedemptionUsdcReserved(
+        uint256 indexed trancheId,
+        uint256 amount,
+        uint256 principalReserved,
+        uint256 remainingTrancheUsdc,
+        uint256 remainingTranchePrincipal
+    );
+    event WheelRedemptionUsdcReleased(
+        uint256 indexed trancheId, uint256 amount, uint256 principalRestored, bytes32 stateHash
+    );
     event WheelAccountingAssetsReturned(uint256 usdcAmount, uint256 reservedConsumed, uint256 pendingConsumed);
     event WheelAllocationPauseSet(bool paused);
     event WheelPolicyHashSet(bytes32 indexed previousPolicyHash, bytes32 indexed newPolicyHash);
@@ -141,6 +162,11 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
 
     modifier onlyStrategyManager() {
         _checkStrategyManager();
+        _;
+    }
+
+    modifier onlyManagedCaller() {
+        if (msg.sender != address(this)) revert OnlyStrategyManager();
         _;
     }
 
@@ -201,6 +227,7 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
             assignmentLotCount: $.assignmentLotCount,
             pendingCspUsdc: $.pendingCspUsdc,
             reservedRedemptionUsdc: $.reservedRedemptionUsdc,
+            reservedPrincipalUsdc: $.reservedPrincipalUsdc,
             transitionWeth: $.transitionWeth,
             accountedUsdc: $.accountedUsdc,
             accountedWeth: $.accountedWeth
@@ -243,6 +270,7 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
                 $.assignmentLotCount,
                 $.pendingCspUsdc,
                 $.reservedRedemptionUsdc,
+                $.reservedPrincipalUsdc,
                 $.transitionWeth,
                 $.accountedUsdc,
                 $.accountedWeth,
@@ -265,7 +293,16 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
         return 0;
     }
 
-    function registerLane(address lane, WheelTypes.LaneKind kind) external restricted {
+    /// @notice Entry point invoked by StrategyManager inside its fund lock/NAV synchronization envelope.
+    function executeManagedOperation(uint8 operationClass, bytes calldata data)
+        external
+        onlyStrategyManager
+        returns (bytes memory result)
+    {
+        return WheelManagedOperationDispatcher.dispatch(operationClass, data);
+    }
+
+    function registerLane(address lane, WheelTypes.LaneKind kind) external onlyManagedCaller {
         if (
             lane == address(0) || lane.code.length == 0
                 || (kind != WheelTypes.LaneKind.Csp && kind != WheelTypes.LaneKind.CoveredCall)
@@ -290,7 +327,27 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
         emit WheelLaneRegistered(lane, kind);
     }
 
-    function setLaneActive(address lane, bool active) external restricted {
+    function removeLane(address lane) external onlyManagedCaller {
+        WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
+        WheelTypes.LaneKind kind = $.lanes[lane].kind;
+        if (
+            kind == WheelTypes.LaneKind.None || $.activeLaneTranche[lane] != 0
+                || IWheelChildLane(lane).childShares() != 0
+        ) revert LaneInUse();
+        uint256 length = $.registeredLanes.length;
+        for (uint256 i; i < length; ++i) {
+            if ($.registeredLanes[i] != lane) continue;
+            if (i != length - 1) $.registeredLanes[i] = $.registeredLanes[length - 1];
+            $.registeredLanes.pop();
+            delete $.lanes[lane];
+            _checkpoint($, keccak256(abi.encode("REMOVE_LANE", lane, kind)));
+            emit WheelLaneRemoved(lane, kind);
+            return;
+        }
+        revert InvalidLane();
+    }
+
+    function setLaneActive(address lane, bool active) external onlyManagedCaller {
         WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
         if ($.lanes[lane].kind == WheelTypes.LaneKind.None) {
             revert InvalidLane();
@@ -319,47 +376,23 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
         $.pendingCspUsdc += amount;
         WheelTypes.Tranche storage current = $.tranches[trancheId];
         current.leg = WheelTypes.TrancheLeg.PendingCsp;
+        current.principalUsdc = amount;
         current.pendingUsdc = amount;
         _checkpointTranche($, trancheId, keccak256(abi.encode("QUEUE", allocationId, amount)));
         emit WheelTrancheQueued(trancheId, allocationId, amount, $.pendingCspUsdc, current.stateHash);
     }
 
-    function openCspTranche(uint256 trancheId, address lane, bytes calldata openData) external restricted nonReentrant {
+    function openCspTranche(uint256 trancheId, address lane, bytes calldata openData)
+        external
+        onlyManagedCaller
+        nonReentrant
+    {
         WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
         if ($.allocationsPaused) revert AllocationPaused();
-        _requireLane($, lane, WheelTypes.LaneKind.Csp);
-        WheelTypes.Tranche storage current = $.tranches[trancheId];
-        _requireLeg(current, WheelTypes.TrancheLeg.PendingCsp);
-        if ($.activeLaneTranche[lane] != 0) revert LaneInUse();
-        uint256 amount = current.pendingUsdc;
-        if (amount == 0 || amount > $.pendingCspUsdc || amount > $.accountedUsdc) revert InvalidAmount();
-
-        bytes32 transitionHash = _consumeNextTransition($, trancheId, "OPEN_CSP", lane);
-        IERC20 usdcToken = IERC20($.usdc);
-        uint256 beforeBalance = usdcToken.balanceOf(address(this));
-        usdcToken.forceApprove(lane, amount);
-        (uint256 shares, uint256 positionId, uint64 expiry, bytes32 childHash) =
-            IWheelCspChildLane(lane).openCsp(trancheId, transitionHash, amount, openData);
-        usdcToken.forceApprove(lane, 0);
-        uint256 spent = beforeBalance - usdcToken.balanceOf(address(this));
-        if (spent != amount) revert TransferMismatch();
-        if (shares == 0) revert ChildShareMismatch();
-
-        $.accountedUsdc -= spent;
-        $.pendingCspUsdc -= spent;
-        $.activeLaneTranche[lane] = trancheId;
-        current.leg = WheelTypes.TrancheLeg.CspOpen;
-        current.childLane = lane;
-        current.pendingUsdc = 0;
-        current.childShares = shares;
-        current.childPositionId = positionId;
-        current.expiry = expiry;
-        current.childPositionHash = childHash;
-        _checkpointTranche($, trancheId, transitionHash);
-        emit WheelTrancheOpened(trancheId, lane, current.leg, positionId, shares, expiry, childHash);
+        WheelCoordinatorPositionOperations.openCsp($, trancheId, lane, openData);
     }
 
-    function settleCspTranche(uint256 trancheId) external restricted nonReentrant {
+    function settleCspTranche(uint256 trancheId) external onlyManagedCaller nonReentrant {
         WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
         WheelTypes.Tranche storage current = $.tranches[trancheId];
         if (current.leg != WheelTypes.TrancheLeg.CspOpen && current.leg != WheelTypes.TrancheLeg.CspSettling) {
@@ -373,121 +406,21 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
         emit WheelTrancheSettlementAdvanced(trancheId, current.childLane, current.leg, kind, childHash);
     }
 
-    function handoffCspTranche(uint256 trancheId) external restricted nonReentrant returns (uint256 lotId) {
-        WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
-        WheelTypes.Tranche storage current = $.tranches[trancheId];
-        _requireLeg(current, WheelTypes.TrancheLeg.CspSettling);
-        address lane = current.childLane;
-        bytes32 transitionHash = _consumeNextTransition($, trancheId, "HANDOFF_CSP", lane);
-        uint256 usdcBefore = IERC20($.usdc).balanceOf(address(this));
-        uint256 wethBefore = IERC20($.weth).balanceOf(address(this));
-        WheelTypes.LaneBasket memory basket =
-            IWheelCspChildLane(lane).handoffCsp(trancheId, current.childPositionHash, transitionHash, address(this));
-        _validateBasketDelta($, basket, usdcBefore, wethBefore, current.childShares, transitionHash);
-        if (basket.settlementKind == WheelTypes.SettlementKind.None) {
-            revert InvalidSettlement();
-        }
-
-        $.activeLaneTranche[lane] = 0;
-        $.accountedUsdc += basket.usdcAmount;
-        $.accountedWeth += basket.wethAmount;
-        $.pendingCspUsdc += basket.usdcAmount;
-        current.childLane = address(0);
-        current.childShares = 0;
-        current.childPositionHash = bytes32(0);
-        if (basket.wethAmount != 0) {
-            if (basket.literalAssignmentStrike8 == 0) revert InvalidAmount();
-            _splitPendingUsdc($, current, trancheId, basket.usdcAmount, transitionHash);
-            lotId = ++$.assignmentLotCount;
-            $.lots[lotId] = WheelTypes.AssignmentLot({
-                originCspLane: lane,
-                createdAt: uint64(block.timestamp),
-                status: WheelTypes.LotStatus.Available,
-                trancheId: trancheId,
-                originCspPositionId: basket.positionId,
-                wethReceived: basket.wethAmount,
-                remainingWeth: basket.wethAmount,
-                literalAssignmentStrike8: basket.literalAssignmentStrike8
-            });
-            $.transitionWeth += basket.wethAmount;
-            current.assignmentLotId = lotId;
-            current.leg = WheelTypes.TrancheLeg.WethTransition;
-            emit WheelAssignmentLotCreated(
-                lotId, trancheId, lane, basket.positionId, basket.wethAmount, basket.literalAssignmentStrike8
-            );
-            emit WheelLotStatusChanged(lotId, WheelTypes.LotStatus.Available, basket.wethAmount, trancheId);
-        } else {
-            current.pendingUsdc = basket.usdcAmount;
-            current.leg = WheelTypes.TrancheLeg.PendingCsp;
-        }
-        _checkpointTranche($, trancheId, transitionHash);
-        _requireNoDeficit($);
-        emit WheelChildHandoff(
-            trancheId,
-            lane,
-            transitionHash,
-            basket.settlementKind,
-            basket.childSharesBurned,
-            basket.usdcAmount,
-            basket.wethAmount
-        );
+    function handoffCspTranche(uint256 trancheId) external onlyManagedCaller nonReentrant returns (uint256 lotId) {
+        return WheelCoordinatorPositionOperations.handoffCsp(_getWheelCoordinatorAdapterStorage(), trancheId);
     }
 
     function openCoveredCallTranche(uint256 trancheId, address lane, bytes calldata openData)
         external
-        restricted
+        onlyManagedCaller
         nonReentrant
     {
         WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
         if ($.allocationsPaused) revert AllocationPaused();
-        _requireLane($, lane, WheelTypes.LaneKind.CoveredCall);
-        WheelTypes.Tranche storage current = $.tranches[trancheId];
-        _requireLeg(current, WheelTypes.TrancheLeg.WethTransition);
-        if ($.activeLaneTranche[lane] != 0) revert LaneInUse();
-        WheelTypes.AssignmentLot storage lot = $.lots[current.assignmentLotId];
-        if (lot.status != WheelTypes.LotStatus.Available || lot.remainingWeth == 0) revert InvalidAmount();
-
-        ICoveredCallFundAdapter.OpenPositionData memory decoded =
-            abi.decode(openData, (ICoveredCallFundAdapter.OpenPositionData));
-        uint256 buffer8 = IWheelCoveredCallChildLane(lane).executionCostBuffer8();
-        if (buffer8 != $.floorBufferUsd8) revert InvalidLane();
-        uint256 requiredFloor8 = lot.literalAssignmentStrike8 + buffer8;
-        uint256 callStrike8 = OToken(decoded.quote.oToken).strikePrice();
-        if (callStrike8 < requiredFloor8) revert CallStrikeBelowFloor();
-
-        uint256 amount = lot.remainingWeth;
-        bytes32 transitionHash = _consumeNextTransition($, trancheId, "OPEN_CALL", lane);
-        IERC20 wethToken = IERC20($.weth);
-        uint256 beforeBalance = wethToken.balanceOf(address(this));
-        wethToken.forceApprove(lane, amount);
-        (uint256 shares, uint256 positionId, uint64 expiry, bytes32 childHash) = IWheelCoveredCallChildLane(lane)
-            .openCoveredCall(
-                trancheId, transitionHash, current.assignmentLotId, lot.literalAssignmentStrike8, amount, openData
-            );
-        wethToken.forceApprove(lane, 0);
-        uint256 spent = beforeBalance - wethToken.balanceOf(address(this));
-        if (spent != amount) revert TransferMismatch();
-        if (shares != amount) revert ChildShareMismatch();
-
-        $.accountedWeth -= spent;
-        $.transitionWeth -= spent;
-        $.activeLaneTranche[lane] = trancheId;
-        lot.status = WheelTypes.LotStatus.InCall;
-        current.leg = WheelTypes.TrancheLeg.CallOpen;
-        current.childLane = lane;
-        current.childShares = shares;
-        current.childPositionId = positionId;
-        current.expiry = expiry;
-        current.childPositionHash = childHash;
-        _checkpointTranche($, trancheId, transitionHash);
-        emit WheelCoveredCallFloorEnforced(
-            trancheId, current.assignmentLotId, lane, lot.literalAssignmentStrike8, buffer8, requiredFloor8, callStrike8
-        );
-        emit WheelLotStatusChanged(current.assignmentLotId, lot.status, lot.remainingWeth, trancheId);
-        emit WheelTrancheOpened(trancheId, lane, current.leg, positionId, shares, expiry, childHash);
+        WheelCoordinatorPositionOperations.openCoveredCall($, trancheId, lane, openData);
     }
 
-    function settleCoveredCallTranche(uint256 trancheId) external restricted nonReentrant {
+    function settleCoveredCallTranche(uint256 trancheId) external onlyManagedCaller nonReentrant {
         WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
         WheelTypes.Tranche storage current = $.tranches[trancheId];
         if (current.leg != WheelTypes.TrancheLeg.CallOpen && current.leg != WheelTypes.TrancheLeg.CallSettling) {
@@ -501,71 +434,72 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
         emit WheelTrancheSettlementAdvanced(trancheId, current.childLane, current.leg, kind, childHash);
     }
 
-    function handoffCoveredCallTranche(uint256 trancheId) external restricted nonReentrant {
+    function handoffCoveredCallTranche(uint256 trancheId) external onlyManagedCaller nonReentrant {
+        WheelCoordinatorPositionOperations.handoffCoveredCall(_getWheelCoordinatorAdapterStorage(), trancheId);
+    }
+
+    function reserveRedemptionUsdc(uint256 trancheId, uint256 amount) external onlyManagedCaller {
         WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
         WheelTypes.Tranche storage current = $.tranches[trancheId];
-        _requireLeg(current, WheelTypes.TrancheLeg.CallSettling);
-        address lane = current.childLane;
-        bytes32 transitionHash = _consumeNextTransition($, trancheId, "HANDOFF_CALL", lane);
-        uint256 usdcBefore = IERC20($.usdc).balanceOf(address(this));
-        uint256 wethBefore = IERC20($.weth).balanceOf(address(this));
-        WheelTypes.LaneBasket memory basket = IWheelCoveredCallChildLane(lane)
-            .handoffCoveredCall(trancheId, current.childPositionHash, transitionHash, address(this));
-        _validateBasketDelta($, basket, usdcBefore, wethBefore, current.childShares, transitionHash);
-        if (basket.settlementKind == WheelTypes.SettlementKind.None) {
-            revert InvalidSettlement();
-        }
-
-        uint256 lotId = current.assignmentLotId;
-        WheelTypes.AssignmentLot storage lot = $.lots[lotId];
-        $.activeLaneTranche[lane] = 0;
-        $.accountedUsdc += basket.usdcAmount;
-        $.accountedWeth += basket.wethAmount;
-        $.pendingCspUsdc += basket.usdcAmount;
-        $.transitionWeth += basket.wethAmount;
-        current.childLane = address(0);
-        current.childShares = 0;
-        current.childPositionHash = bytes32(0);
-        lot.remainingWeth = basket.wethAmount;
-        if (basket.wethAmount == 0) {
-            lot.status = WheelTypes.LotStatus.CalledAway;
-            current.pendingUsdc += basket.usdcAmount;
-            current.leg = WheelTypes.TrancheLeg.PendingCsp;
-        } else {
-            lot.status = WheelTypes.LotStatus.Available;
-            _splitPendingUsdc($, current, trancheId, basket.usdcAmount, transitionHash);
-            current.leg = WheelTypes.TrancheLeg.WethTransition;
-        }
-        _checkpointTranche($, trancheId, transitionHash);
-        _requireNoDeficit($);
-        emit WheelLotStatusChanged(lotId, lot.status, lot.remainingWeth, trancheId);
-        emit WheelChildHandoff(
-            trancheId,
-            lane,
-            transitionHash,
-            basket.settlementKind,
-            basket.childSharesBurned,
-            basket.usdcAmount,
-            basket.wethAmount
-        );
-    }
-
-    function reserveRedemptionUsdc(uint256 amount) external restricted {
-        WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
-        if (amount == 0 || amount > $.pendingCspUsdc) revert InvalidAmount();
+        _requireLeg(current, WheelTypes.TrancheLeg.PendingCsp);
+        if (amount == 0 || amount > current.pendingUsdc || amount > $.pendingCspUsdc) revert InvalidAmount();
+        uint256 principalReserved = _principalShare(current.principalUsdc, current.pendingUsdc, amount);
+        current.pendingUsdc -= amount;
+        current.principalUsdc -= principalReserved;
+        if (current.pendingUsdc == 0) current.leg = WheelTypes.TrancheLeg.Closed;
         $.pendingCspUsdc -= amount;
         $.reservedRedemptionUsdc += amount;
-        _checkpoint($, keccak256(abi.encode("RESERVE_REDEMPTION", amount)));
+        $.reservedPrincipalUsdc += principalReserved;
+        _checkpointTranche(
+            $,
+            trancheId,
+            keccak256(
+                abi.encode("RESERVE_REDEMPTION", amount, principalReserved, current.pendingUsdc, current.principalUsdc)
+            )
+        );
+        emit WheelRedemptionUsdcReserved(
+            trancheId, amount, principalReserved, current.pendingUsdc, current.principalUsdc
+        );
         emit WheelRedemptionReserveChanged($.reservedRedemptionUsdc, $.pendingCspUsdc);
     }
 
-    function releaseRedemptionUsdc(uint256 amount) external restricted {
+    function releaseRedemptionUsdc(uint256 amount) external onlyManagedCaller returns (uint256 trancheId) {
         WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
         if (amount == 0 || amount > $.reservedRedemptionUsdc) revert InvalidAmount();
+        uint256 principalRestored = _principalShare($.reservedPrincipalUsdc, $.reservedRedemptionUsdc, amount);
         $.reservedRedemptionUsdc -= amount;
+        $.reservedPrincipalUsdc -= principalRestored;
         $.pendingCspUsdc += amount;
-        _checkpoint($, keccak256(abi.encode("RELEASE_REDEMPTION", amount)));
+        trancheId = _createPendingTranche(
+            $, amount, principalRestored, keccak256(abi.encode("RELEASE_REDEMPTION", amount, principalRestored))
+        );
+        emit WheelRedemptionUsdcReleased(trancheId, amount, principalRestored, $.tranches[trancheId].stateHash);
         emit WheelRedemptionReserveChanged($.reservedRedemptionUsdc, $.pendingCspUsdc);
+    }
+
+    /// @notice Splits a pending tranche so each CSP quote can stay within one lane's configured capacity.
+    function splitPendingCspTranche(uint256 trancheId, uint256 amount)
+        external
+        onlyManagedCaller
+        returns (uint256 siblingTrancheId)
+    {
+        WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
+        WheelTypes.Tranche storage current = $.tranches[trancheId];
+        _requireLeg(current, WheelTypes.TrancheLeg.PendingCsp);
+        if (amount == 0 || amount >= current.pendingUsdc) revert InvalidAmount();
+        uint256 principalMoved = _principalShare(current.principalUsdc, current.pendingUsdc, amount);
+        current.pendingUsdc -= amount;
+        current.principalUsdc -= principalMoved;
+        bytes32 operationHash = keccak256(
+            abi.encode(
+                "SPLIT_PENDING_CSP", trancheId, amount, principalMoved, current.pendingUsdc, current.principalUsdc
+            )
+        );
+        _checkpointTranche($, trancheId, operationHash);
+        siblingTrancheId = _createPendingTranche($, amount, principalMoved, operationHash);
+        emit WheelSiblingTrancheQueued(
+            trancheId, siblingTrancheId, amount, principalMoved, $.tranches[siblingTrancheId].stateHash
+        );
     }
 
     function deallocate(uint256 targetValue, uint256 minAccountingAssetsOut, bytes calldata)
@@ -575,19 +509,18 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
         returns (uint256 accountingAssetsOut, uint256 principalReleased)
     {
         WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
-        uint256 available = $.reservedRedemptionUsdc + $.pendingCspUsdc;
-        if (targetValue == 0 || targetValue > available || targetValue > $.accountedUsdc) revert InvalidAmount();
+        if (targetValue == 0 || targetValue > $.reservedRedemptionUsdc || targetValue > $.accountedUsdc) {
+            revert InvalidAmount();
+        }
         accountingAssetsOut = targetValue;
         if (accountingAssetsOut < minAccountingAssetsOut) revert InvalidAmount();
-        uint256 reservedConsumed = Math.min($.reservedRedemptionUsdc, accountingAssetsOut);
-        uint256 pendingConsumed = accountingAssetsOut - reservedConsumed;
-        $.reservedRedemptionUsdc -= reservedConsumed;
-        $.pendingCspUsdc -= pendingConsumed;
+        principalReleased = _principalShare($.reservedPrincipalUsdc, $.reservedRedemptionUsdc, accountingAssetsOut);
+        $.reservedRedemptionUsdc -= accountingAssetsOut;
+        $.reservedPrincipalUsdc -= principalReleased;
         $.accountedUsdc -= accountingAssetsOut;
-        principalReleased = accountingAssetsOut;
-        _checkpoint($, keccak256(abi.encode("RETURN_USDC", accountingAssetsOut, reservedConsumed, pendingConsumed)));
+        _checkpoint($, keccak256(abi.encode("RETURN_USDC", accountingAssetsOut, principalReleased)));
         _transferExact(IERC20($.usdc), $.fund, accountingAssetsOut);
-        emit WheelAccountingAssetsReturned(accountingAssetsOut, reservedConsumed, pendingConsumed);
+        emit WheelAccountingAssetsReturned(accountingAssetsOut, accountingAssetsOut, 0);
     }
 
     function deallocateInKind(uint256, address, bytes calldata)
@@ -620,23 +553,24 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
         $.accountedWeth = 0;
         $.pendingCspUsdc = 0;
         $.reservedRedemptionUsdc = 0;
+        $.reservedPrincipalUsdc = 0;
         $.transitionWeth = 0;
         _checkpoint($, keccak256(abi.encode("EMERGENCY_IN_KIND", escrow, amounts)));
         _transferExact(IERC20($.usdc), escrow, amounts[0]);
         _transferExact(IERC20($.weth), escrow, amounts[1]);
     }
 
-    function pauseAllocations() external restricted {
+    function pauseAllocations() external onlyManagedCaller {
         _getWheelCoordinatorAdapterStorage().allocationsPaused = true;
         emit WheelAllocationPauseSet(true);
     }
 
-    function resumeAllocations() external restricted {
+    function resumeAllocations() external onlyManagedCaller {
         _getWheelCoordinatorAdapterStorage().allocationsPaused = false;
         emit WheelAllocationPauseSet(false);
     }
 
-    function setPolicyHash(bytes32 newPolicyHash) external restricted {
+    function setPolicyHash(bytes32 newPolicyHash) external onlyManagedCaller {
         if (newPolicyHash == bytes32(0)) revert InvalidAmount();
         WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
         bytes32 previous = $.policyHash;
@@ -646,7 +580,7 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
     }
 
     /// @notice Finalizes a buffer already applied to every registered CC lane by the curator.
-    function setFloorBufferUsd8(uint256 newFloorBufferUsd8) external restricted {
+    function setFloorBufferUsd8(uint256 newFloorBufferUsd8) external onlyManagedCaller {
         WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
         for (uint256 i; i < $.registeredLanes.length; ++i) {
             address lane = $.registeredLanes[i];
@@ -661,53 +595,27 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
         emit WheelFloorBufferSet(previous, newFloorBufferUsd8);
     }
 
-    function _requireLane(
+    function _createPendingTranche(
         WheelCoordinatorAdapterStorageLayout storage $,
-        address lane,
-        WheelTypes.LaneKind expectedKind
-    ) private view {
-        LaneConfig storage config = $.lanes[lane];
-        if (!config.active || config.kind != expectedKind || IWheelChildLane(lane).coordinator() != address(this)) {
-            revert InvalidLane();
-        }
+        uint256 amount,
+        uint256 principalAmount,
+        bytes32 operationHash
+    ) private returns (uint256 trancheId) {
+        trancheId = ++$.trancheCount;
+        WheelTypes.Tranche storage current = $.tranches[trancheId];
+        current.leg = WheelTypes.TrancheLeg.PendingCsp;
+        current.principalUsdc = principalAmount;
+        current.pendingUsdc = amount;
+        _checkpointTranche($, trancheId, operationHash);
     }
 
-    function _splitPendingUsdc(
-        WheelCoordinatorAdapterStorageLayout storage $,
-        WheelTypes.Tranche storage parent,
-        uint256 parentTrancheId,
-        uint256 returnedUsdc,
-        bytes32 transitionHash
-    ) private {
-        uint256 siblingUsdc = parent.pendingUsdc + returnedUsdc;
-        parent.pendingUsdc = 0;
-        if (siblingUsdc == 0) return;
-
-        uint256 siblingTrancheId = ++$.trancheCount;
-        WheelTypes.Tranche storage sibling = $.tranches[siblingTrancheId];
-        sibling.leg = WheelTypes.TrancheLeg.PendingCsp;
-        sibling.pendingUsdc = siblingUsdc;
-        _checkpointTranche(
-            $, siblingTrancheId, keccak256(abi.encode("SPLIT_USDC", parentTrancheId, transitionHash, siblingUsdc))
-        );
-        emit WheelSiblingTrancheQueued(parentTrancheId, siblingTrancheId, siblingUsdc, sibling.stateHash);
+    function _principalShare(uint256 principal, uint256 totalAssets, uint256 assets) private pure returns (uint256) {
+        if (assets == totalAssets) return principal;
+        return Math.mulDiv(principal, assets, totalAssets);
     }
 
     function _requireLeg(WheelTypes.Tranche storage current, WheelTypes.TrancheLeg expected) private view {
         if (current.leg != expected) revert InvalidTrancheLeg();
-    }
-
-    function _consumeNextTransition(
-        WheelCoordinatorAdapterStorageLayout storage $,
-        uint256 trancheId,
-        bytes32 action,
-        address lane
-    ) private returns (bytes32 transitionHash) {
-        transitionHash = keccak256(
-            abi.encode(block.chainid, address(this), trancheId, $.stateNonce + 1, action, lane, $.positionsHash)
-        );
-        if ($.consumedTransitions[transitionHash]) revert DuplicateTransition(transitionHash);
-        $.consumedTransitions[transitionHash] = true;
     }
 
     function _checkpointTranche(
@@ -725,6 +633,8 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
                 trancheId,
                 current.leg,
                 current.childLane,
+                current.principalUsdc,
+                current.pendingUsdc,
                 current.childShares,
                 current.childPositionId,
                 current.assignmentLotId,
@@ -738,26 +648,6 @@ contract WheelCoordinatorAdapter is FundUpgradeable, WheelCoordinatorAdapterStor
     function _checkpoint(WheelCoordinatorAdapterStorageLayout storage $, bytes32 operationHash) private {
         uint64 nonce = ++$.stateNonce;
         $.positionsHash = keccak256(abi.encode($.positionsHash, nonce, operationHash));
-    }
-
-    function _validateBasketDelta(
-        WheelCoordinatorAdapterStorageLayout storage $,
-        WheelTypes.LaneBasket memory basket,
-        uint256 usdcBefore,
-        uint256 wethBefore,
-        uint256 expectedShares,
-        bytes32 transitionHash
-    ) private view {
-        if (basket.transitionHash != transitionHash) {
-            revert DuplicateTransition(basket.transitionHash);
-        }
-        if (basket.childSharesBurned != expectedShares) {
-            revert ChildShareMismatch();
-        }
-        uint256 observedUsdc = IERC20($.usdc).balanceOf(address(this)) - usdcBefore;
-        uint256 observedWeth = IERC20($.weth).balanceOf(address(this)) - wethBefore;
-        if (observedUsdc != basket.usdcAmount) revert TransferMismatch();
-        if (observedWeth != basket.wethAmount) revert TransferMismatch();
     }
 
     function _requireNoDeficit(WheelCoordinatorAdapterStorageLayout storage $) private view {

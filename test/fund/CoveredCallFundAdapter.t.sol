@@ -482,12 +482,22 @@ contract CoveredCallFundAdapterTest is Test {
             ICoveredCallFundValuator.ValuationData({optionObservations: observations});
 
         FundTypes.PositionValue memory value = valuator.value(address(adapter), snapshot, abi.encode(valuationData));
+        FundTypes.PositionValue memory bounded =
+            valuator.valuePosition(address(adapter), 1, snapshot, abi.encode(valuationData));
         uint256 premiumWeth = _expectedWeth(PREMIUM, 1_800e8);
         uint256 normalizationCost = Math.mulDiv(premiumWeth, 100, 10_000, Math.Rounding.Ceil);
         assertEq(value.grossAssets, COLLATERAL + premiumWeth);
         assertEq(value.liabilities, 0.102e18);
         assertEq(value.liquidAccountingAssets, 0);
         assertEq(value.baseExitCost, 0.00102e18 + normalizationCost);
+        assertEq(bounded.grossAssets, value.grossAssets);
+        assertEq(bounded.liabilities, value.liabilities);
+        assertEq(bounded.liquidAccountingAssets, value.liquidAccountingAssets);
+        assertEq(bounded.baseExitCost, value.baseExitCost);
+        assertEq(bounded.dataHash, value.dataHash);
+
+        vm.expectRevert(abi.encodeWithSelector(ICoveredCallFundValuator.InvalidObservation.selector, uint256(2)));
+        valuator.valuePosition(address(adapter), 2, snapshot, abi.encode(valuationData));
 
         ICoveredCallFundValuator.ValuationData memory emptyData = ICoveredCallFundValuator.ValuationData({
             optionObservations: new ICoveredCallFundValuator.OptionObservation[](0)

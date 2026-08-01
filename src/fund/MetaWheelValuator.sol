@@ -8,6 +8,7 @@ import {FundConstants} from "./FundConstants.sol";
 import {FundTypes} from "./FundTypes.sol";
 import {WheelTypes} from "./WheelTypes.sol";
 import {IPositionValuator} from "./interfaces/IPositionValuator.sol";
+import {IBoundedPositionValuator} from "./interfaces/IBoundedPositionValuator.sol";
 import {IWheelChildLane} from "./interfaces/IWheelChildLane.sol";
 import {IWheelCoordinatorAdapter} from "./interfaces/IWheelCoordinatorAdapter.sol";
 
@@ -170,13 +171,19 @@ contract MetaWheelValuator is IPositionValuator {
         uint256 idleUsdc;
         uint256 idleWeth;
         if (kind == WheelTypes.LaneKind.Csp) {
-            childValue = IPositionValuator(cspValuator).value(childAdapter, snapshotBlock, report.valuationData);
+            childValue = IBoundedPositionValuator(cspValuator)
+                .valuePosition(
+                    childAdapter, IWheelChildLane(lane).activePositionId(), snapshotBlock, report.valuationData
+                );
             (idleUsdc, idleWeth) = IWheelCspLaneAccounting(lane).accountingState();
             parentValue.grossAssets += childValue.grossAssets;
             parentValue.liabilities += childValue.liabilities;
             parentValue.baseExitCost += childValue.baseExitCost;
         } else if (kind == WheelTypes.LaneKind.CoveredCall) {
-            childValue = IPositionValuator(coveredCallValuator).value(childAdapter, snapshotBlock, report.valuationData);
+            childValue = IBoundedPositionValuator(coveredCallValuator)
+                .valuePosition(
+                    childAdapter, IWheelChildLane(lane).activePositionId(), snapshotBlock, report.valuationData
+                );
             (idleUsdc, idleWeth,,) = IWheelCoveredCallLaneAccounting(lane).accountingState();
             parentValue.grossAssets += _wethValue(childValue.grossAssets, spotPrice);
             parentValue.liabilities += _wethValue(childValue.liabilities, spotPrice);

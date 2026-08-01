@@ -21,11 +21,13 @@ import {IFundFlowManager} from "../../src/fund/interfaces/IFundFlowManager.sol";
 import {IStrategyManager} from "../../src/fund/interfaces/IStrategyManager.sol";
 import {IFundStrategyAdapter} from "../../src/fund/interfaces/IFundStrategyAdapter.sol";
 import {IPositionValuator} from "../../src/fund/interfaces/IPositionValuator.sol";
+import {FundAccountingStorage} from "../../src/fund/storage/FundAccountingStorage.sol";
 
 contract ProductionStrategyAdapter is IFundStrategyAdapter {
     address public immutable override fund;
     address public immutable override accountingAsset;
     uint64 public positionNonce;
+    uint8 public lastManagedOperationClass;
 
     constructor(address fund_, address accountingAsset_) {
         fund = fund_;
@@ -95,7 +97,60 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
         IERC20(accountingAsset).transfer(escrow, amounts[0]);
         ++positionNonce;
     }
+
+    function executeManagedOperation(uint8 operationClass, bytes calldata data) external returns (bytes memory result) {
+        require(msg.sender == FundVault(fund).strategyManager(), "ONLY_MANAGER");
+        lastManagedOperationClass = operationClass;
+        ++positionNonce;
+        return data;
+    }
 }
+
+    contract UnmanagedProductionStrategyAdapter is IFundStrategyAdapter {
+        address public immutable override fund;
+        address public immutable override accountingAsset;
+
+        constructor(address fund_, address accountingAsset_) {
+            fund = fund_;
+            accountingAsset = accountingAsset_;
+        }
+
+        function interfaceVersion() external pure returns (uint64) {
+            return 1;
+        }
+
+        function deallocationInterfaceVersion() external pure returns (uint64) {
+            return 2;
+        }
+
+        function positionStateHash() external view returns (bytes32) {
+            return keccak256(abi.encode(address(this), IERC20(accountingAsset).balanceOf(address(this))));
+        }
+
+        function freeAssets(address asset_) external view returns (uint256) {
+            return IERC20(asset_).balanceOf(address(this));
+        }
+
+        function allocate(address, uint256, bytes calldata) external pure {
+            revert("UNUSED");
+        }
+
+        function deallocate(uint256, uint256, bytes calldata) external pure returns (uint256, uint256) {
+            revert("UNUSED");
+        }
+
+        function deallocateInKind(uint256, address, bytes calldata)
+            external
+            pure
+            returns (address[] memory, uint256[] memory)
+        {
+            revert("UNUSED");
+        }
+
+        function emergencyExit(address, bytes calldata) external pure returns (address[] memory, uint256[] memory) {
+            revert("UNUSED");
+        }
+    }
 
     contract LegacyProductionStrategyAdapter {
         address public immutable fund;
@@ -1028,6 +1083,71 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             assertEq(strategy.allocatedToAdapter(address(adapter), address(asset)), 40e6 + 1);
         }
 
+        function test_managedAdapterOperationsInvalidateNavAndSynchronizeEveryRoleClass() public {
+            (ProductionStrategyAdapter adapter,) = _configureProductionStrategy(50e6, 0);
+
+            _submitNavWithStrategy(address(adapter));
+            strategy.executeAdapterAllocationOperation(address(adapter), hex"a1");
+            _assertManagedOperationSynchronized(adapter, 1, 1);
+
+            _submitNavWithStrategy(address(adapter));
+            strategy.executeAdapterProcessingOperation(address(adapter), hex"b2");
+            _assertManagedOperationSynchronized(adapter, 2, 2);
+
+            _submitNavWithStrategy(address(adapter));
+            strategy.executeAdapterGuardianOperation(address(adapter), hex"c3");
+            _assertManagedOperationSynchronized(adapter, 3, 3);
+
+            bytes memory configurationCall =
+                abi.encodeCall(strategy.executeAdapterConfigurationOperation, (address(adapter), hex"d4"));
+            manager.schedule(address(strategy), configurationCall, 0);
+            vm.warp(block.timestamp + FundConstants.CURATOR_DELAY);
+            _submitNavWithStrategy(address(adapter));
+            strategy.executeAdapterConfigurationOperation(address(adapter), hex"d4");
+            _assertManagedOperationSynchronized(adapter, 4, 4);
+        }
+
+        function test_unmanagedConfiguredAdapterRevertsWithoutPartialNavOrHashMutation() public {
+            UnmanagedProductionStrategyAdapter adapter =
+                new UnmanagedProductionStrategyAdapter(address(vault), address(asset));
+            ProductionPositionValuator valuator = new ProductionPositionValuator();
+            _scheduleAndCall(
+                address(accounting),
+                abi.encodeCall(
+                    accounting.setComponent,
+                    (accounting.strategyComponentId(address(adapter)), address(valuator), uint64(1), true)
+                )
+            );
+            FundTypes.StrategyConfig memory config = FundTypes.StrategyConfig({
+                active: true,
+                maxAllocationBps: 5_000,
+                maxLossBps: 0,
+                cooldown: 0,
+                interfaceVersion: 1,
+                valuator: address(valuator),
+                absoluteCap: 50e6
+            });
+            _scheduleAndCall(address(strategy), abi.encodeCall(strategy.setStrategyConfig, (address(adapter), config)));
+            _submitNavWithStrategy(address(adapter));
+
+            FundTypes.NavCommit memory navBefore = vault.activeNavWindow();
+            bytes32 managerHashBefore = strategy.positionsHash();
+            FundAccountingStorage.ComponentState memory componentBefore =
+                accounting.componentState(accounting.strategyComponentId(address(adapter)));
+            vm.expectRevert();
+            strategy.executeAdapterProcessingOperation(address(adapter), hex"dead");
+
+            FundTypes.NavCommit memory navAfter = vault.activeNavWindow();
+            FundAccountingStorage.ComponentState memory componentAfter =
+                accounting.componentState(accounting.strategyComponentId(address(adapter)));
+            assertEq(navAfter.validUntilBlock, navBefore.validUntilBlock);
+            assertEq(navAfter.positionsHash, navBefore.positionsHash);
+            assertEq(strategy.positionsHash(), managerHashBefore);
+            assertEq(strategy.positionNonce(address(adapter)), 0);
+            assertEq(componentAfter.nonce, componentBefore.nonce);
+            assertEq(componentAfter.positionStateHash, componentBefore.positionStateHash);
+        }
+
         function test_principalReleaseUsesItsOwnConfiguredLossBound() public {
             _depositForAlice(100e6);
             (ProductionStrategyAdapter adapter,) = _configureProductionStrategy(50e6, 1_000);
@@ -1557,6 +1677,94 @@ contract ProductionStrategyAdapter is IFundStrategyAdapter {
             ) = _buildSignedNav(grossAssets, liquidAssets, baseExitCost);
             accounting.submitNav(reportNonce, reports, reporters, signatures);
             vm.roll(validAfterBlock);
+        }
+
+        function _submitNavWithStrategy(address adapter) private {
+            vm.roll(block.number + 2);
+            uint64 snapshotBlock = uint64(block.number - 1);
+            bytes32 snapshotHash = keccak256(abi.encode("strategy-snapshot", snapshotBlock));
+            vm.setBlockhash(snapshotBlock, snapshotHash);
+            uint64 validAfterBlock = uint64(block.number + 1);
+            uint64 validUntilBlock = validAfterBlock + 10;
+            uint64 reportNonce = accounting.lastReportNonce() + 1;
+
+            FundTypes.ComponentReport[] memory reports = new FundTypes.ComponentReport[](2);
+            uint256 idleAssets = vault.accountedIdleAssets();
+            reports[0] = FundTypes.ComponentReport({
+                fund: address(vault),
+                componentId: IDLE_COMPONENT,
+                chainId: block.chainid,
+                snapshotBlock: snapshotBlock,
+                snapshotBlockHash: snapshotHash,
+                validAfterBlock: validAfterBlock,
+                validUntilBlock: validUntilBlock,
+                reporterSetVersion: 1,
+                componentNonce: vault.fundFlowNonce(),
+                positionStateHash: vault.idleStateHash(),
+                grossAssets: idleAssets,
+                liabilities: 0,
+                liquidAccountingAssets: idleAssets,
+                baseExitCost: 0,
+                dataHash: keccak256(abi.encode("idle", idleAssets))
+            });
+
+            bytes32 componentId = accounting.strategyComponentId(adapter);
+            FundAccountingStorage.ComponentState memory component = accounting.componentState(componentId);
+            uint256 strategyAssets = asset.balanceOf(adapter);
+            reports[1] = FundTypes.ComponentReport({
+                fund: address(vault),
+                componentId: componentId,
+                chainId: block.chainid,
+                snapshotBlock: snapshotBlock,
+                snapshotBlockHash: snapshotHash,
+                validAfterBlock: validAfterBlock,
+                validUntilBlock: validUntilBlock,
+                reporterSetVersion: 1,
+                componentNonce: component.nonce,
+                positionStateHash: component.positionStateHash,
+                grossAssets: strategyAssets,
+                liabilities: 0,
+                liquidAccountingAssets: strategyAssets,
+                baseExitCost: 0,
+                dataHash: keccak256(abi.encode("strategy", adapter, strategyAssets))
+            });
+
+            bytes32 digest = accounting.signatureDigest(reportNonce, reports);
+            address[] memory reporters = new address[](2);
+            bytes[] memory signatures = new bytes[](2);
+            reporters[0] = vm.addr(REPORTER_ONE_KEY);
+            reporters[1] = vm.addr(REPORTER_TWO_KEY);
+            signatures[0] = _signature(REPORTER_ONE_KEY, digest);
+            signatures[1] = _signature(REPORTER_TWO_KEY, digest);
+            accounting.submitNav(reportNonce, reports, reporters, signatures);
+            vm.roll(validAfterBlock);
+        }
+
+        function _assertManagedOperationSynchronized(
+            ProductionStrategyAdapter adapter,
+            uint8 expectedClass,
+            uint64 expectedNonce
+        ) private {
+            assertEq(adapter.lastManagedOperationClass(), expectedClass);
+            assertEq(strategy.positionNonce(address(adapter)), expectedNonce);
+            assertEq(vault.activeNavWindow().positionsHash, strategy.positionsHash());
+            bytes32 componentId = accounting.strategyComponentId(address(adapter));
+            FundAccountingStorage.ComponentState memory component = accounting.componentState(componentId);
+            assertEq(component.nonce, expectedNonce);
+            assertEq(component.positionStateHash, adapter.positionStateHash());
+            assertLt(vault.activeNavWindow().validUntilBlock, block.number);
+
+            asset.mint(alice, 1);
+            vm.startPrank(alice);
+            asset.approve(address(vault), 1);
+            assertEq(vault.maxDeposit(alice), 0);
+            vm.expectRevert(
+                abi.encodeWithSignature(
+                    "ERC4626ExceededMaxDeposit(address,uint256,uint256)", alice, uint256(1), uint256(0)
+                )
+            );
+            vault.deposit(1, alice);
+            vm.stopPrank();
         }
 
         function _buildSignedNav(uint256 grossAssets, uint256 liquidAssets, uint256 baseExitCost)

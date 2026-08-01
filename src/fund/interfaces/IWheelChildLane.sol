@@ -12,5 +12,6 @@ interface IWheelChildLane {
     function childShares() external view returns (uint256);
     function activeTrancheId() external view returns (uint256);
     function activePositionId() external view returns (uint256);
+    function executionStateHash() external view returns (bytes32);
     function positionStateHash() external view returns (bytes32);
 }

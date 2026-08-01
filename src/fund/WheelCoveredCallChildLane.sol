@@ -179,7 +179,8 @@ contract WheelCoveredCallChildLane is FundUpgradeable, WheelCoveredCallChildLane
         return ($.accountedUsdc, $.accountedWeth, $.literalAssignmentStrike8, $.requiredFloor8);
     }
 
-    function positionStateHash() public view returns (bytes32) {
+    /// @notice Stable operational commitment; permissionless token transfers cannot invalidate it.
+    function executionStateHash() public view returns (bytes32) {
         WheelCoveredCallChildLaneStorageLayout storage $ = _getWheelCoveredCallChildLaneStorage();
         return keccak256(
             abi.encode(
@@ -197,7 +198,17 @@ contract WheelCoveredCallChildLane is FundUpgradeable, WheelCoveredCallChildLane
                 $.literalAssignmentStrike8,
                 $.requiredFloor8,
                 $.expiry,
-                $.positionsHash,
+                $.positionsHash
+            )
+        );
+    }
+
+    /// @notice Balance-sensitive reconciliation commitment used by NAV reporters.
+    function positionStateHash() public view returns (bytes32) {
+        WheelCoveredCallChildLaneStorageLayout storage $ = _getWheelCoveredCallChildLaneStorage();
+        return keccak256(
+            abi.encode(
+                executionStateHash(),
                 ICoveredCallFundAdapter($.adapter).positionStateHash(),
                 IERC20($.usdc).balanceOf(address(this)),
                 IERC20($.weth).balanceOf(address(this))
@@ -267,7 +278,7 @@ contract WheelCoveredCallChildLane is FundUpgradeable, WheelCoveredCallChildLane
         $.expiry = expiry;
         _checkpoint($, transitionHash);
         mintedChildShares = received;
-        positionHash = positionStateHash();
+        positionHash = executionStateHash();
         emit CoveredCallOpened(
             trancheId,
             lotId,
@@ -303,7 +314,7 @@ contract WheelCoveredCallChildLane is FundUpgradeable, WheelCoveredCallChildLane
             trancheId != $.activeTrancheId
                 || ($.state != WheelTypes.LaneState.Open && $.state != WheelTypes.LaneState.Settling)
         ) revert InvalidLaneState(WheelTypes.LaneState.Open, $.state);
-        bytes32 currentHash = positionStateHash();
+        bytes32 currentHash = executionStateHash();
         if (currentHash != expectedPositionHash) revert InvalidPositionHash(expectedPositionHash, currentHash);
 
         ICoveredCallFundAdapter coveredCall = ICoveredCallFundAdapter($.adapter);
@@ -329,7 +340,7 @@ contract WheelCoveredCallChildLane is FundUpgradeable, WheelCoveredCallChildLane
         } else if (settled.lifecycle == ICoveredCallFundAdapter.Lifecycle.AwaitingPhysicalDelivery) {
             $.state = WheelTypes.LaneState.Settling;
             _checkpoint($, keccak256(abi.encode("SETTLE_CALL_PENDING", trancheId, settled.lifecycleHash)));
-            positionHash = positionStateHash();
+            positionHash = executionStateHash();
             emit CoveredCallSettlementAdvanced(
                 trancheId,
                 $.consumedLotId,
@@ -360,7 +371,7 @@ contract WheelCoveredCallChildLane is FundUpgradeable, WheelCoveredCallChildLane
         $.state = WheelTypes.LaneState.ReadyForHandoff;
         _checkpoint($, keccak256(abi.encode("SETTLE_CALL", trancheId, settled.lifecycleHash, adapterTransition)));
         _requireNoDeficit($);
-        positionHash = positionStateHash();
+        positionHash = executionStateHash();
         emit CoveredCallSettlementAdvanced(
             trancheId,
             $.consumedLotId,
@@ -383,7 +394,7 @@ contract WheelCoveredCallChildLane is FundUpgradeable, WheelCoveredCallChildLane
         if ($.state != WheelTypes.LaneState.ReadyForHandoff || trancheId != $.activeTrancheId) {
             revert InvalidLaneState(WheelTypes.LaneState.ReadyForHandoff, $.state);
         }
-        bytes32 currentHash = positionStateHash();
+        bytes32 currentHash = executionStateHash();
         if (currentHash != expectedPositionHash) revert InvalidPositionHash(expectedPositionHash, currentHash);
         if (receiver == address(0)) revert InvalidAddress();
         _consumeTransition($, transitionHash);

@@ -15,6 +15,11 @@ contract MetaWheelMockCanonicalValuator is IPositionValuator {
 
     mapping(address adapter => bytes32 dataHash) public expectedDataHash;
     mapping(address adapter => FundTypes.PositionValue positionValue) private _values;
+    uint256 public historicalPositionCount;
+
+    function setHistoricalPositionCount(uint256 count) external {
+        historicalPositionCount = count;
+    }
 
     function setValue(address adapter, bytes calldata valuationData, FundTypes.PositionValue calldata positionValue)
         external
@@ -32,7 +37,23 @@ contract MetaWheelMockCanonicalValuator is IPositionValuator {
         view
         returns (FundTypes.PositionValue memory positionValue)
     {
+        bytes32 historyCommitment;
+        for (uint256 i; i < historicalPositionCount; ++i) {
+            historyCommitment = keccak256(abi.encode(historyCommitment, i));
+        }
+        if (historyCommitment == bytes32(type(uint256).max)) revert InvalidCanonicalData();
         if (snapshotBlock != block.number || keccak256(data) != expectedDataHash[adapter]) {
+            revert InvalidCanonicalData();
+        }
+        return _values[adapter];
+    }
+
+    function valuePosition(address adapter, uint256 positionId, uint64 snapshotBlock, bytes calldata data)
+        external
+        view
+        returns (FundTypes.PositionValue memory positionValue)
+    {
+        if (positionId == 0 || snapshotBlock != block.number || keccak256(data) != expectedDataHash[adapter]) {
             revert InvalidCanonicalData();
         }
         return _values[adapter];
@@ -159,6 +180,7 @@ contract MetaWheelValuatorTest is Test {
                 assignmentLotCount: 1,
                 pendingCspUsdc: 100e6,
                 reservedRedemptionUsdc: 0,
+                reservedPrincipalUsdc: 0,
                 transitionWeth: 1e18,
                 accountedUsdc: 100e6,
                 accountedWeth: 1e18
@@ -235,6 +257,25 @@ contract MetaWheelValuatorTest is Test {
         reports[0].positionHash = bytes32(uint256(1));
         vm.expectRevert(abi.encodeWithSelector(MetaWheelValuator.InvalidLaneReport.selector, address(cspLane)));
         valuator.value(address(coordinator), uint64(block.number), abi.encode(reports));
+    }
+
+    function test_parentValuationCostDoesNotGrowWithThreeHundredTerminalChildPositions() public {
+        WheelTypes.LaneValuation[] memory reports = _reports();
+        uint256 gasBefore = gasleft();
+        FundTypes.PositionValue memory baseline =
+            valuator.value(address(coordinator), uint64(block.number), abi.encode(reports));
+        uint256 baselineGas = gasBefore - gasleft();
+
+        cspValuator.setHistoricalPositionCount(300);
+        callValuator.setHistoricalPositionCount(300);
+        gasBefore = gasleft();
+        FundTypes.PositionValue memory afterHistory =
+            valuator.value(address(coordinator), uint64(block.number), abi.encode(reports));
+        uint256 historyGas = gasBefore - gasleft();
+
+        assertEq(afterHistory.grossAssets, baseline.grossAssets);
+        assertEq(afterHistory.liabilities, baseline.liabilities);
+        assertLe(historyGas, baselineGas + 5_000);
     }
 
     function _reports() private view returns (WheelTypes.LaneValuation[] memory reports) {
