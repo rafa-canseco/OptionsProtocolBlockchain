@@ -119,7 +119,7 @@ linker_json=$(printf '%s\n' "${bindings[@]}" | jq -R . | jq -s .)
 records_file="$temporary_dir/library-records.jsonl"
 : >"$records_file"
 if [[ "$mode" == "broadcast" || "$mode" == "fork-broadcast" ]]; then
-  run_file="broadcast/DeployMetaWheelLibrariesBaseSepolia.s.sol/84532/run-latest.json"
+  run_file="broadcast/DeployMetaWheelLibrariesBaseSepolia.s.sol/84532/deployLibraries-latest.json"
   [[ -f "$run_file" ]] || die "Foundry broadcast receipt file is missing"
   transaction_rows=()
   while IFS= read -r transaction_row; do
