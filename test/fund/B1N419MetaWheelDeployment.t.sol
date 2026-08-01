@@ -14,6 +14,8 @@ import {FundConstants} from "../../src/fund/FundConstants.sol";
 import {FundFactory} from "../../src/fund/FundFactory.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
 import {FundVault} from "../../src/fund/FundVault.sol";
+import {CspFundValuatorV2} from "../../src/fund/CspFundValuatorV2.sol";
+import {CoveredCallFundValuatorV2} from "../../src/fund/CoveredCallFundValuatorV2.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
 import {WheelCoordinatorAdapter} from "../../src/fund/WheelCoordinatorAdapter.sol";
 import {WheelCspChildLane} from "../../src/fund/WheelCspChildLane.sol";
@@ -39,6 +41,13 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
 
     function validateForTest(DeployConfig memory config, address broadcaster) external view {
         _validateConfig(config, broadcaster);
+    }
+
+    function validateFactoryDeploymentForTest(DeploymentAddresses memory deployed, uint64 expectedVersion)
+        external
+        view
+    {
+        _requireFactoryDeployment(deployed, expectedVersion);
     }
 
     function setUp() public {
@@ -99,6 +108,16 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
         assertEq(coordinator.policyHash(), config.wheel.policyHash);
         assertEq(coordinator.floorBufferUsd8(), config.wheel.floorBufferUsd8);
         assertEq(StrategyManager(deployed.strategy).strategyConfig(deployed.coordinator).interfaceVersion, 0);
+        CspFundValuatorV2 cspValuator = CspFundValuatorV2(deployed.cspValuator);
+        CoveredCallFundValuatorV2 coveredCallValuator = CoveredCallFundValuatorV2(deployed.coveredCallValuator);
+        assertEq(cspValuator.approvedObserverCount(), 2);
+        assertEq(coveredCallValuator.approvedObserverCount(), 2);
+        for (uint256 i; i < 2; ++i) {
+            assertEq(cspValuator.approvedObserverAt(i), config.valuation.approvedObservers[i]);
+            assertEq(coveredCallValuator.approvedObserverAt(i), config.valuation.approvedObservers[i + 2]);
+            assertFalse(cspValuator.isApprovedObserver(config.valuation.approvedObservers[i + 2]));
+            assertFalse(coveredCallValuator.isApprovedObserver(config.valuation.approvedObservers[i]));
+        }
 
         for (uint256 i; i < 4; ++i) {
             assertEq(WheelCspChildLane(deployed.cspLanes[i]).coordinator(), deployed.coordinator);
@@ -137,6 +156,16 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
         assertEq(config.standalone.coveredCallVaultProxy.codehash, ccVaultCodehashBefore);
         assertEq(config.standalone.coveredCallAdapterProxy.codehash, ccAdapterCodehashBefore);
         _requireStandaloneBaseline(config.standalone);
+    }
+
+    function test_reconciliationRejectsAlteredDeploymentId() public {
+        DeployConfig memory config = _config();
+        DeploymentAddresses memory deployed = _deploy(config, address(this));
+        this.validateFactoryDeploymentForTest(deployed, config.fund.implementationVersion);
+
+        deployed.deploymentId = keccak256("ALTERED_B1N419_DEPLOYMENT_ID");
+        vm.expectRevert(bytes("B1N419: factory deployment"));
+        this.validateFactoryDeploymentForTest(deployed, config.fund.implementationVersion);
     }
 
     function test_managedSetupRegistersFourByFourThenPausesWithoutActivating() public {

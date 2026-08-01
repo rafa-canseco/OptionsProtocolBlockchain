@@ -117,6 +117,8 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
         deployed.claimEscrow = fund.claimEscrow;
         deployed.accessManager = fund.accessManager;
 
+        address[] memory cspObservers = _observerPair(config.valuation.approvedObservers, 0);
+        address[] memory coveredCallObservers = _observerPair(config.valuation.approvedObservers, 2);
         deployed.cspValuator = address(
             new CspFundValuatorV2(
                 config.valuation.spotFeed,
@@ -124,7 +126,7 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
                 config.valuation.maxSpotStaleness,
                 config.valuation.maxObservationWindow,
                 config.valuation.observationQuorum,
-                config.valuation.approvedObservers
+                cspObservers
             )
         );
         deployed.coveredCallValuator = address(
@@ -134,7 +136,7 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
                 config.valuation.maxSpotStaleness,
                 config.valuation.maxObservationWindow,
                 config.valuation.observationQuorum,
-                config.valuation.approvedObservers
+                coveredCallObservers
             )
         );
         deployed.metaWheelValuator = address(
@@ -243,6 +245,13 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
         }
     }
 
+    function _observerPair(address[] memory observers, uint256 offset) private pure returns (address[] memory pair) {
+        require(observers.length == 4 && offset <= 2, "B1N419: observer pair");
+        pair = new address[](2);
+        pair[0] = observers[offset];
+        pair[1] = observers[offset + 1];
+    }
+
     function _deployCoveredCallLanes(DeployConfig memory config, DeploymentAddresses memory deployed) private {
         FundAccessManager manager = FundAccessManager(deployed.accessManager);
         for (uint256 i; i < COVERED_CALL_LANE_COUNT; ++i) {
@@ -295,6 +304,7 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
     }
 
     function _reconcileBootstrap(DeployConfig memory config, DeploymentAddresses memory deployed) internal view {
+        _requireFactoryDeployment(deployed, config.fund.implementationVersion);
         require(FundVault(deployed.vault).asset() == config.assets.usdc, "B1N419: vault asset");
         require(FundVault(deployed.vault).depositsPaused(), "B1N419: deposits open");
         require(FundVault(deployed.vault).redemptionsPaused(), "B1N419: redemptions open");

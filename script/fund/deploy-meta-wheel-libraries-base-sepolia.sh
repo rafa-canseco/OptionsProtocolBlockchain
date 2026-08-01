@@ -13,6 +13,8 @@ done
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_DIR"
 
+expected_broadcaster=0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425
+
 : "${BASE_SEPOLIA_RPC_URL:?BASE_SEPOLIA_RPC_URL is required}"
 : "${B1N419_LIBRARY_BROADCASTER:?B1N419_LIBRARY_BROADCASTER is required}"
 : "${B1N419_LIBRARY_DRAFT_PATH:?B1N419_LIBRARY_DRAFT_PATH is required}"
@@ -29,6 +31,9 @@ mode=${B1N419_LIBRARY_MODE:-simulate}
 [[ "$B1N419_LIBRARY_BROADCASTER" =~ ^0x[0-9a-fA-F]{40}$ ]] || die "invalid broadcaster"
 [[ "$B1N419_LIBRARY_BROADCASTER" != "0x0000000000000000000000000000000000000000" ]] \
   || die "zero broadcaster"
+[[ "$(tr '[:upper:]' '[:lower:]' <<<"$B1N419_LIBRARY_BROADCASTER")" \
+  == "$(tr '[:upper:]' '[:lower:]' <<<"$expected_broadcaster")" ]] \
+  || die "library broadcaster is not the approved B1N-419 bootstrap identity"
 [[ "$(cast chain-id --rpc-url "$BASE_SEPOLIA_RPC_URL")" == "84532" ]] || die "RPC is not Base Sepolia"
 
 source_commit=$(git rev-parse HEAD)

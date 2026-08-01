@@ -21,6 +21,12 @@ Covered Call proxy.
 - The parent remains deposit/redemption paused and the coordinator strategy remains inactive through handoff.
 - Bootstrap pauses each child lane through its explicit `GUARDIAN_ROLE`. The coordinator is temporarily unpaused,
   but has no registered lanes, no configured strategy and no funds, so it has no useful execution route.
+- The approved Base Sepolia library/core/bootstrap broadcaster is
+  `0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425`. Fee recipient and the current `BatchSettler` onboarding owner are
+  `0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D`; the generator and finalizer reject identity drift.
+- The four observer inputs are domain-separated: `[0,1]` are the complete CSP set and `[2,3]` are the complete
+  Covered Call set, with quorum 2 in each valuator and no cross-authorization. The two NAV reporters are a separate
+  exact set with threshold 2.
 
 ## Rebase gate for the final ABI
 
@@ -67,7 +73,8 @@ Start one persistent Anvil fork pinned to the reviewed Base Sepolia block with c
 3. Run `rehearse-meta-wheel-base-sepolia.sh` with that same Anvil URL as `B1N419_FORK_RPC_URL`. It broadcasts locally
    (never live) and executes build, upgrade checks, tests, preflight, bootstrap, reconciliation, role rotation,
    inactive configuration, exactly eight managed registrations, managed pause, onboarding and final read-only
-   reconciliation. The same five `--libraries` bindings are supplied to every Foundry invocation. It ends by
+   reconciliation. The same five `--libraries` bindings are supplied to every Foundry invocation, and the linked
+   unit suite runs with `--fork-url` so those five deployed libraries exist in its EVM. It ends by
    proving the canonical finalizer rejects the Anvil RPC.
 
 For live inputs, repeat library deployment only after separate approval with `B1N419_LIBRARY_MODE=broadcast`, then
@@ -139,7 +146,9 @@ outside `fundFirst..fundLast`.
 
 `script/fund/finalize-meta-wheel-manifest.sh` never broadcasts. It fails closed unless:
 
-1. the sidecar is explicitly approved and its manifest digest, `sourceCommit` and `deploymentId` match;
+1. the sidecar is explicitly approved and its manifest digest, `sourceCommit` and `deploymentId` match; the same
+   `deploymentId` must resolve through `FundFactory.deployment(id)` to the exact eight Fund addresses and
+   implementation version recorded by the manifest;
 2. RPC receipts, block hashes, success statuses, contract coverage and runtime code hashes all match;
 3. the coordinator was configured inactive before managed lane setup, with all phase receipts ordered;
 4. Blockscout verification and bootstrap/final-role/standalone reconciliation are complete;
@@ -166,3 +175,10 @@ B1N419_BACKEND_PYTHON (optional; defaults to python3)
 
 A fork/dry-run manifest and sidecar can never be used as deployment truth. No address, block or receipt may be
 copied from fork output.
+
+The positive live-route fixture runs the full finalizer under the stock macOS `/bin/bash` 3.2 with deterministic
+receipts, transactions, linked calldata and backend parsing:
+
+```text
+script/fund/test-meta-wheel-finalizer-live-fixture.sh
+```

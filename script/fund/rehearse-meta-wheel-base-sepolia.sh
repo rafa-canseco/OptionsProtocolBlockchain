@@ -24,6 +24,8 @@ export B1N419_MANIFEST_PATH B1N419_BACKEND_ROOT
 export B1N419_MIN_BROADCASTER_BALANCE_WEI=${B1N419_MIN_BROADCASTER_BALANCE_WEI:-1}
 
 rpc_url=$B1N419_FORK_RPC_URL
+expected_bootstrap=0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425
+expected_settler_owner=0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D
 [[ "$(cast chain-id --rpc-url "$rpc_url")" == "84532" ]] || die "Anvil fork chain id must be 84532"
 client_version=$(cast rpc web3_clientVersion --rpc-url "$rpc_url" | jq -r '.')
 [[ "$(tr '[:upper:]' '[:lower:]' <<<"$client_version")" == *anvil* ]] || die "RPC is not Anvil"
@@ -87,11 +89,18 @@ curator=$(jq -r '.environment.FINAL_ROLE_CURATOR' "$B1N419_APPROVED_INPUTS_PATH"
 guardian=$(jq -r '.environment.FINAL_ROLE_GUARDIAN' "$B1N419_APPROVED_INPUTS_PATH")
 batch_settler=$(jq -r '.environment.BATCH_SETTLER' "$B1N419_APPROVED_INPUTS_PATH")
 settler_owner=$(cast call "$batch_settler" 'owner()(address)' --rpc-url "$rpc_url")
+[[ "$(tr '[:upper:]' '[:lower:]' <<<"$bootstrap")" \
+  == "$(tr '[:upper:]' '[:lower:]' <<<"$expected_bootstrap")" ]] \
+  || die "approved bootstrap identity mismatch"
+[[ "$(tr '[:upper:]' '[:lower:]' <<<"$settler_owner")" \
+  == "$(tr '[:upper:]' '[:lower:]' <<<"$expected_settler_owner")" ]] \
+  || die "BatchSettler onboarding owner mismatch"
 
 forge clean
 forge build "${link_arguments[@]}"
 script/fund/validate-meta-wheel-upgrades.sh
-forge test --match-path test/fund/B1N419MetaWheelDeployment.t.sol "${link_arguments[@]}"
+forge test --match-path test/fund/B1N419MetaWheelDeployment.t.sol --fork-url "$rpc_url" \
+  "${link_arguments[@]}"
 run_read_only \
   script/fund/PreflightMetaWheelBaseSepolia.s.sol:PreflightMetaWheelBaseSepolia \
   'preflight()' "$bootstrap"

@@ -288,6 +288,18 @@ abstract contract B1N419Base is Script {
         return address(uint160(uint256(vm.load(proxy, ERC1967_IMPLEMENTATION_SLOT))));
     }
 
+    function _requireFactoryDeployment(DeploymentAddresses memory deployed, uint64 expectedVersion) internal view {
+        FundFactory.FundDeployment memory registered = FundFactory(deployed.factory).deployment(deployed.deploymentId);
+        require(
+            registered.vault == deployed.vault && registered.share == deployed.share
+                && registered.accounting == deployed.accounting && registered.navVerifier == deployed.navVerifier
+                && registered.flowManager == deployed.flow && registered.strategyManager == deployed.strategy
+                && registered.claimEscrow == deployed.claimEscrow && registered.accessManager == deployed.accessManager,
+            "B1N419: factory deployment"
+        );
+        require(registered.implementationVersion == expectedVersion, "B1N419: factory version");
+    }
+
     function _requireNonzeroRoles(FundFactory.RoleAccounts memory roles) private pure {
         require(
             roles.admin != address(0) && roles.upgrader != address(0) && roles.accounting != address(0)

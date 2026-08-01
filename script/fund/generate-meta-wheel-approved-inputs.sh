@@ -13,6 +13,9 @@ done
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_DIR"
 
+expected_bootstrap=0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425
+expected_settler_owner=0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D
+
 : "${BASE_SEPOLIA_RPC_URL:?BASE_SEPOLIA_RPC_URL is required}"
 : "${B1N419_DEPLOYMENT_PINS_PATH:?B1N419_DEPLOYMENT_PINS_PATH is required}"
 : "${B1N419_LIBRARY_EVIDENCE_PATH:?B1N419_LIBRARY_EVIDENCE_PATH is required}"
@@ -52,9 +55,13 @@ else
   jq -e '.forkConfig != null' <<<"$anvil_info" >/dev/null || die "Anvil is not fork-backed"
 fi
 
-jq -e --arg approval "$required_approval" --arg commit "$source_commit" '
+jq -e --arg approval "$required_approval" --arg commit "$source_commit" \
+  --arg bootstrap "$(tr '[:upper:]' '[:lower:]' <<<"$expected_bootstrap")" \
+  --arg settlerOwner "$(tr '[:upper:]' '[:lower:]' <<<"$expected_settler_owner")" '
   .schemaVersion == "1.0.0" and .issue == "B1N-419" and .approval == $approval and
   .sourceCommit == $commit and .network.name == "base-sepolia" and .network.chainId == 84532 and
+  (.bootstrapBroadcaster | ascii_downcase) == $bootstrap and
+  (.feeRecipient | ascii_downcase) == $settlerOwner and
   (.bootstrapBroadcaster | test("^0x[0-9a-fA-F]{40}$") and
     ascii_downcase != "0x0000000000000000000000000000000000000000") and
   .factoryOwner == .finalRoles.admin and
@@ -71,12 +78,20 @@ jq -e --arg approval "$required_approval" --arg commit "$source_commit" '
     ascii_downcase != "0x0000000000000000000000000000000000000000000000000000000000000000")
 ' "$B1N419_DEPLOYMENT_PINS_PATH" >/dev/null || die "pins are incomplete, overlapping, or unapproved"
 
-jq -e --arg status "$required_status" --arg environment "$required_environment" --arg commit "$source_commit" '
+jq -e --arg status "$required_status" --arg environment "$required_environment" --arg commit "$source_commit" \
+  --arg broadcaster "$(tr '[:upper:]' '[:lower:]' <<<"$expected_bootstrap")" '
   .schemaVersion == "1.0.0" and .issue == "B1N-419" and .status == $status and
   .sourceCommit == $commit and .network.chainId == 84532 and .network.environmentKind == $environment and
+  (.broadcaster | ascii_downcase) == $broadcaster and
   .exactRelinkVerified == true and (.orderedLibraries | length) == 5 and
   all(.orderedLibraries[]; .receipt.status == 1)
 ' "$B1N419_LIBRARY_EVIDENCE_PATH" >/dev/null || die "library evidence does not match mode/source"
+
+settler=$(jq -r '.dependencies.BATCH_SETTLER' "$B1N419_DEPLOYMENT_PINS_PATH")
+settler_owner=$(cast call "$settler" 'owner()(address)' --rpc-url "$BASE_SEPOLIA_RPC_URL")
+[[ "$(tr '[:upper:]' '[:lower:]' <<<"$settler_owner")" \
+  == "$(tr '[:upper:]' '[:lower:]' <<<"$expected_settler_owner")" ]] \
+  || die "BatchSettler owner is not the approved onboarding identity"
 
 for address in $(jq -r '.dependencies[]' "$B1N419_DEPLOYMENT_PINS_PATH"); do
   [[ "$(cast code "$address" --rpc-url "$BASE_SEPOLIA_RPC_URL")" != "0x" ]] || die "dependency has no code: $address"

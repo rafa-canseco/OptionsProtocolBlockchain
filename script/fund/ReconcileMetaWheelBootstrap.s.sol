@@ -42,6 +42,7 @@ contract ReconcileMetaWheelBootstrap is DeployMetaWheelBaseSepolia {
         deployed.flow = vm.parseJsonAddress(manifest, ".flow");
         deployed.strategy = vm.parseJsonAddress(manifest, ".strategy");
         deployed.claimEscrow = vm.parseJsonAddress(manifest, ".claimEscrow");
+        deployed.navVerifier = vm.parseJsonAddress(manifest, ".navVerifier");
         deployed.inKindEscrow = vm.parseJsonAddress(manifest, ".inKindEscrow");
         deployed.emergencyEscrow = vm.parseJsonAddress(manifest, ".emergencyEscrow");
         deployed.coordinator = vm.parseJsonAddress(manifest, ".coordinator");

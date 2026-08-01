@@ -2,9 +2,12 @@
 pragma solidity 0.8.24;
 
 import {BatchSettler} from "../../src/core/BatchSettler.sol";
+import {CoveredCallFundValuatorV2} from "../../src/fund/CoveredCallFundValuatorV2.sol";
 import {FundAccessManager} from "../../src/fund/FundAccessManager.sol";
+import {FundAccounting} from "../../src/fund/FundAccounting.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
 import {FundVault} from "../../src/fund/FundVault.sol";
+import {CspFundValuatorV2} from "../../src/fund/CspFundValuatorV2.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
 import {WheelCoordinatorAdapter} from "../../src/fund/WheelCoordinatorAdapter.sol";
 import {WheelCoveredCallChildLane} from "../../src/fund/WheelCoveredCallChildLane.sol";
@@ -45,8 +48,10 @@ contract ReconcileMetaWheelCanonical is DeployMetaWheelBaseSepolia {
 
         _requireBoundary(config, manifest);
         deployed = _loadCanonicalAddresses(manifest);
+        _requireFactoryDeployment(deployed, config.fund.implementationVersion);
         _requireCanonicalCore(config, deployed, manifest);
         _requireCanonicalWheel(config, deployed, manifest);
+        _requireValuationIdentities(config, deployed);
         _requireFinalRoles(FundAccessManager(deployed.accessManager), config.finalRoles);
         _requireStandaloneBaseline(config.standalone);
         _requireV1Policy(config);
@@ -99,6 +104,7 @@ contract ReconcileMetaWheelCanonical is DeployMetaWheelBaseSepolia {
         returns (DeploymentAddresses memory deployed)
     {
         deployed.deploymentId = vm.parseJsonBytes32(manifest, ".deploymentId");
+        deployed.factory = vm.parseJsonAddress(manifest, ".factory");
         deployed.vault = vm.parseJsonAddress(manifest, ".contracts.fundVault.proxy");
         deployed.vaultImplementation = vm.parseJsonAddress(manifest, ".contracts.fundVault.implementation");
         deployed.share = vm.parseJsonAddress(manifest, ".contracts.fundShare.proxy");
@@ -115,6 +121,8 @@ contract ReconcileMetaWheelCanonical is DeployMetaWheelBaseSepolia {
         deployed.accessManager = vm.parseJsonAddress(manifest, ".contracts.accessManager.address");
         deployed.metaWheelValuator = vm.parseJsonAddress(manifest, ".contracts.metaWheelValuator.address");
         deployed.navVerifier = vm.parseJsonAddress(manifest, ".contracts.navReportVerifier.address");
+        deployed.cspValuator = vm.parseJsonAddress(manifest, ".cspValuator");
+        deployed.coveredCallValuator = vm.parseJsonAddress(manifest, ".coveredCallValuator");
         deployed.cspLanes = _fixed(vm.parseJsonAddressArray(manifest, ".cspLanes"));
         deployed.cspAdapters = _fixed(vm.parseJsonAddressArray(manifest, ".cspAdapters"));
         deployed.coveredCallLanes = _fixed(vm.parseJsonAddressArray(manifest, ".coveredCallLanes"));
@@ -281,6 +289,46 @@ contract ReconcileMetaWheelCanonical is DeployMetaWheelBaseSepolia {
 
     function _requireCodehash(string memory manifest, string memory key, address deployed) private view {
         require(deployed.codehash == vm.parseJsonBytes32(manifest, string.concat(key, ".codehash")), "B1N419: codehash");
+    }
+
+    function _requireValuationIdentities(DeployConfig memory config, DeploymentAddresses memory deployed) private view {
+        CspFundValuatorV2 cspValuator = CspFundValuatorV2(deployed.cspValuator);
+        CoveredCallFundValuatorV2 coveredCallValuator = CoveredCallFundValuatorV2(deployed.coveredCallValuator);
+        require(
+            config.valuation.approvedObservers.length == 4 && cspValuator.approvedObserverCount() == 2
+                && coveredCallValuator.approvedObserverCount() == 2
+                && cspValuator.observationQuorum() == config.valuation.observationQuorum
+                && coveredCallValuator.observationQuorum() == config.valuation.observationQuorum,
+            "B1N419: observer set"
+        );
+        for (uint256 i; i < 2; ++i) {
+            address expectedCsp = config.valuation.approvedObservers[i];
+            address expectedCoveredCall = config.valuation.approvedObservers[i + 2];
+            require(
+                cspValuator.approvedObserverAt(i) == expectedCsp
+                    && coveredCallValuator.approvedObserverAt(i) == expectedCoveredCall
+                    && cspValuator.isApprovedObserver(expectedCsp)
+                    && coveredCallValuator.isApprovedObserver(expectedCoveredCall)
+                    && !cspValuator.isApprovedObserver(expectedCoveredCall)
+                    && !coveredCallValuator.isApprovedObserver(expectedCsp),
+                "B1N419: observer binding"
+            );
+        }
+
+        FundAccounting accounting = FundAccounting(deployed.accounting);
+        require(
+            accounting.reporterSetVersion() == 1
+                && accounting.reporterThreshold() == config.valuation.navReporterThreshold
+                && accounting.activeReporterCount() == config.valuation.navReporters.length,
+            "B1N419: reporter set"
+        );
+        for (uint256 i; i < config.valuation.navReporters.length; ++i) {
+            address expected = config.valuation.navReporters[i];
+            require(
+                accounting.activeReporterAt(i) == expected && accounting.isReporter(expected),
+                "B1N419: reporter binding"
+            );
+        }
     }
 
     function _fixed(address[] memory values) private pure returns (address[4] memory fixedValues) {
