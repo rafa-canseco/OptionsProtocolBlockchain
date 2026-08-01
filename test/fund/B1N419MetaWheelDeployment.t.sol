@@ -58,6 +58,12 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
         _requireCanonicalPolicyState(config, deployed);
     }
 
+    function writeManifestForTest(DeployConfig memory config, DeploymentAddresses memory deployed, string memory path)
+        external
+    {
+        _writeManifest(config, deployed, path);
+    }
+
     function setUp() public {
         vm.chainId(BASE_SEPOLIA_CHAIN_ID);
         usdc = new MockERC20("USD Coin", "USDC", 6);
@@ -165,6 +171,140 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
         assertEq(config.standalone.coveredCallVaultProxy.codehash, ccVaultCodehashBefore);
         assertEq(config.standalone.coveredCallAdapterProxy.codehash, ccAdapterCodehashBefore);
         _requireStandaloneBaseline(config.standalone);
+    }
+
+    function test_manifestWriterKeepsOperationalAndCanonicalPathsEqual() public {
+        DeployConfig memory config = _config();
+        DeploymentAddresses memory deployed = _deploy(config, address(this));
+        string memory path =
+            string.concat(vm.projectRoot(), "/deployments/base-sepolia/b1n-419/.test-producer-manifest.json");
+        if (vm.exists(path)) vm.removeFile(path);
+
+        this.writeManifestForTest(config, deployed, path);
+        string memory manifest = vm.readFile(path);
+        _assertManifestAddress(manifest, ".vault", ".contracts.fundVault.proxy", deployed.vault);
+        _assertManifestAddress(
+            manifest, ".vaultImplementation", ".contracts.fundVault.implementation", deployed.vaultImplementation
+        );
+        _assertManifestAddress(manifest, ".share", ".contracts.fundShare.proxy", deployed.share);
+        _assertManifestAddress(
+            manifest, ".shareImplementation", ".contracts.fundShare.implementation", deployed.shareImplementation
+        );
+        _assertManifestAddress(manifest, ".accounting", ".contracts.fundAccounting.proxy", deployed.accounting);
+        _assertManifestAddress(
+            manifest,
+            ".accountingImplementation",
+            ".contracts.fundAccounting.implementation",
+            deployed.accountingImplementation
+        );
+        _assertManifestAddress(manifest, ".flow", ".contracts.fundFlowManager.proxy", deployed.flow);
+        _assertManifestAddress(
+            manifest, ".flowImplementation", ".contracts.fundFlowManager.implementation", deployed.flowImplementation
+        );
+        _assertManifestAddress(manifest, ".strategy", ".contracts.strategyManager.proxy", deployed.strategy);
+        _assertManifestAddress(
+            manifest,
+            ".strategyImplementation",
+            ".contracts.strategyManager.implementation",
+            deployed.strategyImplementation
+        );
+        _assertManifestAddress(manifest, ".coordinator", ".contracts.wheelCoordinator.proxy", deployed.coordinator);
+        _assertManifestAddress(
+            manifest,
+            ".coordinatorImplementation",
+            ".contracts.wheelCoordinator.implementation",
+            deployed.coordinatorImplementation
+        );
+        _assertManifestAddress(manifest, ".claimEscrow", ".contracts.claimEscrow.address", deployed.claimEscrow);
+        _assertManifestAddress(manifest, ".accessManager", ".contracts.accessManager.address", deployed.accessManager);
+        _assertManifestAddress(
+            manifest, ".metaWheelValuator", ".contracts.metaWheelValuator.address", deployed.metaWheelValuator
+        );
+        _assertManifestAddress(manifest, ".navVerifier", ".contracts.navReportVerifier.address", deployed.navVerifier);
+        _assertManifestCodehash(
+            manifest,
+            ".vaultImplementationCodehash",
+            ".contracts.fundVault.implementationCodehash",
+            deployed.vaultImplementation.codehash
+        );
+        _assertManifestCodehash(
+            manifest,
+            ".shareImplementationCodehash",
+            ".contracts.fundShare.implementationCodehash",
+            deployed.shareImplementation.codehash
+        );
+        _assertManifestCodehash(
+            manifest,
+            ".accountingImplementationCodehash",
+            ".contracts.fundAccounting.implementationCodehash",
+            deployed.accountingImplementation.codehash
+        );
+        _assertManifestCodehash(
+            manifest,
+            ".flowImplementationCodehash",
+            ".contracts.fundFlowManager.implementationCodehash",
+            deployed.flowImplementation.codehash
+        );
+        _assertManifestCodehash(
+            manifest,
+            ".strategyImplementationCodehash",
+            ".contracts.strategyManager.implementationCodehash",
+            deployed.strategyImplementation.codehash
+        );
+        _assertManifestCodehash(
+            manifest,
+            ".coordinatorImplementationCodehash",
+            ".contracts.wheelCoordinator.implementationCodehash",
+            deployed.coordinatorImplementation.codehash
+        );
+        _assertCanonicalCodehash(manifest, ".contracts.claimEscrow.codehash", deployed.claimEscrow.codehash);
+        _assertCanonicalCodehash(manifest, ".contracts.accessManager.codehash", deployed.accessManager.codehash);
+        _assertCanonicalCodehash(manifest, ".contracts.metaWheelValuator.codehash", deployed.metaWheelValuator.codehash);
+        _assertCanonicalCodehash(manifest, ".contracts.navReportVerifier.codehash", deployed.navVerifier.codehash);
+
+        _assertOperationalAddress(manifest, ".factory", deployed.factory);
+        _assertOperationalAddress(manifest, ".accessManagerDeployer", deployed.accessManagerDeployer);
+        _assertOperationalAddress(manifest, ".cspAdapterImplementation", deployed.cspAdapterImplementation);
+        _assertOperationalAddress(manifest, ".cspLaneImplementation", deployed.cspLaneImplementation);
+        _assertOperationalAddress(manifest, ".cspValuator", deployed.cspValuator);
+        _assertOperationalAddress(
+            manifest, ".coveredCallAdapterImplementation", deployed.coveredCallAdapterImplementation
+        );
+        _assertOperationalAddress(manifest, ".coveredCallLaneImplementation", deployed.coveredCallLaneImplementation);
+        _assertOperationalAddress(manifest, ".coveredCallValuator", deployed.coveredCallValuator);
+        _assertOperationalAddress(manifest, ".inKindEscrow", deployed.inKindEscrow);
+        _assertOperationalAddress(manifest, ".emergencyEscrow", deployed.emergencyEscrow);
+
+        _assertOperationalCodehash(manifest, ".factoryCodehash", deployed.factory.codehash);
+        _assertOperationalCodehash(manifest, ".accessManagerDeployerCodehash", deployed.accessManagerDeployer.codehash);
+        _assertOperationalCodehash(manifest, ".vaultProxyCodehash", deployed.vault.codehash);
+        _assertOperationalCodehash(manifest, ".shareProxyCodehash", deployed.share.codehash);
+        _assertOperationalCodehash(manifest, ".accountingProxyCodehash", deployed.accounting.codehash);
+        _assertOperationalCodehash(manifest, ".flowProxyCodehash", deployed.flow.codehash);
+        _assertOperationalCodehash(manifest, ".strategyProxyCodehash", deployed.strategy.codehash);
+        _assertOperationalCodehash(manifest, ".coordinatorProxyCodehash", deployed.coordinator.codehash);
+        _assertOperationalCodehash(
+            manifest, ".cspAdapterImplementationCodehash", deployed.cspAdapterImplementation.codehash
+        );
+        _assertOperationalCodehash(manifest, ".cspLaneImplementationCodehash", deployed.cspLaneImplementation.codehash);
+        _assertOperationalCodehash(
+            manifest, ".coveredCallAdapterImplementationCodehash", deployed.coveredCallAdapterImplementation.codehash
+        );
+        _assertOperationalCodehash(
+            manifest, ".coveredCallLaneImplementationCodehash", deployed.coveredCallLaneImplementation.codehash
+        );
+        _assertOperationalCodehash(manifest, ".cspValuatorCodehash", deployed.cspValuator.codehash);
+        _assertOperationalCodehash(manifest, ".coveredCallValuatorCodehash", deployed.coveredCallValuator.codehash);
+
+        _assertOperationalAddresses(manifest, ".cspLanes", deployed.cspLanes);
+        _assertOperationalAddresses(manifest, ".cspAdapters", deployed.cspAdapters);
+        _assertOperationalAddresses(manifest, ".coveredCallLanes", deployed.coveredCallLanes);
+        _assertOperationalAddresses(manifest, ".coveredCallAdapters", deployed.coveredCallAdapters);
+        _assertOperationalCodehashes(manifest, ".cspLaneCodehashes", deployed.cspLanes);
+        _assertOperationalCodehashes(manifest, ".cspAdapterCodehashes", deployed.cspAdapters);
+        _assertOperationalCodehashes(manifest, ".coveredCallLaneCodehashes", deployed.coveredCallLanes);
+        _assertOperationalCodehashes(manifest, ".coveredCallAdapterCodehashes", deployed.coveredCallAdapters);
+        vm.removeFile(path);
     }
 
     function test_reconciliationRejectsAlteredDeploymentId() public {
@@ -539,6 +679,72 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
         implementation = address(new MockERC20("Baseline", "BASE", 18));
         proxy = address(new ERC1967Proxy(implementation, ""));
         codehash = implementation.codehash;
+    }
+
+    function _assertManifestAddress(
+        string memory manifest,
+        string memory operationalPath,
+        string memory canonicalPath,
+        address expected
+    ) private {
+        address operational = vm.parseJsonAddress(manifest, operationalPath);
+        address canonical = vm.parseJsonAddress(manifest, canonicalPath);
+        assertNotEq(operational, address(0));
+        assertEq(operational, expected);
+        assertEq(canonical, expected);
+    }
+
+    function _assertManifestCodehash(
+        string memory manifest,
+        string memory operationalPath,
+        string memory canonicalPath,
+        bytes32 expected
+    ) private {
+        bytes32 operational = vm.parseJsonBytes32(manifest, operationalPath);
+        bytes32 canonical = vm.parseJsonBytes32(manifest, canonicalPath);
+        assertNotEq(operational, bytes32(0));
+        assertEq(operational, expected);
+        assertEq(canonical, expected);
+    }
+
+    function _assertCanonicalCodehash(string memory manifest, string memory path, bytes32 expected) private {
+        bytes32 value = vm.parseJsonBytes32(manifest, path);
+        assertNotEq(value, bytes32(0));
+        assertEq(value, expected);
+    }
+
+    function _assertOperationalAddress(string memory manifest, string memory path, address expected) private {
+        address value = vm.parseJsonAddress(manifest, path);
+        assertNotEq(value, address(0));
+        assertEq(value, expected);
+    }
+
+    function _assertOperationalCodehash(string memory manifest, string memory path, bytes32 expected) private {
+        bytes32 value = vm.parseJsonBytes32(manifest, path);
+        assertNotEq(value, bytes32(0));
+        assertEq(value, expected);
+    }
+
+    function _assertOperationalAddresses(string memory manifest, string memory path, address[4] memory expected)
+        private
+    {
+        address[] memory values = vm.parseJsonAddressArray(manifest, path);
+        assertEq(values.length, expected.length);
+        for (uint256 i; i < values.length; ++i) {
+            assertNotEq(values[i], address(0));
+            assertEq(values[i], expected[i]);
+        }
+    }
+
+    function _assertOperationalCodehashes(string memory manifest, string memory path, address[4] memory deployed)
+        private
+    {
+        bytes32[] memory values = vm.parseJsonBytes32Array(manifest, path);
+        assertEq(values.length, deployed.length);
+        for (uint256 i; i < values.length; ++i) {
+            assertNotEq(values[i], bytes32(0));
+            assertEq(values[i], deployed[i].codehash);
+        }
     }
 
     function _assertRoles(FundAccessManager manager, FundFactory.RoleAccounts memory roles) private view {

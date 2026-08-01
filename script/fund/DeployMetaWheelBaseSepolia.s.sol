@@ -530,7 +530,7 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
     }
 
     function _writeManifest(DeployConfig memory config, DeploymentAddresses memory deployed, string memory path)
-        private
+        internal
     {
         string memory object = "b1n419";
         vm.serializeString(object, "schemaVersion", "1.0.0");
@@ -554,6 +554,7 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
         vm.serializeAddress(object, "flow", deployed.flow);
         vm.serializeAddress(object, "strategy", deployed.strategy);
         vm.serializeAddress(object, "claimEscrow", deployed.claimEscrow);
+        vm.serializeAddress(object, "navVerifier", deployed.navVerifier);
         vm.serializeAddress(object, "inKindEscrow", deployed.inKindEscrow);
         vm.serializeAddress(object, "emergencyEscrow", deployed.emergencyEscrow);
         vm.serializeAddress(object, "coordinator", deployed.coordinator);

@@ -197,6 +197,21 @@ jq -n --arg schemaVersion "1.0.0" --arg issue "B1N-419" --arg sourceCommit "$sou
    }, readiness: {}, assets: {}, v1Boundary: {}, policy: {}, finalRoles: {}, standaloneBaselines: {}}
 ' >"$fixture_dir/manifest.json"
 
+jq -e '
+  ([
+    .factory, .accessManagerDeployer,
+    .vaultImplementation, .shareImplementation, .accountingImplementation,
+    .flowImplementation, .strategyImplementation, .navVerifier,
+    .vault, .share, .accounting, .flow, .strategy, .claimEscrow, .accessManager,
+    .coordinatorImplementation, .coordinator, .metaWheelValuator,
+    .cspAdapterImplementation, .cspLaneImplementation, .cspValuator,
+    .coveredCallAdapterImplementation, .coveredCallLaneImplementation, .coveredCallValuator,
+    .inKindEscrow, .emergencyEscrow
+  ] | all(. != null and test("^0x[0-9a-fA-F]{40}$"))) and
+  (.navVerifier == .contracts.navReportVerifier.address)
+' "$fixture_dir/manifest.json" >/dev/null \
+  || die "fixture manifest operational inventory is incomplete or NAV verifier paths disagree"
+
 manifest_digest="0x$(shasum -a 256 "$fixture_dir/manifest.json" | awk '{print $1}')"
 receipt_json 200 52 >"$fixture_dir/rotation.json"
 receipt_json 201 53 >"$fixture_dir/configuration.json"
