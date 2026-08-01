@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-419",
+  "approval": "NOT_APPROVED_CANONICAL_RECEIPTS_PENDING",
+  "unconfirmedManifestSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "sourceCommit": "FINAL_ABI_COMMIT_REQUIRED",
+  "deploymentId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532,
+    "confirmationBlock": 0,
+    "deploymentBlocks": {"fundFirst": 0, "fundLast": 0}
+  },
+  "canonicalReceipts": [],
+  "phaseReceipts": {
+    "bootstrapDeployment": [],
+    "finalRoleRotation": [],
+    "inactiveCoordinatorConfiguration": [],
+    "managedLaneSetup": [],
+    "childAdapterOnboarding": []
+  },
+  "contractReceipts": [],
+  "contractActivationBlocks": {
+    "fundVault": {"implementationValidFromBlock": 0, "validFromBlock": 0},
+    "fundShare": {"implementationValidFromBlock": 0, "validFromBlock": 0},
+    "fundAccounting": {"implementationValidFromBlock": 0, "validFromBlock": 0},
+    "fundFlowManager": {"implementationValidFromBlock": 0, "validFromBlock": 0},
+    "strategyManager": {"implementationValidFromBlock": 0, "validFromBlock": 0},
+    "wheelCoordinator": {"implementationValidFromBlock": 0, "validFromBlock": 0},
+    "claimEscrow": {"validFromBlock": 0},
+    "accessManager": {"validFromBlock": 0},
+    "metaWheelValuator": {"validFromBlock": 0},
+    "navReportVerifier": {"validFromBlock": 0}
+  },
+  "reconciliation": {
+    "bootstrapReconciled": false,
+    "finalRolesReconciled": false,
+    "standaloneBaselinesUnchanged": false,
+    "managedWrappersOnly": false,
+    "coordinatorConfiguredInactiveBeforeManagedLaneSetup": false,
+    "finalReconciliationBlock": 0
+  },
+  "verification": {"blockscoutVerificationComplete": false}
+}
