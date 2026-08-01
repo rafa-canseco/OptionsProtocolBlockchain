@@ -6,6 +6,7 @@ import {FundAccessManager} from "../../src/fund/FundAccessManager.sol";
 import {FundFlowManager} from "../../src/fund/FundFlowManager.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
+import {WheelCoordinatorAdapter} from "../../src/fund/WheelCoordinatorAdapter.sol";
 import {DeployMetaWheelBaseSepolia} from "./DeployMetaWheelBaseSepolia.s.sol";
 
 /// @notice Curator phase: binds NAV/reporting and the inactive parent strategy.
@@ -14,7 +15,7 @@ contract ConfigureMetaWheelBaseSepolia is DeployMetaWheelBaseSepolia {
     function run() external override returns (DeploymentAddresses memory deployed) {
         _requireBaseSepolia();
         DeployConfig memory config = _loadConfig();
-        string memory manifest = vm.readFile(vm.envString("B1N419_MANIFEST_PATH"));
+        string memory manifest = _loadBoundManifest(config);
         deployed.vault = vm.parseJsonAddress(manifest, ".vault");
         deployed.accessManager = vm.parseJsonAddress(manifest, ".accessManager");
         deployed.accounting = vm.parseJsonAddress(manifest, ".accounting");
@@ -54,6 +55,10 @@ contract ConfigureMetaWheelBaseSepolia is DeployMetaWheelBaseSepolia {
         require(
             !StrategyManager(deployed.strategy).strategyConfig(deployed.coordinator).active,
             "B1N419: strategy activated"
+        );
+        require(
+            WheelCoordinatorAdapter(deployed.coordinator).registeredLaneCount() == 0,
+            "B1N419: lanes registered before inactive config"
         );
     }
 }

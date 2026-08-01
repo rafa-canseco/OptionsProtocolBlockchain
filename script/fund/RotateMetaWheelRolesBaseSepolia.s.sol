@@ -12,7 +12,7 @@ contract RotateMetaWheelRolesBaseSepolia is DeployMetaWheelBaseSepolia {
     function run() external override returns (DeploymentAddresses memory deployed) {
         _requireBaseSepolia();
         DeployConfig memory config = _loadConfig();
-        string memory manifest = vm.readFile(vm.envString("B1N419_MANIFEST_PATH"));
+        string memory manifest = _loadBoundManifest(config);
         deployed.accessManager = vm.parseJsonAddress(manifest, ".accessManager");
         FundAccessManager manager = FundAccessManager(deployed.accessManager);
         address bootstrapAdmin = vm.envAddress("B1N419_BROADCASTER");
@@ -37,11 +37,9 @@ contract RotateMetaWheelRolesBaseSepolia is DeployMetaWheelBaseSepolia {
         _requireSingleImmediateRole(manager, FundConstants.GUARDIAN_ROLE, roles.guardian);
     }
 
-    function _rotateRoles(
-        FundAccessManager manager,
-        address bootstrap,
-        FundFactory.RoleAccounts memory finalRoles
-    ) internal {
+    function _rotateRoles(FundAccessManager manager, address bootstrap, FundFactory.RoleAccounts memory finalRoles)
+        internal
+    {
         bytes[] memory calls = new bytes[](16);
         calls[0] = abi.encodeCall(manager.grantRole, (manager.ADMIN_ROLE(), finalRoles.admin, uint32(0)));
         calls[1] = abi.encodeCall(manager.grantRole, (FundConstants.UPGRADER_ROLE, finalRoles.upgrader, uint32(0)));

@@ -9,17 +9,16 @@ import {FundTypes} from "../../src/fund/FundTypes.sol";
 import {WheelCoordinatorAdapter} from "../../src/fund/WheelCoordinatorAdapter.sol";
 import {WheelCspChildLane} from "../../src/fund/WheelCspChildLane.sol";
 import {WheelCoveredCallChildLane} from "../../src/fund/WheelCoveredCallChildLane.sol";
-import {WheelTypes} from "../../src/fund/WheelTypes.sol";
 import {ICoveredCallFundAdapter} from "../../src/fund/interfaces/ICoveredCallFundAdapter.sol";
 import {ICspFundAdapter} from "../../src/fund/interfaces/ICspFundAdapter.sol";
 import {DeployMetaWheelBaseSepolia} from "./DeployMetaWheelBaseSepolia.s.sol";
 
 /// @notice Read-only reconciliation for the paused, unconfigured bootstrap phase.
 contract ReconcileMetaWheelBootstrap is DeployMetaWheelBaseSepolia {
-    function run() external view override returns (DeploymentAddresses memory deployed) {
+    function run() external override returns (DeploymentAddresses memory deployed) {
         _requireBaseSepolia();
         DeployConfig memory config = _loadConfig();
-        string memory manifest = vm.readFile(vm.envString("B1N419_MANIFEST_PATH"));
+        string memory manifest = _loadBoundManifest(config);
         deployed = _deploymentFromManifest(manifest);
         _reconcileBootstrap(config, deployed);
         _reconcileImplementations(deployed);
@@ -153,22 +152,23 @@ contract ReconcileMetaWheelBootstrap is DeployMetaWheelBaseSepolia {
 
     function _reconcileLanes(DeploymentAddresses memory deployed) private view {
         WheelCoordinatorAdapter coordinator = WheelCoordinatorAdapter(deployed.coordinator);
+        require(coordinator.registeredLaneCount() == 0, "B1N419: lanes registered in bootstrap");
+        require(!coordinator.allocationsPaused(), "B1N419: coordinator paused before managed setup");
         for (uint256 i; i < CSP_LANE_COUNT; ++i) {
-            (address cspLane, WheelTypes.LaneKind cspKind, bool cspActive) = coordinator.registeredLaneAt(i);
             require(
-                cspLane == deployed.cspLanes[i] && cspKind == WheelTypes.LaneKind.Csp && cspActive, "B1N419: CSP lane"
+                WheelCspChildLane(deployed.cspLanes[i]).coordinator() == deployed.coordinator
+                    && WheelCspChildLane(deployed.cspLanes[i]).adapter() == deployed.cspAdapters[i]
+                    && WheelCspChildLane(deployed.cspLanes[i]).allocationsPaused(),
+                "B1N419: CSP lane"
             );
-            require(WheelCspChildLane(cspLane).adapter() == deployed.cspAdapters[i], "B1N419: CSP adapter");
             require(!ICspFundAdapter(deployed.cspAdapters[i]).isOnboarded(), "B1N419: CSP onboarded early");
 
-            (address callLane, WheelTypes.LaneKind callKind, bool callActive) =
-                coordinator.registeredLaneAt(CSP_LANE_COUNT + i);
             require(
-                callLane == deployed.coveredCallLanes[i] && callKind == WheelTypes.LaneKind.CoveredCall && callActive,
+                WheelCoveredCallChildLane(deployed.coveredCallLanes[i]).coordinator() == deployed.coordinator
+                    && WheelCoveredCallChildLane(deployed.coveredCallLanes[i]).adapter()
+                        == deployed.coveredCallAdapters[i]
+                    && WheelCoveredCallChildLane(deployed.coveredCallLanes[i]).allocationsPaused(),
                 "B1N419: CC lane"
-            );
-            require(
-                WheelCoveredCallChildLane(callLane).adapter() == deployed.coveredCallAdapters[i], "B1N419: CC adapter"
             );
             require(
                 !ICoveredCallFundAdapter(deployed.coveredCallAdapters[i]).isOnboarded(), "B1N419: CC onboarded early"

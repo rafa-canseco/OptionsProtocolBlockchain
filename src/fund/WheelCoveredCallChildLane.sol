@@ -133,6 +133,10 @@ contract WheelCoveredCallChildLane is FundUpgradeable, WheelCoveredCallChildLane
         return _getWheelCoveredCallChildLaneStorage().state;
     }
 
+    function allocationsPaused() external view returns (bool) {
+        return _getWheelCoveredCallChildLaneStorage().allocationsPaused;
+    }
+
     function stateNonce() external view returns (uint64) {
         return _getWheelCoveredCallChildLaneStorage().stateNonce;
     }

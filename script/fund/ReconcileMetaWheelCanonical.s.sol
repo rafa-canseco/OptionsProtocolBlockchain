@@ -15,18 +15,18 @@ import {DeployMetaWheelBaseSepolia} from "./DeployMetaWheelBaseSepolia.s.sol";
 /// @notice Read-only final on-chain gate used before a manifest can become canonical.
 /// @dev No transaction is broadcast and the unconfirmed manifest is never mutated by this contract.
 contract ReconcileMetaWheelCanonical is DeployMetaWheelBaseSepolia {
-    function run() external view override returns (DeploymentAddresses memory deployed) {
+    function run() external override returns (DeploymentAddresses memory deployed) {
         return _reconcileCanonical();
     }
 
-    function reconcile() external view returns (DeploymentAddresses memory deployed) {
+    function reconcile() external returns (DeploymentAddresses memory deployed) {
         return _reconcileCanonical();
     }
 
-    function _reconcileCanonical() private view returns (DeploymentAddresses memory deployed) {
+    function _reconcileCanonical() private returns (DeploymentAddresses memory deployed) {
         _requireBaseSepolia();
         DeployConfig memory config = _loadConfig();
-        string memory manifest = vm.readFile(vm.envString("B1N419_MANIFEST_PATH"));
+        string memory manifest = _loadBoundManifest(config);
 
         require(
             keccak256(bytes(vm.parseJsonString(manifest, ".status")))
@@ -104,15 +104,13 @@ contract ReconcileMetaWheelCanonical is DeployMetaWheelBaseSepolia {
         deployed.share = vm.parseJsonAddress(manifest, ".contracts.fundShare.proxy");
         deployed.shareImplementation = vm.parseJsonAddress(manifest, ".contracts.fundShare.implementation");
         deployed.accounting = vm.parseJsonAddress(manifest, ".contracts.fundAccounting.proxy");
-        deployed.accountingImplementation =
-            vm.parseJsonAddress(manifest, ".contracts.fundAccounting.implementation");
+        deployed.accountingImplementation = vm.parseJsonAddress(manifest, ".contracts.fundAccounting.implementation");
         deployed.flow = vm.parseJsonAddress(manifest, ".contracts.fundFlowManager.proxy");
         deployed.flowImplementation = vm.parseJsonAddress(manifest, ".contracts.fundFlowManager.implementation");
         deployed.strategy = vm.parseJsonAddress(manifest, ".contracts.strategyManager.proxy");
         deployed.strategyImplementation = vm.parseJsonAddress(manifest, ".contracts.strategyManager.implementation");
         deployed.coordinator = vm.parseJsonAddress(manifest, ".contracts.wheelCoordinator.proxy");
-        deployed.coordinatorImplementation =
-            vm.parseJsonAddress(manifest, ".contracts.wheelCoordinator.implementation");
+        deployed.coordinatorImplementation = vm.parseJsonAddress(manifest, ".contracts.wheelCoordinator.implementation");
         deployed.claimEscrow = vm.parseJsonAddress(manifest, ".contracts.claimEscrow.address");
         deployed.accessManager = vm.parseJsonAddress(manifest, ".contracts.accessManager.address");
         deployed.metaWheelValuator = vm.parseJsonAddress(manifest, ".contracts.metaWheelValuator.address");
@@ -189,6 +187,7 @@ contract ReconcileMetaWheelCanonical is DeployMetaWheelBaseSepolia {
         WheelCoordinatorAdapter coordinator = WheelCoordinatorAdapter(deployed.coordinator);
         require(coordinator.fund() == deployed.vault, "B1N419: coordinator fund");
         require(coordinator.registeredLaneCount() == 8, "B1N419: lane count");
+        require(coordinator.allocationsPaused(), "B1N419: coordinator not paused at handoff");
         require(coordinator.policyHash() == config.wheel.policyHash, "B1N419: wheel policy");
         require(coordinator.floorBufferUsd8() == config.wheel.floorBufferUsd8, "B1N419: wheel floor");
 
@@ -203,14 +202,11 @@ contract ReconcileMetaWheelCanonical is DeployMetaWheelBaseSepolia {
         );
         address cspAdapterImplementation = vm.parseJsonAddress(manifest, ".cspAdapterImplementation");
         address cspLaneImplementation = vm.parseJsonAddress(manifest, ".cspLaneImplementation");
-        address coveredCallAdapterImplementation =
-            vm.parseJsonAddress(manifest, ".coveredCallAdapterImplementation");
+        address coveredCallAdapterImplementation = vm.parseJsonAddress(manifest, ".coveredCallAdapterImplementation");
         address coveredCallLaneImplementation = vm.parseJsonAddress(manifest, ".coveredCallLaneImplementation");
         require(
-            cspAdapterImplementation.codehash
-                    == vm.parseJsonBytes32(manifest, ".cspAdapterImplementationCodehash")
-                && cspLaneImplementation.codehash
-                    == vm.parseJsonBytes32(manifest, ".cspLaneImplementationCodehash")
+            cspAdapterImplementation.codehash == vm.parseJsonBytes32(manifest, ".cspAdapterImplementationCodehash")
+                && cspLaneImplementation.codehash == vm.parseJsonBytes32(manifest, ".cspLaneImplementationCodehash")
                 && coveredCallAdapterImplementation.codehash
                     == vm.parseJsonBytes32(manifest, ".coveredCallAdapterImplementationCodehash")
                 && coveredCallLaneImplementation.codehash
@@ -227,52 +223,49 @@ contract ReconcileMetaWheelCanonical is DeployMetaWheelBaseSepolia {
 
         bytes32[] memory cspLaneCodehashes = vm.parseJsonBytes32Array(manifest, ".cspLaneCodehashes");
         bytes32[] memory cspAdapterCodehashes = vm.parseJsonBytes32Array(manifest, ".cspAdapterCodehashes");
-        bytes32[] memory coveredCallLaneCodehashes =
-            vm.parseJsonBytes32Array(manifest, ".coveredCallLaneCodehashes");
+        bytes32[] memory coveredCallLaneCodehashes = vm.parseJsonBytes32Array(manifest, ".coveredCallLaneCodehashes");
         bytes32[] memory coveredCallAdapterCodehashes =
             vm.parseJsonBytes32Array(manifest, ".coveredCallAdapterCodehashes");
         require(
-            cspLaneCodehashes.length == 4 && cspAdapterCodehashes.length == 4
-                && coveredCallLaneCodehashes.length == 4 && coveredCallAdapterCodehashes.length == 4,
+            cspLaneCodehashes.length == 4 && cspAdapterCodehashes.length == 4 && coveredCallLaneCodehashes.length == 4
+                && coveredCallAdapterCodehashes.length == 4,
             "B1N419: child codehash count"
         );
 
         BatchSettler settler = BatchSettler(config.assets.batchSettler);
         for (uint256 i; i < CSP_LANE_COUNT; ++i) {
-            (address cspLane, WheelTypes.LaneKind cspKind,) = coordinator.registeredLaneAt(i);
-            (address coveredCallLane, WheelTypes.LaneKind coveredCallKind,) =
+            (address cspLane, WheelTypes.LaneKind cspKind, bool cspActive) = coordinator.registeredLaneAt(i);
+            (address coveredCallLane, WheelTypes.LaneKind coveredCallKind, bool coveredCallActive) =
                 coordinator.registeredLaneAt(CSP_LANE_COUNT + i);
             require(
-                cspLane == deployed.cspLanes[i] && cspKind == WheelTypes.LaneKind.Csp,
+                cspLane == deployed.cspLanes[i] && cspKind == WheelTypes.LaneKind.Csp && cspActive,
                 "B1N419: CSP lane order"
             );
             require(
-                coveredCallLane == deployed.coveredCallLanes[i]
-                    && coveredCallKind == WheelTypes.LaneKind.CoveredCall,
+                coveredCallLane == deployed.coveredCallLanes[i] && coveredCallKind == WheelTypes.LaneKind.CoveredCall
+                    && coveredCallActive,
                 "B1N419: CC lane order"
             );
             require(
                 WheelCspChildLane(cspLane).coordinator() == deployed.coordinator
-                    && WheelCspChildLane(cspLane).adapter() == deployed.cspAdapters[i],
+                    && WheelCspChildLane(cspLane).adapter() == deployed.cspAdapters[i]
+                    && WheelCspChildLane(cspLane).allocationsPaused(),
                 "B1N419: CSP binding"
             );
             require(
                 WheelCoveredCallChildLane(coveredCallLane).coordinator() == deployed.coordinator
-                    && WheelCoveredCallChildLane(coveredCallLane).adapter() == deployed.coveredCallAdapters[i],
+                    && WheelCoveredCallChildLane(coveredCallLane).adapter() == deployed.coveredCallAdapters[i]
+                    && WheelCoveredCallChildLane(coveredCallLane).allocationsPaused(),
                 "B1N419: CC binding"
             );
             require(
-                cspLane.codehash == cspLaneCodehashes[i]
-                    && deployed.cspAdapters[i].codehash == cspAdapterCodehashes[i]
+                cspLane.codehash == cspLaneCodehashes[i] && deployed.cspAdapters[i].codehash == cspAdapterCodehashes[i]
                     && coveredCallLane.codehash == coveredCallLaneCodehashes[i]
                     && deployed.coveredCallAdapters[i].codehash == coveredCallAdapterCodehashes[i],
                 "B1N419: child proxy codehash"
             );
             require(settler.authorizedPhysicalDeliveryVault(deployed.cspAdapters[i]), "B1N419: CSP onboarding");
-            require(
-                settler.authorizedPhysicalDeliveryVault(deployed.coveredCallAdapters[i]),
-                "B1N419: CC onboarding"
-            );
+            require(settler.authorizedPhysicalDeliveryVault(deployed.coveredCallAdapters[i]), "B1N419: CC onboarding");
         }
 
         address[] memory libraries = vm.parseJsonAddressArray(manifest, ".linkedLibraries");

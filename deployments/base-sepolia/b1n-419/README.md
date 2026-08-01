@@ -6,15 +6,21 @@ Covered Call proxy.
 
 ## Current status
 
-- The scaffold is intentionally **not approved for broadcast** while the managed-strategy ABI is still changing.
+- The scaffold is frozen to the final managed-strategy ABI but remains **not approved for live broadcast**.
 - `deployment-inputs.template.json` is not an approved artifact and contains blocking placeholders.
 - `manifest.template.json` is the fail-closed backend contract; every deployment/block/receipt placeholder rejects
   registry ingestion.
 - `canonicalization-evidence.template.json` is a separate receipt sidecar and is paired to the manifest by the full
   `sourceCommit`, non-zero `deploymentId`, and SHA-256 of the unconfirmed manifest.
+- `library-prephase.template.json` is a second, independent sidecar for the five deployments that must precede the
+  Fund deployment block window. A fork artifact always remains noncanonical.
+- `deployment-pins.template.json` enumerates the only human/governance inputs. The approved deployment JSON is
+  generated deterministically; editing `deployment-inputs.template.json` by hand is not an accepted workflow.
 - Deployment, authority rotation, inactive strategy configuration, managed lane setup, child onboarding and
   activation are separate phases.
 - The parent remains deposit/redemption paused and the coordinator strategy remains inactive through handoff.
+- Bootstrap pauses each child lane through its explicit `GUARDIAN_ROLE`. The coordinator is temporarily unpaused,
+  but has no registered lanes, no configured strategy and no funds, so it has no useful execution route.
 
 ## Rebase gate for the final ABI
 
@@ -31,35 +37,80 @@ Each address and runtime code hash belongs in `LINKED_LIBRARIES` and `LINKED_LIB
 deployed first, then the entire source must be rebuilt with exact `--libraries` bindings before deploying
 `StrategyManager`, child adapters or the coordinator. The deployment manifest records the ordered bindings.
 
-The final ABI changes the lane bootstrap order. The coordinator must first be registered in `StrategyManager` with
-`active: false`. Only then may `registerLane`, lane pausing or coordinator pausing execute through the
-`StrategyManager` managed-operation wrappers and `WheelManagedOperationDispatcher`. Never authorize or invoke the
-coordinator's direct selectors from an EOA or bot. The final rebase must remove the legacy direct-selector bootstrap
-path before this scaffold can be approved for broadcast.
+`DeployMetaWheelLibrariesBaseSepolia.run()` always reverts. The only supported entrypoint is orchestrated by
+`script/fund/deploy-meta-wheel-libraries-base-sepolia.sh`, whose default mode is `simulate`; it invokes the five
+CREATEs against a current Base Sepolia fork, emits a `SIMULATED_NONCANONICAL` sidecar and performs a clean rebuild
+with the five generated `--libraries` arguments. Live mode additionally requires the exact approval phrase and an
+approved full source commit, and then RPC-reconciles every receipt and runtime code hash before emitting canonical
+library evidence. Supplying `--broadcast`, `--resume`, RPC or sender flags directly is rejected.
+
+The final ABI fixes the lane bootstrap order. The coordinator must first be registered in `StrategyManager` with
+`active: false`. Only then may `registerLane` or coordinator pausing execute through the
+`StrategyManager` managed-operation wrappers and `WheelManagedOperationDispatcher`. Here, “pausing” means the
+coordinator's `pauseAllocations`; child lanes retain their explicit guardian selector policy. Never authorize or
+invoke coordinator selectors from an EOA or bot. Approval requires proving the legacy direct-selector coordinator
+bootstrap path is absent.
+
+## Deterministic fork inputs and rehearsal
+
+Start one persistent Anvil fork pinned to the reviewed Base Sepolia block with chain id `84532`. On that same RPC:
+
+1. Set `B1N419_LIBRARY_MODE=fork-broadcast`, fork-only draft/sidecar paths, the dedicated library broadcaster and
+   `BASE_SEPOLIA_RPC_URL` equal to the Anvil URL; run
+   `script/fund/deploy-meta-wheel-libraries-base-sepolia.sh --unlocked`. The wrapper proves `anvil_nodeInfo` has a
+   fork configuration and marks all receipts `SIMULATED_NONCANONICAL`.
+2. Fill and approve a non-template `deployment-pins.json` with approval `APPROVED_BASE_SEPOLIA_DRY_RUN`, the full
+   source commit, dependency/standalone pins, one bootstrap account, seven distinct final role accounts, four
+   mutually distinct option observers and two NAV reporters. All six valuation keys must also be distinct from
+   every role account. Run `generate-meta-wheel-approved-inputs.sh` with `B1N419_INPUT_MODE=dry-run`; it verifies
+   live fork code, implementation slots, library order/code hashes and writes both sorted JSON and its SHA-256.
+3. Run `rehearse-meta-wheel-base-sepolia.sh` with that same Anvil URL as `B1N419_FORK_RPC_URL`. It broadcasts locally
+   (never live) and executes build, upgrade checks, tests, preflight, bootstrap, reconciliation, role rotation,
+   inactive configuration, exactly eight managed registrations, managed pause, onboarding and final read-only
+   reconciliation. The same five `--libraries` bindings are supplied to every Foundry invocation. It ends by
+   proving the canonical finalizer rejects the Anvil RPC.
+
+For live inputs, repeat library deployment only after separate approval with `B1N419_LIBRARY_MODE=broadcast`, then
+run the generator with `B1N419_INPUT_MODE=live` and pins approval `APPROVED_BASE_SEPOLIA_LIVE`. Live mode and the
+canonical finalizer both reject Anvil/Hardhat clients and `anvil_nodeInfo`.
 
 ## Safe phase order
 
-1. Run `forge clean && forge build` and `script/fund/validate-meta-wheel-upgrades.sh` with the final link map.
-2. Copy the template to an approved input file, replace every placeholder, pin standalone implementation slots and
+1. From a clean final-ABI commit, run the library prephase in its default fork-only mode. Review the ordered
+   addresses, code hashes and exact relink result. No simulated address may be copied into approved inputs.
+2. After separate approval, run that same prephase in live mode to deploy only the five libraries. Preserve its
+   canonical sidecar, then run `script/fund/validate-meta-wheel-upgrades.sh` with the recorded link map.
+3. Copy the template to an approved input file, replace every placeholder, pin standalone implementation slots and
    code hashes from the same fork block, and record its SHA-256 digest.
-3. Run the read-only preflight with `--sig preflight()`.
-4. Run `DeployMetaWheelBaseSepolia` against a current Base Sepolia fork **without** `--broadcast`.
-5. Reconcile the generated manifest with `ReconcileMetaWheelBootstrap`.
-6. Only after review, broadcast bootstrap using the existing Base Sepolia credential through an ignored Foundry
+4. Run the read-only preflight with `--sig preflight()`.
+5. Run `DeployMetaWheelBaseSepolia` against a current Base Sepolia fork **without** `--broadcast`.
+6. Reconcile the generated manifest with `ReconcileMetaWheelBootstrap`.
+7. Only after review, broadcast bootstrap using the existing Base Sepolia credential through an ignored Foundry
    keystore/account. Bootstrap roles may temporarily share that address because the whole deployment is paused.
    Scripts take only
    `B1N419_BROADCASTER`; they never read or print a raw private key.
-7. Run `RotateMetaWheelRolesBaseSepolia`, then `ReconcileMetaWheelFinalRoles`. Final admin, upgrader, accounting,
+8. Run `RotateMetaWheelRolesBaseSepolia`, then `ReconcileMetaWheelFinalRoles`. Final admin, upgrader, accounting,
    allocator, processor, curator and guardian accounts must be distinct; the bootstrap address is revoked.
-8. Run the curator configuration phase first. It binds reporters, the independent Meta Wheel valuator, the
+9. Run the curator configuration phase first. It binds reporters, the independent Meta Wheel valuator, the
    coordinator strategy with `active: false`, and exit escrows.
-9. Run the managed lane setup phase through the four `StrategyManager` operation-class wrappers. Register and pause
-   lanes/coordinator only through those wrappers; do not use direct target selectors.
-10. Run child onboarding from the current `BatchSettler` owner. This mutates only the eight fresh adapter
+10. Run `SetupMetaWheelManagedLanesBaseSepolia.registerLanes()` as final curator, then
+   `pauseCoordinator()` as final guardian, and finish with the read-only `reconcileManagedSetup()`. Lane registration
+   uses the configuration wrapper and coordinator pause uses the guardian wrapper; do not use coordinator target
+   selectors directly.
+11. Run child onboarding from the current `BatchSettler` owner. This mutates only the eight fresh adapter
    authorization entries and rechecks standalone proxy baselines before and after.
-11. Activation remains a separate QA gate after backend NAV reconciliation and two-cycle fork simulation.
+12. Activation remains a separate QA gate after backend NAV reconciliation and two-cycle fork simulation.
 
-No script in this scaffold resumes deposits or opens a position.
+No deployment or handoff script resumes deposits or opens a position; only the separately approved activation gate
+can open deposits, and no activation entrypoint opens an options position.
+
+`ActivateMetaWheelBaseSepolia` is deliberately two-phase and opens no position. `prepareActivation()` performs one
+atomic curator `AccessManager.multicall` that resumes all child lanes, the coordinator and the StrategyManager while
+the Fund remains deposit/redemption paused. This managed operation invalidates NAV by design. ACCOUNTING must then
+submit a fresh signed NAV whose `positionsHash` equals the current StrategyManager hash. Only after that does
+`openFund()` atomically resume redemptions and deposits. Both phases use separately digested activation approvals;
+the open approval binds the canonical manifest, readiness hash, fresh NAV window and all QA flags. Activation
+receipts live in `activation-evidence.json`, never by rewriting the canonical deployment manifest.
 
 ## Backend handoff contract
 
@@ -80,7 +131,9 @@ parser. Receipts for role rotation, inactive configuration, managed lane setup, 
 live in the paired `canonicalization-evidence.json` sidecar. They are evidence, not backend deployment truth.
 Phase receipts use the canonical `{transactionHash, blockNumber, blockHash, status: 1}` shape. Each
 `contractReceipts[]` entry adds `contract`, `address` and `runtimeCodehash`; the finalizer requires exact one-to-one
-coverage of the fresh core, coordinator, valuator, lane, adapter, escrow and five-library inventory.
+coverage of the fresh core, coordinator, valuator, lane, adapter and escrow inventory. The five earlier library
+receipts and runtime code hashes live only in the separately reconciled library-prephase sidecar, because they are
+outside `fundFirst..fundLast`.
 
 ## Canonical finalization
 
@@ -101,9 +154,12 @@ canonical artifact. Required environment variables are:
 BASE_SEPOLIA_RPC_URL
 B1N419_MANIFEST_PATH
 B1N419_CANONICALIZATION_EVIDENCE_PATH
+B1N419_LIBRARY_EVIDENCE_PATH
 B1N419_CANONICAL_MANIFEST_PATH
 B1N419_APPROVED_INPUTS_PATH
 B1N419_APPROVED_INPUTS_SHA256
+B1N419_SOURCE_COMMIT
+B1N419_EXECUTION_CONTEXT (must be BASE_SEPOLIA_LIVE)
 B1N419_BACKEND_ROOT
 B1N419_BACKEND_PYTHON (optional; defaults to python3)
 ```

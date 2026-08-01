@@ -8,6 +8,7 @@ interface IWheelChildLane {
     function adapter() external view returns (address);
     function laneKind() external pure returns (WheelTypes.LaneKind);
     function laneState() external view returns (WheelTypes.LaneState);
+    function allocationsPaused() external view returns (bool);
     function stateNonce() external view returns (uint64);
     function childShares() external view returns (uint256);
     function activeTrancheId() external view returns (uint256);

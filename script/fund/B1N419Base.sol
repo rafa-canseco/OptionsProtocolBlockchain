@@ -192,14 +192,11 @@ abstract contract B1N419Base is Script {
             config.valuation.maxSpotStaleness != 0 && config.valuation.maxObservationWindow != 0, "B1N419: valuation"
         );
         require(
-            config.valuation.observationQuorum >= 2
-                && config.valuation.observationQuorum <= config.valuation.approvedObservers.length,
+            config.valuation.approvedObservers.length == 4 && config.valuation.observationQuorum == 2,
             "B1N419: observers"
         );
         require(
-            config.valuation.navReporterThreshold >= 2
-                && config.valuation.navReporterThreshold <= config.valuation.navReporters.length,
-            "B1N419: reporters"
+            config.valuation.navReporters.length == 2 && config.valuation.navReporterThreshold == 2, "B1N419: reporters"
         );
         require(config.wheel.policyHash != bytes32(0), "B1N419: policy hash");
         require(
@@ -242,16 +239,14 @@ abstract contract B1N419Base is Script {
         );
         _requireUniqueNonzero(config.valuation.approvedObservers, "B1N419: observer address");
         _requireUniqueNonzero(config.valuation.navReporters, "B1N419: reporter address");
+        _requireValuationKeySeparation(config);
         _requireV1Policy(config);
         _requireStandaloneBaseline(config.standalone);
     }
 
     function _requireV1Policy(DeployConfig memory config) internal view {
         require(config.assets.batchSettler.code.length != 0, "B1N419: settler");
-        require(
-            BatchSettler(config.assets.batchSettler).protocolFeeBps() == PREMIUM_FEE_BPS,
-            "B1N419: premium fee"
-        );
+        require(BatchSettler(config.assets.batchSettler).protocolFeeBps() == PREMIUM_FEE_BPS, "B1N419: premium fee");
     }
 
     function _requireStandaloneBaseline(StandaloneBaseline memory baseline) internal view {
@@ -327,6 +322,32 @@ abstract contract B1N419Base is Script {
                 require(accounts[i] != accounts[j], reason);
             }
         }
+    }
+
+    function _requireValuationKeySeparation(DeployConfig memory config) private pure {
+        for (uint256 i; i < config.valuation.approvedObservers.length; ++i) {
+            address observer = config.valuation.approvedObservers[i];
+            require(
+                !_isRoleAccount(observer, config.fund.roles) && !_isRoleAccount(observer, config.finalRoles),
+                "B1N419: observer reuses role"
+            );
+            for (uint256 j; j < config.valuation.navReporters.length; ++j) {
+                require(observer != config.valuation.navReporters[j], "B1N419: observer reporter overlap");
+            }
+        }
+        for (uint256 i; i < config.valuation.navReporters.length; ++i) {
+            address reporter = config.valuation.navReporters[i];
+            require(
+                !_isRoleAccount(reporter, config.fund.roles) && !_isRoleAccount(reporter, config.finalRoles),
+                "B1N419: reporter reuses role"
+            );
+        }
+    }
+
+    function _isRoleAccount(address account, FundFactory.RoleAccounts memory roles) private pure returns (bool) {
+        return account == roles.admin || account == roles.upgrader || account == roles.accounting
+            || account == roles.allocator || account == roles.processor || account == roles.curator
+            || account == roles.guardian;
     }
 
     function _requireSingleImmediateRole(FundAccessManager manager, uint64 role, address expected) internal view {

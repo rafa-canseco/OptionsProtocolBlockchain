@@ -8,6 +8,7 @@
   "network": {
     "name": "base-sepolia",
     "chainId": 84532,
+    "environmentKind": "live",
     "confirmationBlock": 0,
     "deploymentBlocks": {"fundFirst": 0, "fundLast": 0}
   },

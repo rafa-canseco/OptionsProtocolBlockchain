@@ -3,6 +3,7 @@ pragma solidity 0.8.24;
 
 import {console2} from "forge-std/console2.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {VmSafe} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {FundVault} from "../../src/fund/FundVault.sol";
 import {FundShare} from "../../src/fund/FundShare.sol";
@@ -23,11 +24,13 @@ import {WheelCspChildLane} from "../../src/fund/WheelCspChildLane.sol";
 import {WheelCoveredCallChildLane} from "../../src/fund/WheelCoveredCallChildLane.sol";
 import {WheelCoveredCallFundAdapter} from "../../src/fund/WheelCoveredCallFundAdapter.sol";
 import {MetaWheelValuator} from "../../src/fund/MetaWheelValuator.sol";
-import {WheelTypes} from "../../src/fund/WheelTypes.sol";
 import {ICoveredCallFundAdapter} from "../../src/fund/interfaces/ICoveredCallFundAdapter.sol";
 import {ICspFundAdapter} from "../../src/fund/interfaces/ICspFundAdapter.sol";
 import {CspFundAdapterOperations} from "../../src/fund/libraries/CspFundAdapterOperations.sol";
 import {CoveredCallFundAdapterOperations} from "../../src/fund/libraries/CoveredCallFundAdapterOperations.sol";
+import {ManagedStrategyOperations} from "../../src/fund/libraries/ManagedStrategyOperations.sol";
+import {WheelCoordinatorPositionOperations} from "../../src/fund/libraries/WheelCoordinatorPositionOperations.sol";
+import {WheelManagedOperationDispatcher} from "../../src/fund/libraries/WheelManagedOperationDispatcher.sol";
 import {FundAccessPolicy} from "../../src/fund/libraries/FundAccessPolicy.sol";
 import {WheelAccessPolicy} from "../../src/fund/libraries/WheelAccessPolicy.sol";
 import {B1N419Base} from "./B1N419Base.sol";
@@ -60,6 +63,13 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
     {
         require(config.linkedLibraries[0] == address(CspFundAdapterOperations), "B1N419: CSP library binding");
         require(config.linkedLibraries[1] == address(CoveredCallFundAdapterOperations), "B1N419: CC library binding");
+        require(config.linkedLibraries[2] == address(ManagedStrategyOperations), "B1N419: managed library binding");
+        require(
+            config.linkedLibraries[3] == address(WheelManagedOperationDispatcher), "B1N419: dispatcher library binding"
+        );
+        require(
+            config.linkedLibraries[4] == address(WheelCoordinatorPositionOperations), "B1N419: position library binding"
+        );
 
         deployed.vaultImplementation = address(new FundVault());
         deployed.shareImplementation = address(new FundShare());
@@ -169,7 +179,6 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
         _deployCspLanes(config, deployed);
         _deployCoveredCallLanes(config, deployed);
 
-        WheelCoordinatorAdapter(deployed.coordinator).pauseAllocations();
         _configureRules(
             FundAccessManager(deployed.accessManager), deployed.coordinator, WheelAccessPolicy.coordinatorRules()
         );
@@ -194,7 +203,6 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
 
     function _deployCspLanes(DeployConfig memory config, DeploymentAddresses memory deployed) private {
         FundAccessManager manager = FundAccessManager(deployed.accessManager);
-        WheelCoordinatorAdapter coordinator = WheelCoordinatorAdapter(deployed.coordinator);
         for (uint256 i; i < CSP_LANE_COUNT; ++i) {
             address lane = address(new ERC1967Proxy(deployed.cspLaneImplementation, ""));
             address adapter = address(
@@ -227,10 +235,9 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
                         maxAssets: config.wheel.cspLaneMaxAssets
                     })
                 );
-            coordinator.registerLane(lane, WheelTypes.LaneKind.Csp);
-            WheelCspChildLane(lane).pauseAllocations();
             _configureRules(manager, lane, WheelAccessPolicy.cspLaneRules());
             _configureRules(manager, adapter, FundAccessPolicy.cspAdapterRules());
+            WheelCspChildLane(lane).pauseAllocations();
             deployed.cspLanes[i] = lane;
             deployed.cspAdapters[i] = adapter;
         }
@@ -238,7 +245,6 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
 
     function _deployCoveredCallLanes(DeployConfig memory config, DeploymentAddresses memory deployed) private {
         FundAccessManager manager = FundAccessManager(deployed.accessManager);
-        WheelCoordinatorAdapter coordinator = WheelCoordinatorAdapter(deployed.coordinator);
         for (uint256 i; i < COVERED_CALL_LANE_COUNT; ++i) {
             address lane = address(new ERC1967Proxy(deployed.coveredCallLaneImplementation, ""));
             address adapter = address(
@@ -272,10 +278,9 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
                         executionCostBuffer8: config.wheel.floorBufferUsd8
                     })
                 );
-            coordinator.registerLane(lane, WheelTypes.LaneKind.CoveredCall);
-            WheelCoveredCallChildLane(lane).pauseAllocations();
             _configureRules(manager, lane, WheelAccessPolicy.coveredCallLaneRules());
             _configureRules(manager, adapter, FundAccessPolicy.coveredCallAdapterRules());
+            WheelCoveredCallChildLane(lane).pauseAllocations();
             deployed.coveredCallLanes[i] = lane;
             deployed.coveredCallAdapters[i] = adapter;
         }
@@ -294,11 +299,7 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
         require(FundVault(deployed.vault).depositsPaused(), "B1N419: deposits open");
         require(FundVault(deployed.vault).redemptionsPaused(), "B1N419: redemptions open");
         require(WheelCoordinatorAdapter(deployed.coordinator).fund() == deployed.vault, "B1N419: coordinator fund");
-        require(
-            WheelCoordinatorAdapter(deployed.coordinator).registeredLaneCount()
-                == CSP_LANE_COUNT + COVERED_CALL_LANE_COUNT,
-            "B1N419: lane count"
-        );
+        require(WheelCoordinatorAdapter(deployed.coordinator).registeredLaneCount() == 0, "B1N419: lanes registered");
         (uint16 cspCap, uint16 coveredCallCap) = WheelCoordinatorAdapter(deployed.coordinator).laneCaps();
         require(cspCap == CSP_LANE_COUNT && coveredCallCap == COVERED_CALL_LANE_COUNT, "B1N419: lane caps");
         require(WheelCoordinatorAdapter(deployed.coordinator).policyHash() == config.wheel.policyHash, "B1N419: policy");
@@ -314,9 +315,10 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
         _requireStandaloneBaseline(config.standalone);
     }
 
-    function _loadConfig() internal view returns (DeployConfig memory config) {
+    function _loadConfig() internal returns (DeployConfig memory config) {
         string memory json = vm.readFile(vm.envString("B1N419_APPROVED_INPUTS_PATH"));
         require(sha256(bytes(json)) == vm.envBytes32("B1N419_APPROVED_INPUTS_SHA256"), "B1N419: input digest");
+        _requireInputApproval(json);
         string memory root = ".environment.";
         config.sourceCommit = vm.parseJsonString(json, string.concat(root, "SOURCE_COMMIT"));
         config.assets = AssetConfig({
@@ -342,6 +344,46 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
         config.linkedLibraries = vm.parseJsonAddressArray(json, string.concat(root, "LINKED_LIBRARIES"));
         config.linkedLibraryCodehashes =
             vm.parseJsonBytes32Array(json, string.concat(root, "LINKED_LIBRARY_CODEHASHES"));
+    }
+
+    function _requireInputApproval(string memory json) private {
+        string memory executionContext = vm.envString("B1N419_EXECUTION_CONTEXT");
+        string memory approval = vm.parseJsonString(json, ".approval");
+        string memory sourceCommit = vm.parseJsonString(json, ".environment.SOURCE_COMMIT");
+        require(bytes(sourceCommit).length == 40, "B1N419: full approved source");
+        require(
+            keccak256(bytes(sourceCommit)) == keccak256(bytes(vm.envString("B1N419_SOURCE_COMMIT"))),
+            "B1N419: source approval mismatch"
+        );
+
+        bool isBroadcast =
+            vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) || vm.isContext(VmSafe.ForgeContext.ScriptResume);
+        if (keccak256(bytes(executionContext)) == keccak256("FORK_REHEARSAL")) {
+            require(
+                keccak256(bytes(approval)) == keccak256("APPROVED_BASE_SEPOLIA_DRY_RUN"), "B1N419: dry-run approval"
+            );
+            if (isBroadcast) {
+                bytes memory anvilInfo = vm.rpc("anvil_nodeInfo", "[]");
+                require(anvilInfo.length != 0, "B1N419: persistent rehearsal requires Anvil");
+            }
+        } else if (keccak256(bytes(executionContext)) == keccak256("BASE_SEPOLIA_LIVE")) {
+            require(keccak256(bytes(approval)) == keccak256("APPROVED_BASE_SEPOLIA_LIVE"), "B1N419: live approval");
+        } else {
+            revert("B1N419: execution context");
+        }
+    }
+
+    function _loadBoundManifest(DeployConfig memory config) internal view returns (string memory manifest) {
+        manifest = vm.readFile(vm.envString("B1N419_MANIFEST_PATH"));
+        require(sha256(bytes(manifest)) == vm.envBytes32("B1N419_MANIFEST_SHA256"), "B1N419: manifest digest");
+        require(
+            keccak256(bytes(vm.parseJsonString(manifest, ".sourceCommit"))) == keccak256(bytes(config.sourceCommit)),
+            "B1N419: manifest source"
+        );
+        bytes32 deploymentId = vm.parseJsonBytes32(manifest, ".deploymentId");
+        require(
+            deploymentId != bytes32(0) && deploymentId == vm.envBytes32("B1N419_DEPLOYMENT_ID"), "B1N419: deployment id"
+        );
     }
 
     function _loadFundConfig(string memory json, string memory root) private view returns (FundConfig memory config) {
@@ -615,20 +657,12 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
     }
 
     function _writeContractManifest(DeploymentAddresses memory deployed, string memory path) private {
+        vm.writeJson(_proxyContract(deployed.vault, deployed.vaultImplementation), path, ".contracts.fundVault");
+        vm.writeJson(_proxyContract(deployed.share, deployed.shareImplementation), path, ".contracts.fundShare");
         vm.writeJson(
-            _proxyContract(deployed.vault, deployed.vaultImplementation), path, ".contracts.fundVault"
+            _proxyContract(deployed.accounting, deployed.accountingImplementation), path, ".contracts.fundAccounting"
         );
-        vm.writeJson(
-            _proxyContract(deployed.share, deployed.shareImplementation), path, ".contracts.fundShare"
-        );
-        vm.writeJson(
-            _proxyContract(deployed.accounting, deployed.accountingImplementation),
-            path,
-            ".contracts.fundAccounting"
-        );
-        vm.writeJson(
-            _proxyContract(deployed.flow, deployed.flowImplementation), path, ".contracts.fundFlowManager"
-        );
+        vm.writeJson(_proxyContract(deployed.flow, deployed.flowImplementation), path, ".contracts.fundFlowManager");
         vm.writeJson(
             _proxyContract(deployed.strategy, deployed.strategyImplementation), path, ".contracts.strategyManager"
         );

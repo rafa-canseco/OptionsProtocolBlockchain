@@ -6,14 +6,15 @@ import {BatchSettler} from "../../src/core/BatchSettler.sol";
 import {FundAccessManager} from "../../src/fund/FundAccessManager.sol";
 import {FundVault} from "../../src/fund/FundVault.sol";
 import {StrategyManager} from "../../src/fund/StrategyManager.sol";
+import {WheelCoordinatorAdapter} from "../../src/fund/WheelCoordinatorAdapter.sol";
 import {DeployMetaWheelBaseSepolia} from "./DeployMetaWheelBaseSepolia.s.sol";
 
 /// @notice Read-only gate proving bootstrap authority is gone before later phases.
 contract ReconcileMetaWheelFinalRoles is DeployMetaWheelBaseSepolia {
-    function run() external view override returns (DeploymentAddresses memory deployed) {
+    function run() external override returns (DeploymentAddresses memory deployed) {
         _requireBaseSepolia();
         DeployConfig memory config = _loadConfig();
-        string memory manifest = vm.readFile(vm.envString("B1N419_MANIFEST_PATH"));
+        string memory manifest = _loadBoundManifest(config);
         deployed.accessManager = vm.parseJsonAddress(manifest, ".accessManager");
         deployed.vault = vm.parseJsonAddress(manifest, ".vault");
         deployed.strategy = vm.parseJsonAddress(manifest, ".strategy");
@@ -24,6 +25,10 @@ contract ReconcileMetaWheelFinalRoles is DeployMetaWheelBaseSepolia {
         require(
             StrategyManager(deployed.strategy).strategyConfig(deployed.coordinator).interfaceVersion == 0,
             "B1N419: configured before rotation gate"
+        );
+        require(
+            WheelCoordinatorAdapter(deployed.coordinator).registeredLaneCount() == 0,
+            "B1N419: lanes registered before rotation gate"
         );
 
         BatchSettler settler = BatchSettler(AddressBook(config.assets.addressBook).batchSettler());

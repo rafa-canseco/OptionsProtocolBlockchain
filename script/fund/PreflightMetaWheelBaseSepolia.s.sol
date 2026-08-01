@@ -12,7 +12,7 @@ contract PreflightMetaWheelBaseSepolia is DeployMetaWheelBaseSepolia {
         revert UsePreflightEntryPoint();
     }
 
-    function preflight() external view {
+    function preflight() external {
         _requireBaseSepolia();
         DeployConfig memory config = _loadConfig();
         require(

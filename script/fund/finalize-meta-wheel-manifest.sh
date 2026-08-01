@@ -13,6 +13,7 @@ done
 : "${BASE_SEPOLIA_RPC_URL:?BASE_SEPOLIA_RPC_URL is required}"
 : "${B1N419_MANIFEST_PATH:?B1N419_MANIFEST_PATH is required}"
 : "${B1N419_CANONICALIZATION_EVIDENCE_PATH:?B1N419_CANONICALIZATION_EVIDENCE_PATH is required}"
+: "${B1N419_LIBRARY_EVIDENCE_PATH:?B1N419_LIBRARY_EVIDENCE_PATH is required}"
 : "${B1N419_CANONICAL_MANIFEST_PATH:?B1N419_CANONICAL_MANIFEST_PATH is required}"
 : "${B1N419_APPROVED_INPUTS_PATH:?B1N419_APPROVED_INPUTS_PATH is required}"
 : "${B1N419_APPROVED_INPUTS_SHA256:?B1N419_APPROVED_INPUTS_SHA256 is required}"
@@ -20,6 +21,7 @@ done
 
 manifest_path=$B1N419_MANIFEST_PATH
 evidence_path=$B1N419_CANONICALIZATION_EVIDENCE_PATH
+library_evidence_path=$B1N419_LIBRARY_EVIDENCE_PATH
 canonical_path=$B1N419_CANONICAL_MANIFEST_PATH
 backend_root=$B1N419_BACKEND_ROOT
 backend_python=${B1N419_BACKEND_PYTHON:-python3}
@@ -27,12 +29,20 @@ command -v "$backend_python" >/dev/null 2>&1 || die "backend Python executable n
 
 [[ -f "$manifest_path" ]] || die "unconfirmed manifest not found"
 [[ -f "$evidence_path" ]] || die "canonicalization evidence not found"
+[[ -f "$library_evidence_path" ]] || die "library prephase evidence not found"
 [[ -f "$backend_root/src/deployment_manifest.py" ]] || die "backend parser not found"
 [[ "$manifest_path" != "$canonical_path" ]] || die "canonical output must not overwrite the unconfirmed manifest"
 [[ ! -e "$canonical_path" ]] || die "canonical output already exists"
 
 chain_id=$(cast chain-id --rpc-url "$BASE_SEPOLIA_RPC_URL")
 [[ "$chain_id" == "84532" ]] || die "RPC is not Base Sepolia"
+client_version=$(cast rpc web3_clientVersion --rpc-url "$BASE_SEPOLIA_RPC_URL" | jq -r '.')
+client_version_lower=$(tr '[:upper:]' '[:lower:]' <<<"$client_version")
+[[ "$client_version_lower" != *anvil* && "$client_version_lower" != *hardhat* ]] \
+  || die "canonical finalization rejects local development RPC clients"
+if cast rpc anvil_nodeInfo --rpc-url "$BASE_SEPOLIA_RPC_URL" >/dev/null 2>&1; then
+  die "canonical finalization rejects Anvil RPC methods"
+fi
 
 jq -e '
   .schemaVersion == "1.0.0" and
@@ -48,6 +58,7 @@ jq -e '
   .approval == "APPROVED_CANONICALIZATION" and
   .network.name == "base-sepolia" and
   .network.chainId == 84532 and
+  .network.environmentKind == "live" and
   .verification.blockscoutVerificationComplete == true and
   .reconciliation.bootstrapReconciled == true and
   .reconciliation.finalRolesReconciled == true and
@@ -57,19 +68,55 @@ jq -e '
   .reconciliation.finalReconciliationBlock > 0
 ' "$evidence_path" >/dev/null || die "evidence approval, verification, or reconciliation is incomplete"
 
+jq -e '
+  .schemaVersion == "1.0.0" and .issue == "B1N-419" and
+  .status == "CONFIRMED_CANONICAL_RECEIPTS" and .deploymentStatus == "DEPLOYED" and
+  .handoffReady == true and .network.name == "base-sepolia" and .network.chainId == 84532 and
+  .network.environmentKind == "live" and
+  .exactRelinkVerified == true and
+  (.orderedLibraries | length) == 5 and
+  ([.orderedLibraries[].address | ascii_downcase] | unique | length) == 5 and
+  all(.orderedLibraries[];
+    (.index | type == "number" and . >= 0 and . < 5) and
+    (.artifact | type == "string" and length > 0) and
+    (.address | test("^0x[0-9a-fA-F]{40}$")) and
+    (.runtimeCodehash | test("^0x[0-9a-fA-F]{64}$")) and
+    (.receipt.transactionHash | test("^0x[0-9a-fA-F]{64}$")) and
+    (.receipt.blockHash | test("^0x[0-9a-fA-F]{64}$")) and
+    (.receipt.blockNumber | type == "number" and . > 0) and .receipt.status == 1)
+' "$library_evidence_path" >/dev/null || die "library prephase is not canonical and relinked"
+
 manifest_digest="0x$(shasum -a 256 "$manifest_path" | awk '{print $1}')"
 expected_digest=$(jq -r '.unconfirmedManifestSha256' "$evidence_path")
 [[ "${manifest_digest,,}" == "${expected_digest,,}" ]] || die "unconfirmed manifest digest mismatch"
 
 manifest_source=$(jq -r '.sourceCommit' "$manifest_path")
 evidence_source=$(jq -r '.sourceCommit' "$evidence_path")
+library_source=$(jq -r '.sourceCommit' "$library_evidence_path")
 manifest_deployment_id=$(jq -r '.deploymentId' "$manifest_path")
 evidence_deployment_id=$(jq -r '.deploymentId' "$evidence_path")
 [[ "$manifest_source" == "$evidence_source" ]] || die "sourceCommit does not bind the sidecar"
+[[ "$manifest_source" == "$library_source" ]] || die "sourceCommit does not bind library evidence"
 [[ "${manifest_deployment_id,,}" == "${evidence_deployment_id,,}" ]] || die "deploymentId does not bind the sidecar"
 [[ "$manifest_source" =~ ^[0-9a-fA-F]{40}$ ]] || die "sourceCommit is not a full git commit"
 [[ "$manifest_deployment_id" =~ ^0x[0-9a-fA-F]{64}$ ]] || die "deploymentId is malformed"
 [[ "$manifest_deployment_id" != "0x0000000000000000000000000000000000000000000000000000000000000000" ]] || die "deploymentId is zero"
+
+jq -e --slurpfile libraries "$library_evidence_path" '
+  [.linkedLibraries[] | ascii_downcase]
+    == [$libraries[0].orderedLibraries[].address | ascii_downcase] and
+  [.linkedLibraryCodehashes[] | ascii_downcase]
+    == [$libraries[0].orderedLibraries[].runtimeCodehash | ascii_downcase]
+' "$manifest_path" >/dev/null || die "manifest library bindings do not match prephase evidence"
+
+jq -n -e --slurpfile evidence "$evidence_path" --slurpfile libraries "$library_evidence_path" '
+  [$libraries[0].orderedLibraries[].receipt.transactionHash | ascii_downcase] as $libraryTransactions |
+  [$evidence[0].canonicalReceipts[].transactionHash,
+   $evidence[0].phaseReceipts[][] .transactionHash,
+   $evidence[0].contractReceipts[].transactionHash | ascii_downcase] as $fundTransactions |
+  ($libraryTransactions | length) == ($libraryTransactions | unique | length) and
+  all($libraryTransactions[]; . as $tx | ($fundTransactions | index($tx)) == null)
+' >/dev/null || die "library receipts are duplicated or overlap fund receipts"
 
 for phase_name in bootstrapDeployment finalRoleRotation inactiveCoordinatorConfiguration managedLaneSetup childAdapterOnboarding; do
   jq -e --arg phase "$phase_name" '
@@ -116,7 +163,7 @@ jq -c '
     .cspAdapterImplementation, .cspLaneImplementation, .cspValuator,
     .coveredCallAdapterImplementation, .coveredCallLaneImplementation, .coveredCallValuator,
     .inKindEscrow, .emergencyEscrow
-  ] + .cspLanes + .cspAdapters + .coveredCallLanes + .coveredCallAdapters + .linkedLibraries
+  ] + .cspLanes + .cspAdapters + .coveredCallLanes + .coveredCallAdapters
   | map(ascii_downcase) | unique | sort
 ' "$manifest_path" >"$temporary_dir/expected-contracts.json"
 
@@ -150,34 +197,73 @@ jq -c '[.canonicalReceipts[], (.phaseReceipts[] | .[]), .contractReceipts[]] | u
     validate_receipt "$receipt_json"
   done
 
+jq -c '.orderedLibraries[].receipt' "$library_evidence_path" | while IFS= read -r receipt_json; do
+  validate_receipt "$receipt_json"
+done
+
 strategy_manager=$(jq -r '.strategy | ascii_downcase' "$manifest_path")
 configuration_selector=$(cast sig 'executeAdapterConfigurationOperation(address,bytes)')
 guardian_selector=$(cast sig 'executeAdapterGuardianOperation(address,bytes)')
-allocation_selector=$(cast sig 'executeAdapterAllocationOperation(address,bytes)')
-processing_selector=$(cast sig 'executeAdapterProcessingOperation(address,bytes)')
-forbidden_targets=$(jq -c '[.coordinator] + .cspLanes + .coveredCallLanes | map(ascii_downcase)' "$manifest_path")
+forbidden_target=$(jq -r '.coordinator | ascii_downcase' "$manifest_path")
 while IFS= read -r phase_receipt; do
   phase_tx=$(jq -r '.transactionHash' <<<"$phase_receipt")
   phase_transaction=$(cast tx "$phase_tx" --rpc-url "$BASE_SEPOLIA_RPC_URL" --json)
   phase_to=$(jq -r '(.to // "") | ascii_downcase' <<<"$phase_transaction")
-  if jq -e --arg target "$phase_to" 'index($target) != null' <<<"$forbidden_targets" >/dev/null; then
-    die "phase transaction invokes a coordinator/lane selector directly: $phase_tx"
-  fi
+  [[ "$phase_to" != "$forbidden_target" ]] \
+    || die "phase transaction invokes a coordinator selector directly: $phase_tx"
 done < <(jq -c '.phaseReceipts[][]' "$evidence_path")
 
+managed_receipt_count=$(jq '.phaseReceipts.managedLaneSetup | length' "$evidence_path")
+[[ "$managed_receipt_count" == "9" ]] || die "managed lane setup must contain exactly 8 registrations and 1 pause"
+mapfile -t expected_lanes < <(jq -r '.cspLanes[], .coveredCallLanes[] | ascii_downcase' "$manifest_path")
+[[ "${#expected_lanes[@]}" == "8" ]] || die "manifest does not contain the exact 4+4 lane order"
+managed_index=0
+previous_managed_block=0
 while IFS= read -r managed_receipt; do
   managed_tx=$(jq -r '.transactionHash' <<<"$managed_receipt")
+  managed_block=$(jq -r '.blockNumber' <<<"$managed_receipt")
+  [[ "$managed_block" -ge "$previous_managed_block" ]] || die "managed lane receipts are out of order"
+  previous_managed_block=$managed_block
   transaction=$(cast tx "$managed_tx" --rpc-url "$BASE_SEPOLIA_RPC_URL" --json)
   transaction_to=$(jq -r '.to | ascii_downcase' <<<"$transaction")
   transaction_input=$(jq -r '.input | ascii_downcase' <<<"$transaction")
   transaction_selector=${transaction_input:0:10}
   [[ "$transaction_to" == "$strategy_manager" ]] \
     || die "managed lane setup transaction bypasses StrategyManager: $managed_tx"
-  case "$transaction_selector" in
-    "${configuration_selector,,}"|"${guardian_selector,,}"|"${allocation_selector,,}"|"${processing_selector,,}") ;;
-    *) die "managed lane setup transaction does not use an approved managed wrapper: $managed_tx" ;;
-  esac
+  if [[ "$managed_index" -lt 8 ]]; then
+    [[ "$transaction_selector" == "${configuration_selector,,}" ]] \
+      || die "lane registration does not use the configuration wrapper: $managed_tx"
+    outer=$(cast calldata-decode 'executeAdapterConfigurationOperation(address,bytes)' "$transaction_input" --json)
+    [[ "$(jq -r '.[0] | ascii_downcase' <<<"$outer")" == "$forbidden_target" ]] \
+      || die "lane registration targets the wrong adapter: $managed_tx"
+    managed_data=$(jq -r '.[1]' <<<"$outer")
+    managed_operation=$(cast abi-decode --input 'f(uint8,bytes)' "$managed_data" --json)
+    [[ "$(jq -r '.[0]' <<<"$managed_operation")" == "11" ]] \
+      || die "configuration wrapper does not contain RegisterLane: $managed_tx"
+    lane_arguments=$(jq -r '.[1]' <<<"$managed_operation")
+    decoded_lane=$(cast abi-decode --input 'f(address,uint8)' "$lane_arguments" --json)
+    expected_kind=1
+    [[ "$managed_index" -ge 4 ]] && expected_kind=2
+    [[ "$(jq -r '.[0] | ascii_downcase' <<<"$decoded_lane")" == "${expected_lanes[$managed_index]}" \
+      && "$(jq -r '.[1]' <<<"$decoded_lane")" == "$expected_kind" ]] \
+      || die "RegisterLane order, address, or kind mismatch: $managed_tx"
+  else
+    [[ "$transaction_selector" == "${guardian_selector,,}" ]] \
+      || die "coordinator pause does not use the guardian wrapper: $managed_tx"
+    outer=$(cast calldata-decode 'executeAdapterGuardianOperation(address,bytes)' "$transaction_input" --json)
+    [[ "$(jq -r '.[0] | ascii_downcase' <<<"$outer")" == "$forbidden_target" ]] \
+      || die "guardian wrapper targets the wrong adapter: $managed_tx"
+    managed_data=$(jq -r '.[1]' <<<"$outer")
+    managed_operation=$(cast abi-decode --input 'f(uint8,bytes)' "$managed_data" --json)
+    [[ "$(jq -r '.[0]' <<<"$managed_operation")" == "10" && "$(jq -r '.[1]' <<<"$managed_operation")" == "0x" ]] \
+      || die "guardian wrapper does not contain an empty PauseAllocations: $managed_tx"
+  fi
+  managed_index=$((managed_index + 1))
 done < <(jq -c '.phaseReceipts.managedLaneSetup[]' "$evidence_path")
+
+coordinator_position_nonce=$(cast call "$strategy_manager" 'positionNonce(address)(uint64)' "$forbidden_target" \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL")
+[[ "$coordinator_position_nonce" == "9" ]] || die "unexpected managed setup position nonce"
 
 while IFS= read -r contract_receipt; do
   contract_address=$(jq -r '.address' <<<"$contract_receipt")
@@ -188,6 +274,15 @@ while IFS= read -r contract_receipt; do
   [[ "${actual_codehash,,}" == "$expected_codehash" ]] || die "runtime codehash mismatch at $contract_address"
 done < <(jq -c '.contractReceipts[]' "$evidence_path")
 
+while IFS= read -r library_record; do
+  library_address=$(jq -r '.address' <<<"$library_record")
+  expected_codehash=$(jq -r '.runtimeCodehash | ascii_downcase' <<<"$library_record")
+  runtime_code=$(cast code "$library_address" --rpc-url "$BASE_SEPOLIA_RPC_URL")
+  [[ "$runtime_code" != "0x" ]] || die "no runtime code at library $library_address"
+  actual_codehash=$(cast keccak "$runtime_code")
+  [[ "${actual_codehash,,}" == "$expected_codehash" ]] || die "library runtime codehash mismatch at $library_address"
+done < <(jq -c '.orderedLibraries[]' "$library_evidence_path")
+
 fund_first=$(jq -r '.network.deploymentBlocks.fundFirst' "$evidence_path")
 fund_last=$(jq -r '.network.deploymentBlocks.fundLast' "$evidence_path")
 confirmation_block=$(jq -r '.network.confirmationBlock' "$evidence_path")
@@ -195,6 +290,8 @@ latest_block=$(cast block-number --rpc-url "$BASE_SEPOLIA_RPC_URL")
 [[ "$fund_first" -gt 0 && "$fund_last" -ge "$fund_first" ]] || die "invalid deployment block window"
 [[ "$confirmation_block" -ge "$fund_last" && "$latest_block" -ge "$confirmation_block" ]] \
   || die "deployment receipts have insufficient confirmations"
+library_last=$(jq '[.orderedLibraries[].receipt.blockNumber] | max' "$library_evidence_path")
+[[ "$library_last" -lt "$fund_first" ]] || die "library prephase did not precede the Fund deployment window"
 
 jq -e --argjson first "$fund_first" --argjson last "$fund_last" '
   all(.canonicalReceipts[]; .blockNumber >= $first and .blockNumber <= $last) and
@@ -256,8 +353,17 @@ for contract_key in claimEscrow accessManager metaWheelValuator navReportVerifie
 done
 
 export B1N419_MANIFEST_PATH="$manifest_path"
+export B1N419_MANIFEST_SHA256="$manifest_digest"
+export B1N419_DEPLOYMENT_ID="$manifest_deployment_id"
+export B1N419_SOURCE_COMMIT="$manifest_source"
+export B1N419_EXECUTION_CONTEXT=BASE_SEPOLIA_LIVE
+library_link_arguments=()
+while IFS=$'\t' read -r artifact library_address; do
+  library_link_arguments+=(--libraries "$artifact:$library_address")
+done < <(jq -r '.orderedLibraries[] | [.artifact, .address] | @tsv' "$library_evidence_path")
+[[ "${#library_link_arguments[@]}" == "10" ]] || die "exact five-library link map unavailable"
 forge script script/fund/ReconcileMetaWheelCanonical.s.sol:ReconcileMetaWheelCanonical \
-  --rpc-url "$BASE_SEPOLIA_RPC_URL" --sig "reconcile()"
+  --rpc-url "$BASE_SEPOLIA_RPC_URL" --sig "reconcile()" "${library_link_arguments[@]}"
 
 candidate_path="$temporary_dir/manifest.canonical.candidate.json"
 jq --slurpfile evidence "$evidence_path" '
