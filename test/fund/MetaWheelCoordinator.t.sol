@@ -2,7 +2,9 @@
 pragma solidity 0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {stdError} from "forge-std/StdError.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {FundAccessManager} from "../../src/fund/FundAccessManager.sol";
 import {WheelCoordinatorAdapter} from "../../src/fund/WheelCoordinatorAdapter.sol";
@@ -215,6 +217,8 @@ contract WheelMockCspLane is WheelMockLaneBase {
 
 contract WheelMockCallLane is WheelMockLaneBase {
     uint256 public immutable executionCostBuffer8;
+    uint256 public literalAssignmentStrike8;
+    uint256 public protectedBaseFloor8;
     uint256 public requiredFloor8;
     uint256 public consumedLotId;
 
@@ -236,14 +240,18 @@ contract WheelMockCallLane is WheelMockLaneBase {
         uint256 trancheId,
         bytes32 transitionHash,
         uint256 lotId,
-        uint256 literalAssignmentStrike8,
+        uint256 literalAssignmentStrike8_,
+        uint256 protectedBaseFloor8_,
         uint256 wethAmount,
         bytes calldata openData
     ) external returns (uint256 mintedChildShares, uint256 positionId, uint64 expiry, bytes32 positionHash) {
         require(msg.sender == coordinator && _state == WheelTypes.LaneState.Idle, "OPEN");
         ICoveredCallFundAdapter.OpenPositionData memory decoded =
             abi.decode(openData, (ICoveredCallFundAdapter.OpenPositionData));
-        requiredFloor8 = literalAssignmentStrike8 + executionCostBuffer8;
+        require(protectedBaseFloor8_ >= literalAssignmentStrike8_, "PROTECTED_FLOOR");
+        literalAssignmentStrike8 = literalAssignmentStrike8_;
+        protectedBaseFloor8 = protectedBaseFloor8_;
+        requiredFloor8 = protectedBaseFloor8_ + executionCostBuffer8;
         require(OToken(decoded.quote.oToken).strikePrice() >= requiredFloor8, "FLOOR");
         _weth.transferFrom(msg.sender, address(this), wethAmount);
         _trancheId = trancheId;
@@ -285,6 +293,16 @@ contract WheelMockCallLane is WheelMockLaneBase {
 contract MetaWheelCoordinatorTest is Test {
     uint256 internal constant FLOOR_BUFFER_8 = 10e8;
     bytes32 internal constant POLICY_HASH = keccak256("wheel-policy-v1");
+
+    event WheelCoveredCallFloorEnforced(
+        uint256 indexed trancheId,
+        uint256 indexed lotId,
+        address indexed lane,
+        uint256 literalAssignmentStrike8,
+        uint256 executionCostBuffer8,
+        uint256 requiredFloor8,
+        uint256 callStrike8
+    );
 
     MockERC20 internal usdc;
     MockERC20 internal weth;
@@ -496,13 +514,14 @@ contract MetaWheelCoordinatorTest is Test {
         assertEq(coordinator.tranche(1).principalUsdc, 20_000e6);
     }
 
-    function test_wethFallbackKeepsFullBasisWithWethAndQueuesPremiumBasisFree() public {
+    function test_wethFallbackRebasesNextCallFloorAndKeepsLiteralStrike() public {
         _queue(20_000e6);
         _openCsp(1, _cspOpenData());
-        cspLane.configureSettlement(WheelTypes.SettlementKind.CspAssigned, 0, 10e18, 2_000e8);
+        uint256 literalStrike8 = 2_000e8;
+        cspLane.configureSettlement(WheelTypes.SettlementKind.CspAssigned, 0, 10e18, literalStrike8);
         _settleCsp(1);
         _handoffCsp(1);
-        _openCall(1, _callOpenData(2_000e8 + FLOOR_BUFFER_8));
+        _openCall(1, _callOpenData(literalStrike8 + FLOOR_BUFFER_8));
 
         callLane.configureSettlement(WheelTypes.SettlementKind.WethFallback, 50e6, 9e18);
         _settleCall(1);
@@ -514,10 +533,79 @@ contract MetaWheelCoordinatorTest is Test {
         assertEq(premiumTranche.pendingUsdc, 50e6);
         assertEq(premiumTranche.principalUsdc, 0);
 
+        bytes memory staleFloorOpenData = _callOpenData(literalStrike8 + FLOOR_BUFFER_8);
+        vm.expectRevert(WheelCoordinatorAdapter.CallStrikeBelowFloor.selector);
+        _openCall(1, staleFloorOpenData);
+
+        uint256 protectedBaseFloor8 = Math.mulDiv(20_000e6, 1e20, 9e18, Math.Rounding.Ceil);
+        assertGt(protectedBaseFloor8, literalStrike8);
+        assertGt(mulmod(20_000e6, 1e20, 9e18), 0);
+        uint256 requiredFloor8 = protectedBaseFloor8 + FLOOR_BUFFER_8;
+        bytes memory protectedFloorOpenData = _callOpenData(requiredFloor8);
+        vm.expectEmit(true, true, true, true, address(coordinator));
+        emit WheelCoveredCallFloorEnforced(
+            1, 1, address(callLane), literalStrike8, FLOOR_BUFFER_8, requiredFloor8, requiredFloor8
+        );
+        _openCall(1, protectedFloorOpenData);
+        assertEq(callLane.literalAssignmentStrike8(), literalStrike8);
+        assertEq(callLane.protectedBaseFloor8(), protectedBaseFloor8);
+        assertEq(callLane.requiredFloor8(), requiredFloor8);
+
         _reserve(2, 50e6);
         (uint256 assetsOut, uint256 principalReleased) = strategy.pull(coordinator, 50e6);
         assertEq(assetsOut, 50e6);
         assertEq(principalReleased, 0);
+    }
+
+    function test_partialCallAwayAfterFallbackPreservesConcentratedBasisRatio() public {
+        uint256 startingPrincipal = 20_000e6;
+        uint256 literalStrike8 = 2_000e8;
+        _queue(startingPrincipal);
+        _openCsp(1, _cspOpenData());
+        cspLane.configureSettlement(WheelTypes.SettlementKind.CspAssigned, 0, 10e18, literalStrike8);
+        _settleCsp(1);
+        uint256 lotId = _handoffCsp(1);
+        _openCall(1, _callOpenData(literalStrike8 + FLOOR_BUFFER_8));
+
+        callLane.configureSettlement(WheelTypes.SettlementKind.WethFallback, 0, 9e18);
+        _settleCall(1);
+        _handoffCall(1);
+        uint256 firstProtectedFloor8 = Math.mulDiv(startingPrincipal, 1e20, 9e18, Math.Rounding.Ceil);
+        _openCall(1, _callOpenData(firstProtectedFloor8 + FLOOR_BUFFER_8));
+
+        callLane.configureSettlement(WheelTypes.SettlementKind.CallAway, 9_000e6, 5e18);
+        _settleCall(1);
+        _handoffCall(1);
+
+        uint256 consumedPrincipal = Math.mulDiv(startingPrincipal, 4e18, 9e18);
+        uint256 remainingPrincipal = startingPrincipal - consumedPrincipal;
+        WheelTypes.Tranche memory current = coordinator.tranche(1);
+        WheelTypes.AssignmentLot memory lot = coordinator.assignmentLot(lotId);
+        assertEq(current.principalUsdc, remainingPrincipal);
+        assertEq(lot.remainingWeth, 5e18);
+        uint256 nextProtectedFloor8 = Math.mulDiv(remainingPrincipal, 1e20, 5e18, Math.Rounding.Ceil);
+        assertGe(nextProtectedFloor8, firstProtectedFloor8);
+        assertGe(Math.mulDiv(nextProtectedFloor8, lot.remainingWeth, 1e20), remainingPrincipal);
+        bytes memory belowNextFloorOpenData = _callOpenData(nextProtectedFloor8 + FLOOR_BUFFER_8 - 1);
+        vm.expectRevert(WheelCoordinatorAdapter.CallStrikeBelowFloor.selector);
+        _openCall(1, belowNextFloorOpenData);
+        _openCall(1, _callOpenData(nextProtectedFloor8 + FLOOR_BUFFER_8));
+        assertEq(callLane.literalAssignmentStrike8(), literalStrike8);
+        assertEq(callLane.requiredFloor8(), nextProtectedFloor8 + FLOOR_BUFFER_8);
+    }
+
+    function test_protectedFloorOverflowRevertsClosed() public {
+        _queue(type(uint256).max);
+        _openCsp(1, _cspOpenData());
+        cspLane.configureSettlement(WheelTypes.SettlementKind.CspAssigned, 0, 1, 1);
+        _settleCsp(1);
+        _handoffCsp(1);
+
+        bytes memory openData = _callOpenData(type(uint256).max);
+        vm.expectRevert(stdError.arithmeticError);
+        _openCall(1, openData);
+        assertEq(uint256(callLane.laneState()), uint256(WheelTypes.LaneState.Idle));
+        assertEq(uint256(coordinator.assignmentLot(1).status), uint256(WheelTypes.LotStatus.Available));
     }
 
     function test_lossReturnReleasesFullBasisWithoutLeavingAllocationGhost() public {
@@ -638,7 +726,7 @@ contract MetaWheelCoordinatorTest is Test {
         _handoffCall(1);
     }
 
-    function testFuzz_callFloorNeverAcceptsBelowLiteralPlusBuffer(uint96 rawDeposit, uint64 rawStrike) public {
+    function testFuzz_callFloorNeverAcceptsBelowProtectedBasisPlusBuffer(uint96 rawDeposit, uint64 rawStrike) public {
         uint256 deposit = bound(uint256(rawDeposit), 1e6, 1_000_000e6);
         uint256 strike8 = bound(uint256(rawStrike), 100e8, 100_000e8);
         _queue(deposit);
@@ -647,9 +735,17 @@ contract MetaWheelCoordinatorTest is Test {
         _settleCsp(1);
         _handoffCsp(1);
 
-        bytes memory belowFloor = _callOpenData(strike8 + FLOOR_BUFFER_8 - 1);
+        WheelTypes.Tranche memory current = coordinator.tranche(1);
+        WheelTypes.AssignmentLot memory lot = coordinator.assignmentLot(current.assignmentLotId);
+        uint256 protectedBaseFloor8 =
+            Math.max(strike8, Math.mulDiv(current.principalUsdc, 1e20, lot.remainingWeth, Math.Rounding.Ceil));
+        bytes memory belowFloor = _callOpenData(protectedBaseFloor8 + FLOOR_BUFFER_8 - 1);
         vm.expectRevert(WheelCoordinatorAdapter.CallStrikeBelowFloor.selector);
         _openCall(1, belowFloor);
+
+        _openCall(1, _callOpenData(protectedBaseFloor8 + FLOOR_BUFFER_8));
+        assertEq(callLane.literalAssignmentStrike8(), strike8);
+        assertEq(callLane.requiredFloor8(), protectedBaseFloor8 + FLOOR_BUFFER_8);
     }
 
     function test_runtimeBudgetLeavesUpgradeHeadroom() public view {
