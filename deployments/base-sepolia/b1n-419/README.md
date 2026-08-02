@@ -21,10 +21,13 @@ Covered Call proxy.
 - The parent remains deposit/redemption paused and the coordinator strategy remains inactive through handoff.
 - Bootstrap pauses each child lane through its explicit `GUARDIAN_ROLE`. The coordinator is temporarily unpaused,
   but has no registered lanes, no configured strategy and no funds, so it has no useful execution route.
-- The approved Base Sepolia library/core/bootstrap broadcaster is
-  `0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425`. Fee recipient and the current `BatchSettler` onboarding owner are
+- The approved Base Sepolia library/core/bootstrap broadcaster is the dedicated B1N-419 signer
+  `0x42cB85203838DD9708ED548DC4f815130E8F7e74`. Fee recipient and the current `BatchSettler` onboarding owner are
   `0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D`; this identity cannot be a bootstrap/final role, observer or NAV
   reporter, and the generator and finalizer reject any such overlap.
+- The local signer recovery map uses ignored keystore `.secrets/b1n-419/base-sepolia-meta-wheel-broadcaster` and
+  macOS Keychain service `b1nary-b1n-419-base-sepolia-broadcaster-v1`, account `rafa`. No password or private key
+  belongs in this repository or in deployment evidence.
 - The four observer inputs are domain-separated: `[0,1]` are the complete CSP set and `[2,3]` are the complete
   Covered Call set, with quorum 2 in each valuator and no cross-authorization. The two NAV reporters are a separate
   exact set with threshold 2.
@@ -152,7 +155,7 @@ outside `fundFirst..fundLast`.
    `deploymentId` must resolve through `FundFactory.deployment(id)` to the exact eight Fund addresses and
    implementation version recorded by the manifest;
 2. RPC receipts, block hashes, success statuses, contract coverage and runtime code hashes all match, and all five
-   library transactions were sent by the approved `0x097B…` bootstrap identity;
+   library transactions were sent by the approved `0x42cB…` bootstrap identity;
 3. the coordinator was configured inactive before managed lane setup, with all phase receipts ordered;
 4. Blockscout verification and bootstrap/final-role/standalone reconciliation are complete;
 5. `ReconcileMetaWheelCanonical` passes against live Base Sepolia state, including exact fee/settler ownership,

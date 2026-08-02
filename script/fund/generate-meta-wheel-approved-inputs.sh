@@ -22,7 +22,7 @@ done
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_DIR"
 
-expected_bootstrap=0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425
+expected_bootstrap=0x42cB85203838DD9708ED548DC4f815130E8F7e74
 expected_settler_owner=0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D
 
 : "${BASE_SEPOLIA_RPC_URL:?BASE_SEPOLIA_RPC_URL is required}"

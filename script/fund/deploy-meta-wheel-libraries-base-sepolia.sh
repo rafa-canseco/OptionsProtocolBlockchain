@@ -13,7 +13,7 @@ done
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_DIR"
 
-expected_broadcaster=0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425
+expected_broadcaster=0x42cB85203838DD9708ED548DC4f815130E8F7e74
 
 : "${BASE_SEPOLIA_RPC_URL:?BASE_SEPOLIA_RPC_URL is required}"
 : "${B1N419_LIBRARY_BROADCASTER:?B1N419_LIBRARY_BROADCASTER is required}"

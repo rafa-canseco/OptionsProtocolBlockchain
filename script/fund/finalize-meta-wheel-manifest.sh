@@ -10,7 +10,7 @@ lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
-expected_bootstrap=0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425
+expected_bootstrap=0x42cB85203838DD9708ED548DC4f815130E8F7e74
 expected_settler_owner=0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D
 expected_bootstrap_lower=$(lower "$expected_bootstrap")
 expected_settler_owner_lower=$(lower "$expected_settler_owner")

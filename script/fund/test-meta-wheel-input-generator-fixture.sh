@@ -15,7 +15,7 @@ trap 'rm -rf "$fixture_dir"' EXIT
 
 real_cast=$(command -v cast)
 source_commit=1111111111111111111111111111111111111111
-bootstrap=0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425
+bootstrap=0x42cB85203838DD9708ED548DC4f815130E8F7e74
 settler_owner=0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D
 runtime_codehash=$($real_cast keccak 0x6000)
 

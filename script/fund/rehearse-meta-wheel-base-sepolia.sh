@@ -24,7 +24,7 @@ export B1N419_MANIFEST_PATH B1N419_BACKEND_ROOT
 export B1N419_MIN_BROADCASTER_BALANCE_WEI=${B1N419_MIN_BROADCASTER_BALANCE_WEI:-1}
 
 rpc_url=$B1N419_FORK_RPC_URL
-expected_bootstrap=0x097Bfce6f1Fd87DaA4B5f74e230eC60729eb6425
+expected_bootstrap=0x42cB85203838DD9708ED548DC4f815130E8F7e74
 expected_settler_owner=0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D
 [[ "$(cast chain-id --rpc-url "$rpc_url")" == "84532" ]] || die "Anvil fork chain id must be 84532"
 client_version=$(cast rpc web3_clientVersion --rpc-url "$rpc_url" | jq -r '.')
