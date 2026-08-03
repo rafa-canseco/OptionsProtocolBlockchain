@@ -213,6 +213,82 @@ jq -e '
   || die "fixture manifest operational inventory is incomplete or NAV verifier paths disagree"
 
 manifest_digest="0x$(shasum -a 256 "$fixture_dir/manifest.json" | awk '{print $1}')"
+core_build_info_digest=$(hash_for 801)
+library_build_info_digest=$(hash_for 802)
+core_standard_input_digest=$(hash_for 803)
+library_standard_input_digest=$(hash_for 804)
+core_compiler_output_digest=$(hash_for 805)
+library_compiler_output_digest=$(hash_for 806)
+core_settings_digest=$(hash_for 807)
+library_settings_digest=$(hash_for 808)
+verification_inventory_digest=$(hash_for 809)
+jq -n --arg sourceCommit "$source_commit" --arg deploymentId "$deployment_id" \
+  --arg manifestDigest "$manifest_digest" --arg runtimeCodehash "$runtime_codehash" \
+  --arg coreBuildInfoSha256 "$core_build_info_digest" \
+  --arg libraryBuildInfoSha256 "$library_build_info_digest" \
+  --arg coreStandardJsonInputSha256 "$core_standard_input_digest" \
+  --arg libraryStandardJsonInputSha256 "$library_standard_input_digest" \
+  --arg coreCompilerOutputSha256 "$core_compiler_output_digest" \
+  --arg libraryCompilerOutputSha256 "$library_compiler_output_digest" \
+  --arg coreSettingsSha256 "$core_settings_digest" --arg librarySettingsSha256 "$library_settings_digest" \
+  --arg inventorySha256 "$verification_inventory_digest" \
+  --slurpfile contracts "$fixture_dir/inventory.json" --slurpfile libraries "$fixture_dir/libraries.json" '
+  ([$contracts[0][] | {
+      address, transactionHash, runtimeCodehash,
+      sourceCreationBytecodeMatch: true,
+      sourceRuntimeBytecodeMatch: true,
+      rpcRuntimeBytecodeMatch: true
+    }] +
+   [$libraries[0].orderedLibraries[] | {
+      address, transactionHash: .receipt.transactionHash, runtimeCodehash,
+      sourceCreationBytecodeMatch: true,
+      sourceRuntimeBytecodeMatch: true,
+      rpcRuntimeBytecodeMatch: true
+    }] | sort_by(.address)) as $records |
+  {
+    schemaVersion: "1.0.0", issue: "B1N-419",
+    method: "SOLC_STANDARD_JSON_RPC_EXACT_V2",
+    exactSourceRuntimeBytecodeVerified: true,
+    sourceCommit: $sourceCommit, deploymentId: $deploymentId,
+    unconfirmedManifestSha256: $manifestDigest,
+    coreBuildInfoSha256: $coreBuildInfoSha256,
+    libraryBuildInfoSha256: $libraryBuildInfoSha256,
+    coreStandardJsonInputSha256: $coreStandardJsonInputSha256,
+    libraryStandardJsonInputSha256: $libraryStandardJsonInputSha256,
+    coreCompilerOutputSha256: $coreCompilerOutputSha256,
+    libraryCompilerOutputSha256: $libraryCompilerOutputSha256,
+    coreSettingsSha256: $coreSettingsSha256,
+    librarySettingsSha256: $librarySettingsSha256,
+    inventorySha256: $inventorySha256,
+    addressCount: 47, artifactCount: 25,
+    network: {name: "base-sepolia", chainId: 84532, confirmationBlock: 65},
+    compiler: {
+      version: "0.8.24+commit.e11b9ed9",
+      coreBuildInfoSha256: $coreBuildInfoSha256,
+      libraryBuildInfoSha256: $libraryBuildInfoSha256,
+      coreStandardJsonInputSha256: $coreStandardJsonInputSha256,
+      libraryStandardJsonInputSha256: $libraryStandardJsonInputSha256,
+      coreCompilerOutputSha256: $coreCompilerOutputSha256,
+      libraryCompilerOutputSha256: $libraryCompilerOutputSha256,
+      coreSettingsSha256: $coreSettingsSha256,
+      librarySettingsSha256: $librarySettingsSha256,
+      coreSourceCount: 316, librarySourceCount: 170,
+      coreTargetArtifactCount: 20, libraryTargetArtifactCount: 5,
+      targetArtifactCount: 25, fullSourceSetsRetained: true,
+      targetOnlyOutputSelection: true
+    },
+    inventory: {sha256: $inventorySha256, addressCount: 47, artifactCount: 25,
+      primaryArtifactCount: 20, libraryArtifactCount: 5},
+    summary: {creationVerified: 47, compiledRuntimeVerified: 47, rpcRuntimeVerified: 47,
+      exactCompiledArtifactMatches: 25, exactRpcRuntimeMatches: 47,
+      exactTopLevelCreationMatches: 39, traceDerivedInternalCreationsRecompiled: 8},
+    records: $records
+  }
+' >"$fixture_dir/source-runtime.json"
+source_runtime_digest="0x$(shasum -a 256 "$fixture_dir/source-runtime.json" | awk '{print $1}')"
+jq -n '{}' >"$fixture_dir/core-build-info.json"
+jq -n '{}' >"$fixture_dir/library-build-info.json"
+jq -n '[]' >"$fixture_dir/verification-inventory.json"
 receipt_json 200 52 >"$fixture_dir/rotation.json"
 receipt_json 201 53 >"$fixture_dir/configuration.json"
 receipt_json 211 63 >"$fixture_dir/onboarding.json"
@@ -224,7 +300,12 @@ done
 jq -s . "$managed_jsonl" >"$fixture_dir/managed.json"
 
 jq -n --arg sourceCommit "$source_commit" --arg deploymentId "$deployment_id" \
-  --arg manifestDigest "$manifest_digest" --slurpfile inventory "$fixture_dir/inventory.json" \
+  --arg manifestDigest "$manifest_digest" --arg sourceRuntimeDigest "$source_runtime_digest" \
+  --arg coreBuildInfoSha256 "$core_build_info_digest" \
+  --arg libraryBuildInfoSha256 "$library_build_info_digest" \
+  --arg coreStandardJsonInputSha256 "$core_standard_input_digest" \
+  --arg libraryStandardJsonInputSha256 "$library_standard_input_digest" \
+  --arg inventorySha256 "$verification_inventory_digest" --slurpfile inventory "$fixture_dir/inventory.json" \
   --slurpfile rotation "$fixture_dir/rotation.json" --slurpfile configuration "$fixture_dir/configuration.json" \
   --slurpfile managed "$fixture_dir/managed.json" --slurpfile onboarding "$fixture_dir/onboarding.json" '
   ($inventory[0] | map({transactionHash, blockHash, blockNumber, status})) as $bootstrap |
@@ -232,7 +313,13 @@ jq -n --arg sourceCommit "$source_commit" --arg deploymentId "$deployment_id" \
    sourceCommit: $sourceCommit, deploymentId: $deploymentId, unconfirmedManifestSha256: $manifestDigest,
    network: {name: "base-sepolia", chainId: 84532, environmentKind: "live",
      deploymentBlocks: {fundFirst: 10, fundLast: 51}, confirmationBlock: 65},
-   verification: {blockscoutVerificationComplete: true},
+   verification: {exactSourceRuntimeBytecodeVerified: true,
+     sourceRuntimeEvidenceSha256: $sourceRuntimeDigest,
+     coreBuildInfoSha256: $coreBuildInfoSha256, libraryBuildInfoSha256: $libraryBuildInfoSha256,
+     coreStandardJsonInputSha256: $coreStandardJsonInputSha256,
+     libraryStandardJsonInputSha256: $libraryStandardJsonInputSha256,
+     inventorySha256: $inventorySha256,
+     addressCount: 47, artifactCount: 25},
    reconciliation: {bootstrapReconciled: true, finalRolesReconciled: true,
      standaloneBaselinesUnchanged: true, managedWrappersOnly: true,
      coordinatorConfiguredInactiveBeforeManagedLaneSetup: true, finalReconciliationBlock: 64},
@@ -289,18 +376,24 @@ jq -s 'reduce .[] as $item ({}; .[$item.key] = $item.value)' "$transactions_json
 mkdir -p "$fixture_dir/bin"
 ln -s "$project_dir/test/fixtures/b1n419-finalizer/mock-cast.sh" "$fixture_dir/bin/cast"
 ln -s "$project_dir/test/fixtures/b1n419-finalizer/mock-forge.sh" "$fixture_dir/bin/forge"
+ln -s "$project_dir/test/fixtures/b1n419-finalizer/mock-node.sh" "$fixture_dir/bin/node"
 
 run_finalizer() {
   local inputs=$1
   local digest=$2
   local transactions=$3
   local canonical=$4
+  local evidence=${5:-$fixture_dir/evidence.json}
   PATH="$fixture_dir/bin:$PATH" \
   PYTHONDONTWRITEBYTECODE=1 \
   BASE_SEPOLIA_RPC_URL=https://fixture.invalid \
   B1N419_MANIFEST_PATH="$fixture_dir/manifest.json" \
-  B1N419_CANONICALIZATION_EVIDENCE_PATH="$fixture_dir/evidence.json" \
+  B1N419_CANONICALIZATION_EVIDENCE_PATH="$evidence" \
   B1N419_LIBRARY_EVIDENCE_PATH="$fixture_dir/libraries.json" \
+  B1N419_SOURCE_RUNTIME_EVIDENCE_PATH="$fixture_dir/source-runtime.json" \
+  B1N419_CORE_BUILD_INFO_PATH="$fixture_dir/core-build-info.json" \
+  B1N419_LIBRARY_BUILD_INFO_PATH="$fixture_dir/library-build-info.json" \
+  B1N419_VERIFICATION_INVENTORY_PATH="$fixture_dir/verification-inventory.json" \
   B1N419_CANONICAL_MANIFEST_PATH="$canonical" \
   B1N419_APPROVED_INPUTS_PATH="$inputs" \
   B1N419_APPROVED_INPUTS_SHA256="$digest" \
@@ -316,8 +409,25 @@ run_finalizer() {
 run_finalizer "$fixture_dir/inputs.json" "$inputs_digest" "$fixture_dir/transactions.json" \
   "$fixture_dir/canonical.json"
 
-jq -e '.status == "CONFIRMED_CANONICAL_RECEIPTS" and .deploymentStatus == "DEPLOYED" and .handoffReady == true' \
+jq -e '.status == "CONFIRMED_CANONICAL_RECEIPTS" and .deploymentStatus == "DEPLOYED" and .handoffReady == true and
+  .readiness.exactSourceRuntimeBytecodeVerified == true and
+  .verificationEvidence.method == "SOLC_STANDARD_JSON_RPC_EXACT_V2" and
+  (.verificationEvidence.coreBuildInfoSha256 | test("^0x[0-9a-fA-F]{64}$")) and
+  (.verificationEvidence.libraryBuildInfoSha256 | test("^0x[0-9a-fA-F]{64}$")) and
+  (.verificationEvidence.coreStandardJsonInputSha256 | test("^0x[0-9a-fA-F]{64}$")) and
+  (.verificationEvidence.libraryStandardJsonInputSha256 | test("^0x[0-9a-fA-F]{64}$")) and
+  .verificationEvidence.addressCount == 47 and .verificationEvidence.artifactCount == 25' \
   "$fixture_dir/canonical.json" >/dev/null
+
+jq --arg digest "$(hash_for 999)" '.verification.sourceRuntimeEvidenceSha256 = $digest' \
+  "$fixture_dir/evidence.json" >"$fixture_dir/evidence-wrong-source-runtime-digest.json"
+if run_finalizer "$fixture_dir/inputs.json" "$inputs_digest" "$fixture_dir/transactions.json" \
+  "$fixture_dir/canonical-wrong-source-runtime-digest.json" \
+  "$fixture_dir/evidence-wrong-source-runtime-digest.json" >"$fixture_dir/source-runtime-digest.log" 2>&1; then
+  echo "finalizer accepted an unbound source/runtime evidence digest" >&2
+  exit 1
+fi
+rg -q 'source/runtime verification evidence digest mismatch' "$fixture_dir/source-runtime-digest.log"
 
 jq --arg feeRecipient "$settler_owner" '.environment.FINAL_ROLE_ADMIN = $feeRecipient' \
   "$fixture_dir/inputs.json" >"$fixture_dir/inputs-overlap.json"

@@ -14,6 +14,8 @@ Covered Call proxy.
   `sourceCommit`, non-zero `deploymentId`, and SHA-256 of the unconfirmed manifest.
 - `library-prephase.template.json` is a second, independent sidecar for the five deployments that must precede the
   Fund deployment block window. A fork artifact always remains noncanonical.
+- `source-runtime-verification.template.json` records the reproducible source-build, creation-code and live-runtime
+  proof for the complete 47-address inventory. Its SHA-256 is part of the canonical manifest.
 - `deployment-pins.template.json` enumerates the only human/governance inputs. The approved deployment JSON is
   generated deterministically; editing `deployment-inputs.template.json` by hand is not an accepted workflow.
 - Deployment, authority rotation, inactive strategy configuration, managed lane setup, child onboarding and
@@ -136,6 +138,7 @@ The deploy script always writes `status: UNCONFIRMED_REQUIRES_CANONICAL_RECEIPTS
 - immutable claim escrow, access manager, Meta Wheel valuator and NAV verifier bindings;
 - unchanged V1 boundary entries, all five linked libraries, four standalone proxy baselines and seven final roles;
 - exact 2% AUM, 10% HWM performance and 10% gross-premium fee policy; and
+- exact source/runtime verification evidence for 47 addresses and 25 artifacts; and
 - all backend readiness flags true except `mainnetAuthorized`, which must remain false.
 
 `canonicalReceipts[]` is deliberately limited to receipts inside `fundFirst..fundLast`, as required by the backend
@@ -147,6 +150,16 @@ coverage of the fresh core, coordinator, valuator, lane, adapter and escrow inve
 receipts and runtime code hashes live only in the separately reconciled library-prephase sidecar, because they are
 outside `fundFirst..fundLast`.
 
+Generate the handoff evidence in two fail-closed passes. The first invocation of
+`script/fund/generate-meta-wheel-canonicalization-evidence.sh` reads the seven broadcast files plus Base Sepolia RPC
+and writes pending canonicalization evidence and the 47-address verification inventory. Run
+`verify-meta-wheel-source-runtime.mjs` with that inventory, the exact 316-source linked core build-info and the
+exact 170-source unlinked library-prephase build-info. Then invoke the
+generator again with `B1N419_SOURCE_RUNTIME_EVIDENCE_PATH`, `B1N419_MANIFEST_PATH`,
+`B1N419_CANONICALIZATION_EVIDENCE_PATH`, `B1N419_VERIFICATION_INVENTORY_PATH` and a fresh
+`B1N419_CANONICALIZATION_EVIDENCE_OUTPUT`. This binding pass recalculates the real manifest, inventory and source
+evidence digests before setting `exactSourceRuntimeBytecodeVerified: true`; no JSON is edited by hand.
+
 ## Canonical finalization
 
 `script/fund/finalize-meta-wheel-manifest.sh` never broadcasts. It fails closed unless:
@@ -157,7 +170,8 @@ outside `fundFirst..fundLast`.
 2. RPC receipts, block hashes, success statuses, contract coverage and runtime code hashes all match, and all five
    library transactions were sent by the approved `0x42cB…` bootstrap identity;
 3. the coordinator was configured inactive before managed lane setup, with all phase receipts ordered;
-4. Blockscout verification and bootstrap/final-role/standalone reconciliation are complete;
+4. exact source-build/constructor/runtime bytecode reconciliation and bootstrap/final-role/standalone
+   reconciliation are complete; public explorer verification is optional testnet metadata and is not a handoff gate;
 5. `ReconcileMetaWheelCanonical` passes against live Base Sepolia state, including exact fee/settler ownership,
    complete inactive `StrategyConfig`, minimum idle, exit escrows, all 4+4 lane bounds, covered-call execution
    buffers and every child adapter risk/router configuration; and
@@ -172,6 +186,11 @@ BASE_SEPOLIA_RPC_URL
 B1N419_MANIFEST_PATH
 B1N419_CANONICALIZATION_EVIDENCE_PATH
 B1N419_LIBRARY_EVIDENCE_PATH
+B1N419_SOURCE_RUNTIME_EVIDENCE_PATH
+B1N419_CORE_BUILD_INFO_PATH
+B1N419_LIBRARY_BUILD_INFO_PATH
+B1N419_VERIFICATION_INVENTORY_PATH
+B1N419_SOLC_PATH (optional; defaults to solc and must resolve exact 0.8.24)
 B1N419_CANONICAL_MANIFEST_PATH
 B1N419_APPROVED_INPUTS_PATH
 B1N419_APPROVED_INPUTS_SHA256

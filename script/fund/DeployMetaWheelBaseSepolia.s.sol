@@ -618,6 +618,7 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
         _writeV1BoundaryManifest(config, path);
         vm.writeJson("{}", path, ".standaloneBaselines");
         _writeStandaloneManifest(config, path);
+        vm.writeJson(_verificationEvidenceManifest(), path, ".verificationEvidence");
         vm.writeJson(_readinessManifest(), path, ".readiness");
     }
 
@@ -780,12 +781,26 @@ contract DeployMetaWheelBaseSepolia is B1N419Base {
     function _readinessManifest() private returns (string memory json) {
         string memory object = "b1n419_readiness";
         vm.serializeBool(object, "canonicalReceiptsRecorded", false);
-        vm.serializeBool(object, "blockscoutVerificationComplete", false);
+        vm.serializeBool(object, "exactSourceRuntimeBytecodeVerified", false);
         vm.serializeBool(object, "bootstrapReconciled", false);
         vm.serializeBool(object, "finalRolesReconciled", false);
         vm.serializeBool(object, "standaloneBaselinesUnchanged", false);
         vm.serializeBool(object, "backendHandoffReady", false);
         json = vm.serializeBool(object, "mainnetAuthorized", false);
+    }
+
+    function _verificationEvidenceManifest() private returns (string memory json) {
+        string memory object = "b1n419_verification_evidence";
+        vm.serializeString(object, "method", "SOLC_STANDARD_JSON_RPC_EXACT_V2");
+        vm.serializeString(object, "compilerVersion", "0.8.24+commit.e11b9ed9");
+        vm.serializeBytes32(object, "sourceRuntimeEvidenceSha256", bytes32(0));
+        vm.serializeBytes32(object, "coreBuildInfoSha256", bytes32(0));
+        vm.serializeBytes32(object, "libraryBuildInfoSha256", bytes32(0));
+        vm.serializeBytes32(object, "coreStandardJsonInputSha256", bytes32(0));
+        vm.serializeBytes32(object, "libraryStandardJsonInputSha256", bytes32(0));
+        vm.serializeBytes32(object, "inventorySha256", bytes32(0));
+        vm.serializeUint(object, "addressCount", 0);
+        json = vm.serializeUint(object, "artifactCount", 0);
     }
 
     function _logDeployment(DeploymentAddresses memory deployed) private view {

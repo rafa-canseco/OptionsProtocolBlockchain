@@ -73,9 +73,21 @@
     "coveredCallVault": {"proxy": "0x9060946E6ACC4E430A823E90120743c7305EE2CA", "implementation": "0x0000000000000000000000000000000000000000", "implementationCodehash": "0x0000000000000000000000000000000000000000000000000000000000000000", "unchanged": false},
     "coveredCallAdapter": {"proxy": "0x0BF96C5cE0D637d4D686d342aE42Bc00fDa19De9", "implementation": "0x4e5154F49920d7BcE3953FC75a99d7A2831711C9", "implementationCodehash": "0x0000000000000000000000000000000000000000000000000000000000000000", "unchanged": false}
   },
+  "verificationEvidence": {
+    "method": "SOLC_STANDARD_JSON_RPC_EXACT_V2",
+    "compilerVersion": "0.8.24+commit.e11b9ed9",
+    "sourceRuntimeEvidenceSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coreBuildInfoSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "libraryBuildInfoSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coreStandardJsonInputSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "libraryStandardJsonInputSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "inventorySha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "addressCount": 0,
+    "artifactCount": 0
+  },
   "readiness": {
     "canonicalReceiptsRecorded": false,
-    "blockscoutVerificationComplete": false,
+    "exactSourceRuntimeBytecodeVerified": false,
     "bootstrapReconciled": false,
     "finalRolesReconciled": false,
     "standaloneBaselinesUnchanged": false,
