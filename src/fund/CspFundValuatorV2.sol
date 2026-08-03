@@ -131,6 +131,25 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
         view
         returns (FundTypes.PositionValue memory positionValue)
     {
+        return _value(adapter, 0, snapshotBlock, data);
+    }
+
+    /// @notice Values one current position without traversing terminal adapter history.
+    /// @dev Intended for dedicated Wheel lanes whose adapter policy permits at most one active position.
+    function valuePosition(address adapter, uint256 positionId, uint64 snapshotBlock, bytes calldata data)
+        external
+        view
+        returns (FundTypes.PositionValue memory positionValue)
+    {
+        if (positionId == 0) revert InvalidObservation(0);
+        return _value(adapter, positionId, snapshotBlock, data);
+    }
+
+    function _value(address adapter, uint256 selectedPositionId, uint64 snapshotBlock, bytes calldata data)
+        private
+        view
+        returns (FundTypes.PositionValue memory positionValue)
+    {
         if (adapter == address(0) || adapter.code.length == 0) revert InvalidAdapter(adapter);
         ICspFundAdapter csp = ICspFundAdapter(adapter);
         if (csp.interfaceVersion() != 1 || !csp.isOnboarded()) revert InvalidAdapter(adapter);
@@ -158,11 +177,18 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
         positionValue.liquidAccountingAssets = accountedUsdcValue;
         positionValue.baseExitCost = _swapExitCost(accountedWethFairValue, config.riskConfig.maxSwapSlippageBps);
         uint256 usedObservations;
-        uint256 count = adapterState_.positionCount;
-        for (uint256 positionId = 1; positionId <= count; ++positionId) {
+        uint256 observedActivePositions;
+        uint256 firstPositionId = selectedPositionId == 0 ? 1 : selectedPositionId;
+        uint256 lastPositionId = selectedPositionId == 0 ? adapterState_.positionCount : selectedPositionId;
+        if (
+            lastPositionId > adapterState_.positionCount
+                || (selectedPositionId != 0 && selectedPositionId != adapterState_.positionCount)
+        ) revert InvalidObservation(lastPositionId);
+        for (uint256 positionId = firstPositionId; positionId <= lastPositionId; ++positionId) {
             ICspFundAdapter.Position memory strategyPosition = csp.position(positionId);
             if (strategyPosition.lifecycle == ICspFundAdapter.Lifecycle.None) revert InvalidObservation(positionId);
             if (strategyPosition.lifecycle == ICspFundAdapter.Lifecycle.Open) {
+                ++observedActivePositions;
                 _validateOpenProtocolState(adapter, positionId, strategyPosition, csp);
                 positionValue.grossAssets += strategyPosition.collateral;
                 if (block.timestamp >= OToken(strategyPosition.oToken).expiry()) {
@@ -176,6 +202,7 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
                     usedObservations += used;
                 }
             } else if (strategyPosition.lifecycle == ICspFundAdapter.Lifecycle.AwaitingPhysicalDelivery) {
+                ++observedActivePositions;
                 _validateAwaitingDelivery(adapter, positionId, strategyPosition, csp);
                 uint256 pendingDeliveryValue =
                     _pendingDeliveryValue(positionId, strategyPosition, csp, spotPrice, usdcAddress);
@@ -185,7 +212,12 @@ contract CspFundValuatorV2 is IPositionValuator, ICspFundValuator {
                 _validateTerminalProtocolState(adapter, positionId, strategyPosition, csp);
             }
         }
-        if (usedObservations != valuationData.optionObservations.length) revert InvalidObservation(0);
+        if (
+            usedObservations != valuationData.optionObservations.length
+                || (selectedPositionId != 0
+                    && (adapterState_.activePositionCount > 1
+                        || observedActivePositions != adapterState_.activePositionCount))
+        ) revert InvalidObservation(0);
 
         positionValue.dataHash = keccak256(
             abi.encode(

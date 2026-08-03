@@ -64,7 +64,7 @@ library FundAccessPolicy {
     }
 
     function strategyRules() internal pure returns (Rule[] memory rules) {
-        rules = new Rule[](10);
+        rules = new Rule[](14);
         rules[0] = Rule(UPGRADE_TO_AND_CALL_SELECTOR, FundConstants.UPGRADER_ROLE, FundConstants.CORE_UPGRADE_DELAY);
         rules[1] = Rule(IStrategyManager.allocate.selector, FundConstants.ALLOCATOR_ROLE, 0);
         rules[2] = Rule(IStrategyManager.deallocate.selector, FundConstants.ALLOCATOR_ROLE, 0);
@@ -78,6 +78,14 @@ library FundAccessPolicy {
             Rule(IStrategyManager.resumeAllocation.selector, FundConstants.CURATOR_ROLE, FundConstants.CURATOR_DELAY);
         rules[8] = Rule(IStrategyManager.deallocateInKind.selector, FundConstants.PROCESSOR_ROLE, 0);
         rules[9] = Rule(IStrategyManager.emergencyExit.selector, FundConstants.GUARDIAN_ROLE, 0);
+        rules[10] = Rule(IStrategyManager.executeAdapterAllocationOperation.selector, FundConstants.ALLOCATOR_ROLE, 0);
+        rules[11] = Rule(IStrategyManager.executeAdapterProcessingOperation.selector, FundConstants.PROCESSOR_ROLE, 0);
+        rules[12] = Rule(IStrategyManager.executeAdapterGuardianOperation.selector, FundConstants.GUARDIAN_ROLE, 0);
+        rules[13] = Rule(
+            IStrategyManager.executeAdapterConfigurationOperation.selector,
+            FundConstants.CURATOR_ROLE,
+            FundConstants.CURATOR_DELAY
+        );
     }
 
     function cspAdapterRules() internal pure returns (Rule[] memory rules) {

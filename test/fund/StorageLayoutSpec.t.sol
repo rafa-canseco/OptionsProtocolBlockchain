@@ -27,6 +27,7 @@ contract StorageLayoutSpecTest is Test {
         Upgrades.validateImplementation("src/fund/FundShare.sol:FundShare", options);
         Upgrades.validateImplementation("src/fund/FundAccounting.sol:FundAccounting", options);
         Upgrades.validateImplementation("src/fund/FundFlowManager.sol:FundFlowManager", options);
+        options.unsafeAllow = "external-library-linking";
         Upgrades.validateImplementation("src/fund/StrategyManager.sol:StrategyManager", options);
     }
 

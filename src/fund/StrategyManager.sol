@@ -11,6 +11,7 @@ import {IFundVault} from "./interfaces/IFundVault.sol";
 import {IFundStrategyAdapter} from "./interfaces/IFundStrategyAdapter.sol";
 import {IPositionValuator} from "./interfaces/IPositionValuator.sol";
 import {IFundVaultModuleCallbacks, IFundAccountingModuleCallbacks} from "./interfaces/IFundModuleCallbacks.sol";
+import {ManagedStrategyOperations} from "./libraries/ManagedStrategyOperations.sol";
 
 interface IFundVaultStrategy is IFundVault, IFundVaultModuleCallbacks {
     function asset() external view returns (address);
@@ -49,6 +50,7 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
     event StrategyConfigured(address indexed adapter, address indexed valuator, bool active);
     event StrategyAllocated(address indexed adapter, address indexed asset, uint256 amount, uint64 positionNonce);
     event StrategyDeallocated(address indexed adapter, uint256 targetValue, uint256 assetsOut, uint64 positionNonce);
+    event StrategyManagedOperationExecuted(address indexed adapter, uint8 indexed operationClass, uint64 positionNonce);
     event StrategyDeallocatedInKind(
         bytes32 indexed batchId,
         address indexed adapter,
@@ -207,6 +209,22 @@ contract StrategyManager is FundUpgradeable, StrategyManagerStorage, IStrategyMa
         _syncAccounting(vault.accounting(), adapter, nonce, stateHash);
         vault.endModuleExecution(lockId);
         emit StrategyDeallocated(adapter, targetValue, assetsOut, nonce);
+    }
+
+    function executeAdapterAllocationOperation(address adapter, bytes calldata data) external restricted {
+        ManagedStrategyOperations.executeActive(_getStrategyManagerStorage(), adapter, 1, data);
+    }
+
+    function executeAdapterProcessingOperation(address adapter, bytes calldata data) external restricted {
+        ManagedStrategyOperations.execute(_getStrategyManagerStorage(), adapter, 2, data);
+    }
+
+    function executeAdapterGuardianOperation(address adapter, bytes calldata data) external restricted {
+        ManagedStrategyOperations.execute(_getStrategyManagerStorage(), adapter, 3, data);
+    }
+
+    function executeAdapterConfigurationOperation(address adapter, bytes calldata data) external restricted {
+        ManagedStrategyOperations.execute(_getStrategyManagerStorage(), adapter, 4, data);
     }
 
     function deallocateInKind(bytes32 batchId, address adapter, uint256 fractionWad, bytes calldata data)
