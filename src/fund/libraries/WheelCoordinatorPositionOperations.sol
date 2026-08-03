@@ -193,7 +193,11 @@ library WheelCoordinatorPositionOperations {
             abi.decode(openData, (ICoveredCallFundAdapter.OpenPositionData));
         uint256 buffer8 = IWheelCoveredCallChildLane(lane).executionCostBuffer8();
         if (buffer8 != $.floorBufferUsd8) revert InvalidLane();
-        uint256 requiredFloor8 = lot.literalAssignmentStrike8 + buffer8;
+        uint256 protectedBaseFloor8 = Math.max(
+            lot.literalAssignmentStrike8,
+            Math.mulDiv(current.principalUsdc, 1e20, lot.remainingWeth, Math.Rounding.Ceil)
+        );
+        uint256 requiredFloor8 = protectedBaseFloor8 + buffer8;
         uint256 callStrike8 = OToken(decoded.quote.oToken).strikePrice();
         if (callStrike8 < requiredFloor8) revert CallStrikeBelowFloor();
 
@@ -204,7 +208,13 @@ library WheelCoordinatorPositionOperations {
         wethToken.forceApprove(lane, amount);
         (uint256 shares, uint256 positionId, uint64 expiry, bytes32 childHash) = IWheelCoveredCallChildLane(lane)
             .openCoveredCall(
-                trancheId, transitionHash, current.assignmentLotId, lot.literalAssignmentStrike8, amount, openData
+                trancheId,
+                transitionHash,
+                current.assignmentLotId,
+                lot.literalAssignmentStrike8,
+                protectedBaseFloor8,
+                amount,
+                openData
             );
         wethToken.forceApprove(lane, 0);
         uint256 spent = beforeBalance - wethToken.balanceOf(address(this));

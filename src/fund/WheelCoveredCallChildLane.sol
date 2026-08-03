@@ -133,6 +133,10 @@ contract WheelCoveredCallChildLane is FundUpgradeable, WheelCoveredCallChildLane
         return _getWheelCoveredCallChildLaneStorage().state;
     }
 
+    function allocationsPaused() external view returns (bool) {
+        return _getWheelCoveredCallChildLaneStorage().allocationsPaused;
+    }
+
     function stateNonce() external view returns (uint64) {
         return _getWheelCoveredCallChildLaneStorage().stateNonce;
     }
@@ -221,6 +225,7 @@ contract WheelCoveredCallChildLane is FundUpgradeable, WheelCoveredCallChildLane
         bytes32 transitionHash,
         uint256 lotId,
         uint256 literalAssignmentStrike8,
+        uint256 protectedBaseFloor8,
         uint256 wethAmount,
         bytes calldata openData
     )
@@ -235,13 +240,13 @@ contract WheelCoveredCallChildLane is FundUpgradeable, WheelCoveredCallChildLane
         }
         if (
             trancheId == 0 || lotId == 0 || literalAssignmentStrike8 == 0 || transitionHash == bytes32(0)
-                || wethAmount == 0 || wethAmount > $.maxAssets
+                || protectedBaseFloor8 < literalAssignmentStrike8 || wethAmount == 0 || wethAmount > $.maxAssets
         ) revert InvalidAmount();
         _consumeTransition($, transitionHash);
 
         ICoveredCallFundAdapter.OpenPositionData memory decoded =
             abi.decode(openData, (ICoveredCallFundAdapter.OpenPositionData));
-        uint256 requiredFloorValue8 = literalAssignmentStrike8 + $.executionCostBuffer8;
+        uint256 requiredFloorValue8 = protectedBaseFloor8 + $.executionCostBuffer8;
         uint256 callStrike8 = OToken(decoded.quote.oToken).strikePrice();
         if (callStrike8 < requiredFloorValue8) revert CallStrikeBelowFloor(callStrike8, requiredFloorValue8);
         if (decoded.collateral == 0 || decoded.collateral > wethAmount) revert InvalidAmount();

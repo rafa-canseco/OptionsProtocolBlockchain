@@ -123,6 +123,10 @@ contract WheelCspChildLane is FundUpgradeable, WheelCspChildLaneStorage, IWheelC
         return _getWheelCspChildLaneStorage().state;
     }
 
+    function allocationsPaused() external view returns (bool) {
+        return _getWheelCspChildLaneStorage().allocationsPaused;
+    }
+
     function stateNonce() external view returns (uint64) {
         return _getWheelCspChildLaneStorage().stateNonce;
     }

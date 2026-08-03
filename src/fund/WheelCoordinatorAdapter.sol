@@ -206,6 +206,10 @@ contract WheelCoordinatorAdapter is
         return _getWheelCoordinatorAdapterStorage().floorBufferUsd8;
     }
 
+    function allocationsPaused() external view returns (bool) {
+        return _getWheelCoordinatorAdapterStorage().allocationsPaused;
+    }
+
     function laneCaps() external view returns (uint16 maxCspLanes, uint16 maxCoveredCallLanes) {
         WheelCoordinatorAdapterStorageLayout storage $ = _getWheelCoordinatorAdapterStorage();
         return ($.maxCspLanes, $.maxCoveredCallLanes);

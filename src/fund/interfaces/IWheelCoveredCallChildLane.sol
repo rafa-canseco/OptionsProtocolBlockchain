@@ -14,6 +14,7 @@ interface IWheelCoveredCallChildLane is IWheelChildLane {
         bytes32 transitionHash,
         uint256 lotId,
         uint256 literalAssignmentStrike8,
+        uint256 protectedBaseFloor8,
         uint256 wethAmount,
         bytes calldata openData
     ) external returns (uint256 mintedChildShares, uint256 positionId, uint64 expiry, bytes32 positionHash);

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-419",
+  "status": "NOT_STARTED",
+  "deploymentStatus": "UNCONFIRMED",
+  "handoffReady": false,
+  "sourceCommit": "FINAL_ABI_COMMIT_REQUIRED",
+  "network": {"name": "base-sepolia", "chainId": 84532, "environmentKind": "live"},
+  "broadcaster": "0x0000000000000000000000000000000000000000",
+  "orderedLibraries": [
+    {
+      "index": 0,
+      "artifact": "src/fund/libraries/CspFundAdapterOperations.sol:CspFundAdapterOperations",
+      "address": "0x0000000000000000000000000000000000000000",
+      "runtimeCodehash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "receipt": null
+    },
+    {
+      "index": 1,
+      "artifact": "src/fund/libraries/CoveredCallFundAdapterOperations.sol:CoveredCallFundAdapterOperations",
+      "address": "0x0000000000000000000000000000000000000000",
+      "runtimeCodehash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "receipt": null
+    },
+    {
+      "index": 2,
+      "artifact": "src/fund/libraries/ManagedStrategyOperations.sol:ManagedStrategyOperations",
+      "address": "0x0000000000000000000000000000000000000000",
+      "runtimeCodehash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "receipt": null
+    },
+    {
+      "index": 3,
+      "artifact": "src/fund/libraries/WheelManagedOperationDispatcher.sol:WheelManagedOperationDispatcher",
+      "address": "0x0000000000000000000000000000000000000000",
+      "runtimeCodehash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "receipt": null
+    },
+    {
+      "index": 4,
+      "artifact": "src/fund/libraries/WheelCoordinatorPositionOperations.sol:WheelCoordinatorPositionOperations",
+      "address": "0x0000000000000000000000000000000000000000",
+      "runtimeCodehash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "receipt": null
+    }
+  ],
+  "linkerArguments": [],
+  "exactRelinkVerified": false
+}

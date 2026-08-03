@@ -20,6 +20,7 @@ interface IWheelCoordinatorAdapter is IFundStrategyAdapter {
     function weth() external view returns (address);
     function policyHash() external view returns (bytes32);
     function floorBufferUsd8() external view returns (uint256);
+    function allocationsPaused() external view returns (bool);
     function laneCaps() external view returns (uint16 maxCspLanes, uint16 maxCoveredCallLanes);
     function summary() external view returns (Summary memory);
     function tranche(uint256 trancheId) external view returns (WheelTypes.Tranche memory);
