@@ -15,7 +15,7 @@ expected_settler_owner=0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D
 expected_bootstrap_lower=$(lower "$expected_bootstrap")
 expected_settler_owner_lower=$(lower "$expected_settler_owner")
 
-for command_name in jq cast forge shasum; do
+for command_name in jq cast forge shasum node; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"
 done
 
@@ -23,6 +23,10 @@ done
 : "${B1N419_MANIFEST_PATH:?B1N419_MANIFEST_PATH is required}"
 : "${B1N419_CANONICALIZATION_EVIDENCE_PATH:?B1N419_CANONICALIZATION_EVIDENCE_PATH is required}"
 : "${B1N419_LIBRARY_EVIDENCE_PATH:?B1N419_LIBRARY_EVIDENCE_PATH is required}"
+: "${B1N419_SOURCE_RUNTIME_EVIDENCE_PATH:?B1N419_SOURCE_RUNTIME_EVIDENCE_PATH is required}"
+: "${B1N419_CORE_BUILD_INFO_PATH:?B1N419_CORE_BUILD_INFO_PATH is required}"
+: "${B1N419_LIBRARY_BUILD_INFO_PATH:?B1N419_LIBRARY_BUILD_INFO_PATH is required}"
+: "${B1N419_VERIFICATION_INVENTORY_PATH:?B1N419_VERIFICATION_INVENTORY_PATH is required}"
 : "${B1N419_CANONICAL_MANIFEST_PATH:?B1N419_CANONICAL_MANIFEST_PATH is required}"
 : "${B1N419_APPROVED_INPUTS_PATH:?B1N419_APPROVED_INPUTS_PATH is required}"
 : "${B1N419_APPROVED_INPUTS_SHA256:?B1N419_APPROVED_INPUTS_SHA256 is required}"
@@ -31,6 +35,7 @@ done
 manifest_path=$B1N419_MANIFEST_PATH
 evidence_path=$B1N419_CANONICALIZATION_EVIDENCE_PATH
 library_evidence_path=$B1N419_LIBRARY_EVIDENCE_PATH
+source_runtime_evidence_path=$B1N419_SOURCE_RUNTIME_EVIDENCE_PATH
 canonical_path=$B1N419_CANONICAL_MANIFEST_PATH
 backend_root=$B1N419_BACKEND_ROOT
 backend_python=${B1N419_BACKEND_PYTHON:-python3}
@@ -39,6 +44,10 @@ command -v "$backend_python" >/dev/null 2>&1 || die "backend Python executable n
 [[ -f "$manifest_path" ]] || die "unconfirmed manifest not found"
 [[ -f "$evidence_path" ]] || die "canonicalization evidence not found"
 [[ -f "$library_evidence_path" ]] || die "library prephase evidence not found"
+[[ -f "$source_runtime_evidence_path" ]] || die "source/runtime verification evidence not found"
+[[ -f "$B1N419_CORE_BUILD_INFO_PATH" ]] || die "source/runtime core build-info not found"
+[[ -f "$B1N419_LIBRARY_BUILD_INFO_PATH" ]] || die "source/runtime library build-info not found"
+[[ -f "$B1N419_VERIFICATION_INVENTORY_PATH" ]] || die "source/runtime verification inventory not found"
 [[ -f "$backend_root/src/deployment_manifest.py" ]] || die "backend parser not found"
 [[ "$manifest_path" != "$canonical_path" ]] || die "canonical output must not overwrite the unconfirmed manifest"
 [[ ! -e "$canonical_path" ]] || die "canonical output already exists"
@@ -72,14 +81,22 @@ jq -e '
   .network.name == "base-sepolia" and
   .network.chainId == 84532 and
   .network.environmentKind == "live" and
-  .verification.blockscoutVerificationComplete == true and
+  .verification.exactSourceRuntimeBytecodeVerified == true and
+  (.verification.sourceRuntimeEvidenceSha256 | test("^0x[0-9a-fA-F]{64}$") and . != "0x0000000000000000000000000000000000000000000000000000000000000000") and
+  (.verification.coreBuildInfoSha256 | test("^0x[0-9a-fA-F]{64}$") and . != "0x0000000000000000000000000000000000000000000000000000000000000000") and
+  (.verification.libraryBuildInfoSha256 | test("^0x[0-9a-fA-F]{64}$") and . != "0x0000000000000000000000000000000000000000000000000000000000000000") and
+  (.verification.coreStandardJsonInputSha256 | test("^0x[0-9a-fA-F]{64}$") and . != "0x0000000000000000000000000000000000000000000000000000000000000000") and
+  (.verification.libraryStandardJsonInputSha256 | test("^0x[0-9a-fA-F]{64}$") and . != "0x0000000000000000000000000000000000000000000000000000000000000000") and
+  (.verification.inventorySha256 | test("^0x[0-9a-fA-F]{64}$") and . != "0x0000000000000000000000000000000000000000000000000000000000000000") and
+  .verification.addressCount == 47 and
+  .verification.artifactCount == 25 and
   .reconciliation.bootstrapReconciled == true and
   .reconciliation.finalRolesReconciled == true and
   .reconciliation.standaloneBaselinesUnchanged == true and
   .reconciliation.managedWrappersOnly == true and
   .reconciliation.coordinatorConfiguredInactiveBeforeManagedLaneSetup == true and
   .reconciliation.finalReconciliationBlock > 0
-' "$evidence_path" >/dev/null || die "evidence approval, verification, or reconciliation is incomplete"
+' "$evidence_path" >/dev/null || die "evidence approval, source-bytecode, or reconciliation gate is incomplete"
 
 jq -e '
   .schemaVersion == "1.0.0" and .issue == "B1N-419" and
@@ -104,6 +121,11 @@ expected_digest=$(jq -r '.unconfirmedManifestSha256' "$evidence_path")
 [[ "$(lower "$manifest_digest")" == "$(lower "$expected_digest")" ]] \
   || die "unconfirmed manifest digest mismatch"
 
+source_runtime_digest="0x$(shasum -a 256 "$source_runtime_evidence_path" | awk '{print $1}')"
+expected_source_runtime_digest=$(jq -r '.verification.sourceRuntimeEvidenceSha256' "$evidence_path")
+[[ "$(lower "$source_runtime_digest")" == "$(lower "$expected_source_runtime_digest")" ]] \
+  || die "source/runtime verification evidence digest mismatch"
+
 manifest_source=$(jq -r '.sourceCommit' "$manifest_path")
 evidence_source=$(jq -r '.sourceCommit' "$evidence_path")
 library_source=$(jq -r '.sourceCommit' "$library_evidence_path")
@@ -116,6 +138,82 @@ evidence_deployment_id=$(jq -r '.deploymentId' "$evidence_path")
 [[ "$manifest_source" =~ ^[0-9a-fA-F]{40}$ ]] || die "sourceCommit is not a full git commit"
 [[ "$manifest_deployment_id" =~ ^0x[0-9a-fA-F]{64}$ ]] || die "deploymentId is malformed"
 [[ "$manifest_deployment_id" != "0x0000000000000000000000000000000000000000000000000000000000000000" ]] || die "deploymentId is zero"
+
+jq -e --arg source "$manifest_source" --arg deploymentId "$(lower "$manifest_deployment_id")" \
+  --arg manifestDigest "$(lower "$manifest_digest")" '
+  .schemaVersion == "1.0.0" and
+  .issue == "B1N-419" and
+  .method == "SOLC_STANDARD_JSON_RPC_EXACT_V2" and
+  .exactSourceRuntimeBytecodeVerified == true and
+  .compiler.version == "0.8.24+commit.e11b9ed9" and
+  .network.name == "base-sepolia" and .network.chainId == 84532 and
+  .sourceCommit == $source and
+  (.deploymentId | ascii_downcase) == $deploymentId and
+  (.unconfirmedManifestSha256 | ascii_downcase) == $manifestDigest and
+  .addressCount == 47 and .artifactCount == 25 and
+  .compiler.coreSourceCount == 316 and .compiler.librarySourceCount == 170 and
+  .compiler.coreTargetArtifactCount == 20 and .compiler.libraryTargetArtifactCount == 5 and
+  .compiler.targetArtifactCount == 25 and .compiler.fullSourceSetsRetained == true and
+  .compiler.targetOnlyOutputSelection == true and
+  .inventory.addressCount == 47 and .inventory.artifactCount == 25 and
+  .inventory.primaryArtifactCount == 20 and .inventory.libraryArtifactCount == 5 and
+  .summary.creationVerified == 47 and
+  .summary.compiledRuntimeVerified == 47 and
+  .summary.rpcRuntimeVerified == 47 and
+  .summary.exactCompiledArtifactMatches == 25 and
+  .summary.exactRpcRuntimeMatches == 47 and
+  .summary.exactTopLevelCreationMatches == 39 and
+  .summary.traceDerivedInternalCreationsRecompiled == 8 and
+  (.records | type == "array" and length == 47) and
+  ([.records[].address | ascii_downcase] | unique | length) == 47 and
+  all(.records[];
+    .sourceCreationBytecodeMatch == true and
+    .sourceRuntimeBytecodeMatch == true and
+    .rpcRuntimeBytecodeMatch == true)
+' "$source_runtime_evidence_path" >/dev/null || die "source/runtime verification evidence is incomplete"
+
+jq -e --slurpfile sourceRuntime "$source_runtime_evidence_path" '
+  .verification.coreBuildInfoSha256 == $sourceRuntime[0].coreBuildInfoSha256 and
+  .verification.libraryBuildInfoSha256 == $sourceRuntime[0].libraryBuildInfoSha256 and
+  .verification.coreStandardJsonInputSha256 == $sourceRuntime[0].coreStandardJsonInputSha256 and
+  .verification.libraryStandardJsonInputSha256 == $sourceRuntime[0].libraryStandardJsonInputSha256 and
+  .verification.inventorySha256 == $sourceRuntime[0].inventorySha256 and
+  .verification.addressCount == $sourceRuntime[0].addressCount and
+  .verification.artifactCount == $sourceRuntime[0].artifactCount
+' "$evidence_path" >/dev/null || die "canonicalization evidence does not bind the exact source/runtime proof"
+
+jq -e --slurpfile sourceRuntime "$source_runtime_evidence_path" '
+  .network.confirmationBlock == $sourceRuntime[0].network.confirmationBlock
+' "$evidence_path" >/dev/null || die "source/runtime confirmation block does not match canonicalization evidence"
+
+jq -n -e --slurpfile sourceRuntime "$source_runtime_evidence_path" \
+  --slurpfile evidence "$evidence_path" --slurpfile libraries "$library_evidence_path" '
+  def normalized: {
+    address: (.address | ascii_downcase),
+    transactionHash: (.transactionHash | ascii_downcase),
+    runtimeCodehash: (.runtimeCodehash | ascii_downcase)
+  };
+  ([$sourceRuntime[0].records[] | normalized] | sort_by(.address)) ==
+  (([$evidence[0].contractReceipts[] | normalized] +
+    [$libraries[0].orderedLibraries[] | {
+      address: (.address | ascii_downcase),
+      transactionHash: (.receipt.transactionHash | ascii_downcase),
+      runtimeCodehash: (.runtimeCodehash | ascii_downcase)
+    }]) | sort_by(.address))
+' >/dev/null || die "source/runtime proof does not match the canonical receipt inventory"
+
+source_runtime_confirmation_block=$(jq -r '.network.confirmationBlock' "$source_runtime_evidence_path")
+node script/fund/verify-meta-wheel-source-runtime.mjs \
+  --check "$source_runtime_evidence_path" \
+  --core-build-info "$B1N419_CORE_BUILD_INFO_PATH" \
+  --library-build-info "$B1N419_LIBRARY_BUILD_INFO_PATH" \
+  --inventory "$B1N419_VERIFICATION_INVENTORY_PATH" \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL" \
+  --confirmation-block "$source_runtime_confirmation_block" \
+  --source-commit "$manifest_source" \
+  --deployment-id "$manifest_deployment_id" \
+  --unconfirmed-manifest-sha256 "$manifest_digest" \
+  --solc "${B1N419_SOLC_PATH:-solc}"
 
 jq -n -e --slurpfile inputs "$B1N419_APPROVED_INPUTS_PATH" \
   --slurpfile libraries "$library_evidence_path" \
@@ -443,7 +541,7 @@ forge script script/fund/ReconcileMetaWheelCanonical.s.sol:ReconcileMetaWheelCan
   --rpc-url "$BASE_SEPOLIA_RPC_URL" --sig "reconcile()" "${library_link_arguments[@]}"
 
 candidate_path="$temporary_dir/manifest.canonical.candidate.json"
-jq --slurpfile evidence "$evidence_path" '
+jq --slurpfile evidence "$evidence_path" --slurpfile sourceRuntime "$source_runtime_evidence_path" '
   .status = "CONFIRMED_CANONICAL_RECEIPTS"
   | .deploymentStatus = "DEPLOYED"
   | .handoffReady = true
@@ -455,12 +553,24 @@ jq --slurpfile evidence "$evidence_path" '
         then .contracts[$key].implementationValidFromBlock = $evidence[0].contractActivationBlocks[$key].implementationValidFromBlock
         else . end)
   | .readiness.canonicalReceiptsRecorded = true
-  | .readiness.blockscoutVerificationComplete = true
+  | .readiness.exactSourceRuntimeBytecodeVerified = true
   | .readiness.bootstrapReconciled = true
   | .readiness.finalRolesReconciled = true
   | .readiness.standaloneBaselinesUnchanged = true
   | .readiness.backendHandoffReady = true
   | .readiness.mainnetAuthorized = false
+  | .verificationEvidence = {
+      method: $sourceRuntime[0].method,
+      compilerVersion: $sourceRuntime[0].compiler.version,
+      sourceRuntimeEvidenceSha256: $evidence[0].verification.sourceRuntimeEvidenceSha256,
+      coreBuildInfoSha256: $sourceRuntime[0].coreBuildInfoSha256,
+      libraryBuildInfoSha256: $sourceRuntime[0].libraryBuildInfoSha256,
+      coreStandardJsonInputSha256: $sourceRuntime[0].coreStandardJsonInputSha256,
+      libraryStandardJsonInputSha256: $sourceRuntime[0].libraryStandardJsonInputSha256,
+      inventorySha256: $sourceRuntime[0].inventorySha256,
+      addressCount: $sourceRuntime[0].addressCount,
+      artifactCount: $sourceRuntime[0].artifactCount
+    }
 ' "$manifest_path" >"$candidate_path"
 
 PYTHONPATH="$backend_root" "$backend_python" - "$candidate_path" "$fund_first" <<'PY'

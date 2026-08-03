@@ -220,7 +220,7 @@ contract ActivateMetaWheelBaseSepolia is DeployMetaWheelBaseSepolia {
         return keccak256(
             abi.encode(
                 vm.parseJsonBool(manifest, ".readiness.canonicalReceiptsRecorded"),
-                vm.parseJsonBool(manifest, ".readiness.blockscoutVerificationComplete"),
+                vm.parseJsonBool(manifest, ".readiness.exactSourceRuntimeBytecodeVerified"),
                 vm.parseJsonBool(manifest, ".readiness.bootstrapReconciled"),
                 vm.parseJsonBool(manifest, ".readiness.finalRolesReconciled"),
                 vm.parseJsonBool(manifest, ".readiness.standaloneBaselinesUnchanged"),

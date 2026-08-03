@@ -41,5 +41,15 @@
     "coordinatorConfiguredInactiveBeforeManagedLaneSetup": false,
     "finalReconciliationBlock": 0
   },
-  "verification": {"blockscoutVerificationComplete": false}
+  "verification": {
+    "exactSourceRuntimeBytecodeVerified": false,
+    "sourceRuntimeEvidenceSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coreBuildInfoSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "libraryBuildInfoSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coreStandardJsonInputSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "libraryStandardJsonInputSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "inventorySha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "addressCount": 0,
+    "artifactCount": 0
+  }
 }

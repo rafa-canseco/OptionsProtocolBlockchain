@@ -3,7 +3,7 @@
   "$id": "https://b1nary.example/schemas/b1n-419-meta-wheel-manifest-1.0.0.json",
   "title": "B1N-419 Base Sepolia Meta Wheel deployment handoff",
   "type": "object",
-  "required": ["schemaVersion", "issue", "status", "deploymentStatus", "handoffReady", "sourceCommit", "deploymentId", "network", "canonicalReceipts", "assets", "contracts", "v1Boundary", "policy", "linkedLibraries", "linkedLibraryCodehashes", "finalRoles", "standaloneBaselines", "readiness"],
+  "required": ["schemaVersion", "issue", "status", "deploymentStatus", "handoffReady", "sourceCommit", "deploymentId", "network", "canonicalReceipts", "assets", "contracts", "v1Boundary", "policy", "linkedLibraries", "linkedLibraryCodehashes", "finalRoles", "standaloneBaselines", "readiness", "verificationEvidence"],
   "properties": {
     "schemaVersion": {"const": "1.0.0"},
     "issue": {"const": "B1N-419"},
@@ -89,15 +89,31 @@
       "required": ["cspVault", "cspAdapter", "coveredCallVault", "coveredCallAdapter"],
       "properties": {"cspVault": {"$ref": "#/$defs/standalone"}, "cspAdapter": {"$ref": "#/$defs/standalone"}, "coveredCallVault": {"$ref": "#/$defs/standalone"}, "coveredCallAdapter": {"$ref": "#/$defs/standalone"}}
     },
+    "verificationEvidence": {
+      "type": "object",
+      "required": ["method", "compilerVersion", "sourceRuntimeEvidenceSha256", "coreBuildInfoSha256", "libraryBuildInfoSha256", "coreStandardJsonInputSha256", "libraryStandardJsonInputSha256", "inventorySha256", "addressCount", "artifactCount"],
+      "properties": {
+        "method": {"const": "SOLC_STANDARD_JSON_RPC_EXACT_V2"},
+        "compilerVersion": {"const": "0.8.24+commit.e11b9ed9"},
+        "sourceRuntimeEvidenceSha256": {"$ref": "#/$defs/bytes32"},
+        "coreBuildInfoSha256": {"$ref": "#/$defs/bytes32"},
+        "libraryBuildInfoSha256": {"$ref": "#/$defs/bytes32"},
+        "coreStandardJsonInputSha256": {"$ref": "#/$defs/bytes32"},
+        "libraryStandardJsonInputSha256": {"$ref": "#/$defs/bytes32"},
+        "inventorySha256": {"$ref": "#/$defs/bytes32"},
+        "addressCount": {"type": "integer", "minimum": 0},
+        "artifactCount": {"type": "integer", "minimum": 0}
+      }
+    },
     "readiness": {
       "type": "object",
-      "required": ["canonicalReceiptsRecorded", "blockscoutVerificationComplete", "bootstrapReconciled", "finalRolesReconciled", "standaloneBaselinesUnchanged", "backendHandoffReady", "mainnetAuthorized"],
-      "properties": {"canonicalReceiptsRecorded": {"type": "boolean"}, "blockscoutVerificationComplete": {"type": "boolean"}, "bootstrapReconciled": {"type": "boolean"}, "finalRolesReconciled": {"type": "boolean"}, "standaloneBaselinesUnchanged": {"type": "boolean"}, "backendHandoffReady": {"type": "boolean"}, "mainnetAuthorized": {"const": false}}
+      "required": ["canonicalReceiptsRecorded", "exactSourceRuntimeBytecodeVerified", "bootstrapReconciled", "finalRolesReconciled", "standaloneBaselinesUnchanged", "backendHandoffReady", "mainnetAuthorized"],
+      "properties": {"canonicalReceiptsRecorded": {"type": "boolean"}, "exactSourceRuntimeBytecodeVerified": {"type": "boolean"}, "bootstrapReconciled": {"type": "boolean"}, "finalRolesReconciled": {"type": "boolean"}, "standaloneBaselinesUnchanged": {"type": "boolean"}, "backendHandoffReady": {"type": "boolean"}, "mainnetAuthorized": {"const": false}}
     }
   },
   "allOf": [
     {"if": {"properties": {"deploymentStatus": {"const": "UNCONFIRMED"}}}, "then": {"properties": {"status": {"const": "UNCONFIRMED_REQUIRES_CANONICAL_RECEIPTS"}, "handoffReady": {"const": false}}}},
-    {"if": {"properties": {"deploymentStatus": {"const": "DEPLOYED"}}}, "then": {"properties": {"status": {"const": "CONFIRMED_CANONICAL_RECEIPTS"}, "handoffReady": {"const": true}, "canonicalReceipts": {"minItems": 2}, "readiness": {"properties": {"canonicalReceiptsRecorded": {"const": true}, "blockscoutVerificationComplete": {"const": true}, "bootstrapReconciled": {"const": true}, "finalRolesReconciled": {"const": true}, "standaloneBaselinesUnchanged": {"const": true}, "backendHandoffReady": {"const": true}, "mainnetAuthorized": {"const": false}}}}}}
+    {"if": {"properties": {"deploymentStatus": {"const": "DEPLOYED"}}}, "then": {"properties": {"status": {"const": "CONFIRMED_CANONICAL_RECEIPTS"}, "handoffReady": {"const": true}, "canonicalReceipts": {"minItems": 2}, "verificationEvidence": {"properties": {"addressCount": {"const": 47}, "artifactCount": {"const": 25}}}, "readiness": {"properties": {"canonicalReceiptsRecorded": {"const": true}, "exactSourceRuntimeBytecodeVerified": {"const": true}, "bootstrapReconciled": {"const": true}, "finalRolesReconciled": {"const": true}, "standaloneBaselinesUnchanged": {"const": true}, "backendHandoffReady": {"const": true}, "mainnetAuthorized": {"const": false}}}}}}
   ],
   "$defs": {
     "address": {"type": "string", "pattern": "^0x[0-9a-fA-F]{40}$"},
