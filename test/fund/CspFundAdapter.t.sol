@@ -208,6 +208,34 @@ contract CspFundAdapterTest is Test {
         assertEq(adapter.adapterState().stateNonce, 1);
     }
 
+    function test_b1n438ExactPostProtocolPremiumFloorPasses() public {
+        settler.setTreasury(address(0xFEE));
+        settler.setProtocolFeeBps(400);
+        ICspFundAdapter.AdapterConfig memory config = adapter.adapterConfig();
+        config.riskConfig.minPremiumBps = 20;
+        adapter.setAdapterConfig(config.riskConfig, config.swapRouter, config.swapFeeTier);
+        settler.setPhysicalDeliveryVault(address(adapter), true);
+
+        (ICspFundAdapter.OpenPositionData memory openData,) = _openDataWithPremium(4_166_666);
+        strategyManager.allocate(adapter, address(usdc), COLLATERAL, abi.encode(openData));
+
+        assertEq(adapter.position(1).premiumEarned, 4e6);
+        assertEq(usdc.balanceOf(address(0xFEE)), 166_666);
+    }
+
+    function test_b1n438OneUnitBelowPostProtocolPremiumFloorFails() public {
+        settler.setTreasury(address(0xFEE));
+        settler.setProtocolFeeBps(400);
+        ICspFundAdapter.AdapterConfig memory config = adapter.adapterConfig();
+        config.riskConfig.minPremiumBps = 20;
+        adapter.setAdapterConfig(config.riskConfig, config.swapRouter, config.swapFeeTier);
+        settler.setPhysicalDeliveryVault(address(adapter), true);
+
+        (ICspFundAdapter.OpenPositionData memory openData,) = _openDataWithPremium(4_166_665);
+        vm.expectRevert(ICspFundAdapter.InvalidRiskConfig.selector);
+        strategyManager.allocate(adapter, address(usdc), COLLATERAL, abi.encode(openData));
+    }
+
     function test_onlyStrategyManagerCanMoveAssets() public {
         settler.setPhysicalDeliveryVault(address(adapter), true);
         (ICspFundAdapter.OpenPositionData memory openData,) = _openData();
@@ -523,10 +551,17 @@ contract CspFundAdapterTest is Test {
     }
 
     function _openData() private returns (ICspFundAdapter.OpenPositionData memory openData, address oToken) {
+        return _openDataWithPremium(PREMIUM);
+    }
+
+    function _openDataWithPremium(uint256 premium)
+        private
+        returns (ICspFundAdapter.OpenPositionData memory openData, address oToken)
+    {
         oToken = factory.createOToken(address(weth), address(usdc), address(usdc), STRIKE, expiry, true);
         BatchSettler.Quote memory quote = BatchSettler.Quote({
             oToken: oToken,
-            bidPrice: PREMIUM,
+            bidPrice: premium,
             deadline: block.timestamp + 1 hours,
             quoteId: nextQuoteId++,
             maxAmount: OPTION_AMOUNT,

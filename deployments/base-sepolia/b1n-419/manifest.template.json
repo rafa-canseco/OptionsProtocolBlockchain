@@ -39,7 +39,7 @@
     "whitelist": {"proxy": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab", "unchanged": false}
   },
   "policy": {
-    "policyHash": "0xdb47fcd1f4f96b656fe462956c85194b1f5e25d0c1d8c8862864b256d38fa93c",
+    "policyHash": "0x22e43a8c3c59627c5d08271585b0cf88f80f915d45f0360f71e5d84127172bf1",
     "managementFeeWad": 20000000000000000,
     "performanceFeeBps": 1000,
     "premiumFeeBps": 1000
