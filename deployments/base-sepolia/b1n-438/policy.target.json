@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-438",
+  "network": {"name": "base-sepolia", "chainId": 84532},
+  "status": "SOURCE_ONLY_NOT_APPLIED",
+  "objectiveCspPolicy": {
+    "product": {"underlying": "WETH", "strikeAsset": "USDC", "collateralAsset": "USDC", "isPut": true},
+    "minExpiryDelaySeconds": 129600,
+    "maxExpiryDelaySeconds": 216000,
+    "maxUtilizationBps": 8000,
+    "minPremiumBpsAfterProtocolFeeBeforePerformanceFee": 20
+  },
+  "metaWheelPolicy": {
+    "policyId": "eth_usdc_meta_wheel_base_sepolia_v2",
+    "sha256": "22e43a8c3c59627c5d08271585b0cf88f80f915d45f0360f71e5d84127172bf1"
+  },
+  "offchainTrustBoundary": {
+    "targetDelta": "0.09",
+    "maxQuoteDeviationBps": 150,
+    "reason": "The preserved selector ABI has no IV, model, reference-price, delta, or deviation inputs. Allocators and curators enforce these dynamic checks off-chain."
+  },
+  "unchanged": [
+    "protocolFeeBps",
+    "performanceFeeBps",
+    "deposits",
+    "epochs",
+    "settlement",
+    "assignment",
+    "coveredCalls",
+    "proxiedSettler"
+  ],
+  "execution": {
+    "deploymentPerformed": false,
+    "runtimeConfigurationPerformed": false,
+    "broadcastReceipt": null
+  }
+}

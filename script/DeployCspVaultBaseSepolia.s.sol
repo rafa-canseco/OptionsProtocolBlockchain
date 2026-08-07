@@ -19,8 +19,10 @@ import "../src/vaults/interfaces/IEthCspOptionSelector.sol";
 
 contract DeployCspVaultBaseSepolia is Script {
     uint256 private constant MAX_COLLATERAL_PER_BATCH = 1000e6;
-    uint256 private constant MAX_UTILIZATION_BPS = 2500;
-    uint256 private constant MIN_PREMIUM_BPS = 1;
+    uint256 private constant MAX_UTILIZATION_BPS = 8_000;
+    uint256 private constant MIN_PREMIUM_BPS = 20;
+    uint256 private constant MIN_EXPIRY_DELAY = 36 hours;
+    uint256 private constant MAX_EXPIRY_DELAY = 60 hours;
     uint256 private constant MIN_STRIKE = 100e8;
     uint256 private constant MAX_STRIKE = 10_000e8;
 
@@ -162,8 +164,8 @@ contract DeployCspVaultBaseSepolia is Script {
             maxCollateralPerBatch: MAX_COLLATERAL_PER_BATCH,
             maxUtilizationBps: MAX_UTILIZATION_BPS,
             minPremiumBps: MIN_PREMIUM_BPS,
-            minExpiryDelay: 1 hours,
-            maxExpiryDelay: 30 days,
+            minExpiryDelay: MIN_EXPIRY_DELAY,
+            maxExpiryDelay: MAX_EXPIRY_DELAY,
             minStrike: MIN_STRIKE,
             maxStrike: MAX_STRIKE
         });
@@ -173,8 +175,8 @@ contract DeployCspVaultBaseSepolia is Script {
             maxCollateralPerBatch: MAX_COLLATERAL_PER_BATCH,
             maxUtilizationBps: MAX_UTILIZATION_BPS,
             minPremiumBps: MIN_PREMIUM_BPS,
-            minExpiryDelay: 1 hours,
-            maxExpiryDelay: 30 days,
+            minExpiryDelay: MIN_EXPIRY_DELAY,
+            maxExpiryDelay: MAX_EXPIRY_DELAY,
             minStrike: MIN_STRIKE,
             maxStrike: MAX_STRIKE
         });
@@ -218,5 +220,8 @@ contract DeployCspVaultBaseSepolia is Script {
         console.log("ROLE:MarketMaker:%s", marketMaker);
         console.log("CAP:MaxCollateralPerBatch:%s", MAX_COLLATERAL_PER_BATCH);
         console.log("CAP:MaxUtilizationBps:%s", MAX_UTILIZATION_BPS);
+        console.log("CAP:MinPremiumBps:%s", MIN_PREMIUM_BPS);
+        console.log("CAP:MinExpiryDelay:%s", MIN_EXPIRY_DELAY);
+        console.log("CAP:MaxExpiryDelay:%s", MAX_EXPIRY_DELAY);
     }
 }

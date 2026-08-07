@@ -582,7 +582,7 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
             salt: keccak256("B1N419_TEST"),
             name: "b1nary Meta Wheel",
             symbol: "b1WHEEL",
-            minimumIdleBps: 500,
+            minimumIdleBps: 2_000,
             navActivationDelay: 2,
             maxSnapshotAge: 32,
             maxNavWindowLength: 16,
@@ -607,12 +607,12 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
             guardian: address(0x1006)
         });
         config.wheel = WheelConfig({
-            policyHash: 0xdb47fcd1f4f96b656fe462956c85194b1f5e25d0c1d8c8862864b256d38fa93c,
+            policyHash: 0x22e43a8c3c59627c5d08271585b0cf88f80f915d45f0360f71e5d84127172bf1,
             floorBufferUsd8: 10e8,
             cspLaneMaxAssets: 250_000e6,
             coveredCallLaneMaxAssets: 100 ether,
             transitionExitCostBps: 100,
-            strategyMaxAllocationBps: 9_500,
+            strategyMaxAllocationBps: 8_000,
             strategyMaxLossBps: 100,
             strategyCooldown: 0,
             strategyAbsoluteCap: 1_000_000e6
@@ -628,10 +628,10 @@ contract B1N419MetaWheelDeploymentTest is Test, RotateMetaWheelRolesBaseSepolia 
             navReporterThreshold: 2
         });
         config.cspRisk = ICspFundAdapter.RiskConfig({
-            minExpiryDelay: 1 hours,
-            maxExpiryDelay: 14 days,
+            minExpiryDelay: 36 hours,
+            maxExpiryDelay: 60 hours,
             settlementDefaultDelay: 1 days,
-            minPremiumBps: 1,
+            minPremiumBps: 20,
             maxSwapSlippageBps: 100,
             maxOpenPositions: 1,
             minStrike: 1e8,

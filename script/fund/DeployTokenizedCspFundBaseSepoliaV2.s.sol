@@ -25,6 +25,8 @@ contract DeployTokenizedCspFundBaseSepoliaV2 is DeployTokenizedCspFundBaseSepoli
         );
         require(config.navActivationDelay == B1N352V2Profile.NAV_ACTIVATION_BLOCKS, "B1N352V2: NAV delay");
         require(config.adapterRiskConfig.minExpiryDelay == B1N352V2Profile.MIN_EXPIRY_SECONDS, "B1N352V2: min expiry");
+        require(config.adapterRiskConfig.maxExpiryDelay == B1N352V2Profile.MAX_EXPIRY_SECONDS, "B1N352V2: max expiry");
+        require(config.adapterRiskConfig.minPremiumBps == B1N352V2Profile.MIN_PREMIUM_BPS, "B1N352V2: min premium");
         require(
             config.adapterRiskConfig.settlementDefaultDelay == B1N352V2Profile.FALLBACK_DELAY_SECONDS,
             "B1N352V2: fallback delay"

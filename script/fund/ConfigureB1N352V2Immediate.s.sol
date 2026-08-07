@@ -68,6 +68,15 @@ contract ConfigureB1N352V2Policy is B1N352Operations {
         require(policyConfig.cooldown == B1N352V2Profile.STRATEGY_COOLDOWN_SECONDS, "B1N352V2: cooldown");
         require(policyConfig.absoluteCap == B1N352V2Profile.FUND_CAP, "B1N352V2: fund cap");
         require(
+            deployConfig.adapterRiskConfig.minExpiryDelay == B1N352V2Profile.MIN_EXPIRY_SECONDS, "B1N352V2: min expiry"
+        );
+        require(
+            deployConfig.adapterRiskConfig.maxExpiryDelay == B1N352V2Profile.MAX_EXPIRY_SECONDS, "B1N352V2: max expiry"
+        );
+        require(
+            deployConfig.adapterRiskConfig.minPremiumBps == B1N352V2Profile.MIN_PREMIUM_BPS, "B1N352V2: min premium"
+        );
+        require(
             deployConfig.adapterRiskConfig.maxCollateralPerPosition == B1N352V2Profile.COLLATERAL_CAP,
             "B1N352V2: collateral cap"
         );

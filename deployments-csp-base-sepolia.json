@@ -71,6 +71,17 @@
     "protocolFeeBps": 400,
     "swapFeeTier": 500
   },
+  "b1n438TargetPolicy": {
+    "status": "SOURCE_ONLY_NOT_APPLIED",
+    "maxUtilizationBps": 8000,
+    "minPremiumBpsAfterProtocolFeeBeforePerformanceFee": 20,
+    "minExpiryDelaySeconds": 129600,
+    "maxExpiryDelaySeconds": 216000,
+    "protocolFeeBpsUnchanged": 400,
+    "performanceFeeBpsUnchanged": 1000,
+    "dynamicDeltaTarget": "off-chain:0.09",
+    "quoteDeviationLimit": "off-chain:150-bps"
+  },
   "transactionHashes": {
     "mockChainlinkFeedDeploy": "0xf79ef55d71552ec7091113e03d413bf2c8549df59713accc58413b5296b350b7",
     "mockSwapRouterDeploy": "0x687ac79e15b2eb617cda782a2f9a583a16d558efe9a8eb1e5473fadfc2f1790e",

@@ -1403,6 +1403,68 @@ contract EthCspVaultTest is Test {
         vault.openCspBatch(quote, sig, 1e8, 2000e6);
     }
 
+    function test_b1n438ExactPostProtocolPremiumPassesBeforePerformanceFee() public {
+        EthCspOptionSelector selector = _setB1N438ObjectivePolicy();
+        assertEq(vault.optionSelector(), address(selector));
+        settler.setTreasury(treasury);
+        settler.setProtocolFeeBps(400);
+
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        address putToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 4_166_666, 1e8);
+        vm.prank(operator);
+        vault.openCspBatch(quote, sig, 1e8, 2_000e6);
+
+        (,,,,, uint256 premiumEarned,,) = vault.batches(1);
+        assertEq(premiumEarned, 4e6, "exact 20 bps net premium");
+        assertEq(usdc.balanceOf(treasury), 166_666, "protocol fee first");
+        assertEq(usdc.balanceOf(feeRecipient), 400_000, "performance fee after floor");
+        assertEq(vault.accountedIdleAssets(), 8_003_600_000);
+    }
+
+    function test_b1n438OneUnitBelowPostProtocolPremiumFails() public {
+        _setB1N438ObjectivePolicy();
+        settler.setTreasury(treasury);
+        settler.setProtocolFeeBps(400);
+
+        vm.prank(alice);
+        vault.deposit(10_000e6);
+
+        address putToken = _createPut();
+        (BatchSettler.Quote memory quote, bytes memory sig) = _signQuote(putToken, 4_166_665, 1e8);
+        vm.prank(operator);
+        vm.expectRevert(EthCspOptionSelector.StrategyConstraint.selector);
+        vault.openCspBatch(quote, sig, 1e8, 2_000e6);
+    }
+
+    function test_b1n438PremiumFloorRoundsUpToCollateralUnit() public {
+        EthCspOptionSelector selector = _setB1N438ObjectivePolicy();
+        selector.validatePremium(501, 2);
+        vm.expectRevert(EthCspOptionSelector.StrategyConstraint.selector);
+        selector.validatePremium(501, 1);
+    }
+
+    function test_b1n438ExpiryAndUtilizationBounds() public {
+        EthCspOptionSelector selector = _setB1N438ObjectivePolicy();
+        address validPut = _createPut();
+
+        selector.validateOption(validPut, address(weth), address(usdc), 8_000e6, 0, 10_000e6);
+        vm.expectRevert(EthCspOptionSelector.StrategyConstraint.selector);
+        selector.validateOption(validPut, address(weth), address(usdc), 8_000e6 + 1, 0, 10_000e6);
+
+        uint256 nextEightAm = expiry - 2 days;
+        address tooShort = factory.createOToken(address(weth), address(usdc), address(usdc), STRIKE, nextEightAm, true);
+        vm.expectRevert(EthCspOptionSelector.StrategyConstraint.selector);
+        selector.validateOption(tooShort, address(weth), address(usdc), 1, 0, 10_000e6);
+
+        address tooLong =
+            factory.createOToken(address(weth), address(usdc), address(usdc), STRIKE, nextEightAm + 3 days, true);
+        vm.expectRevert(EthCspOptionSelector.StrategyConstraint.selector);
+        selector.validateOption(tooLong, address(weth), address(usdc), 1, 0, 10_000e6);
+    }
+
     function test_curatorCanDelegateOptionSelectionToModule() public {
         EthCspOptionSelector selector = new EthCspOptionSelector(
             address(this),
@@ -1561,6 +1623,33 @@ contract EthCspVaultTest is Test {
 
         vm.prank(operator);
         vault.openCspBatch(quote, sig, 1e8, 2_000e6);
+    }
+
+    function _setB1N438ObjectivePolicy() internal returns (EthCspOptionSelector selector) {
+        uint256 nextEightAm = expiry;
+        expiry = nextEightAm + 2 days;
+        IEthCspOptionSelector.StrategyConfig memory config = IEthCspOptionSelector.StrategyConfig({
+            maxCollateralPerBatch: 10_000e6,
+            maxUtilizationBps: 8_000,
+            minPremiumBps: 20,
+            minExpiryDelay: 36 hours,
+            maxExpiryDelay: 60 hours,
+            minStrike: 100e8,
+            maxStrike: 10_000e8
+        });
+        selector = new EthCspOptionSelector(address(this), config);
+        vault.setStrategyConfig(
+            EthCspVault.StrategyConfig({
+                maxCollateralPerBatch: config.maxCollateralPerBatch,
+                maxUtilizationBps: config.maxUtilizationBps,
+                minPremiumBps: config.minPremiumBps,
+                minExpiryDelay: config.minExpiryDelay,
+                maxExpiryDelay: config.maxExpiryDelay,
+                minStrike: config.minStrike,
+                maxStrike: config.maxStrike
+            })
+        );
+        vault.setOptionSelector(address(selector));
     }
 
     function _depositAndOpenOnePut() internal {

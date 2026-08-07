@@ -26,6 +26,9 @@ abstract contract B1N419Base is Script {
     uint16 internal constant PERFORMANCE_FEE_BPS = 1_000;
     uint16 internal constant MAX_MANAGEMENT_FEE_BPS = 200;
     uint16 internal constant MAX_PERFORMANCE_FEE_BPS = 2_000;
+    uint64 internal constant CSP_MIN_EXPIRY_DELAY = 36 hours;
+    uint64 internal constant CSP_MAX_EXPIRY_DELAY = 60 hours;
+    uint16 internal constant CSP_MIN_PREMIUM_BPS = 20;
     uint32 internal constant MAX_ACCRUAL_INTERVAL = 30 days;
     uint32 internal constant CRYSTALLIZATION_PERIOD = 1 days;
     bytes32 internal constant ERC1967_IMPLEMENTATION_SLOT =
@@ -210,10 +213,17 @@ abstract contract B1N419Base is Script {
             "B1N419: wheel bounds"
         );
         require(
-            config.wheel.strategyMaxAllocationBps <= 10_000 && config.wheel.strategyMaxLossBps <= 10_000
+            config.wheel.strategyMaxAllocationBps == 8_000 && config.wheel.strategyMaxLossBps <= 10_000
                 && config.wheel.transitionExitCostBps <= 10_000,
             "B1N419: wheel bps"
         );
+        require(config.fund.minimumIdleBps == 2_000, "B1N419: wheel reserve");
+        require(
+            config.cspRisk.minExpiryDelay == CSP_MIN_EXPIRY_DELAY
+                && config.cspRisk.maxExpiryDelay == CSP_MAX_EXPIRY_DELAY,
+            "B1N419: CSP expiry policy"
+        );
+        require(config.cspRisk.minPremiumBps == CSP_MIN_PREMIUM_BPS, "B1N419: CSP premium policy");
         require(
             config.linkedLibraries.length == 5
                 && config.linkedLibraries.length == config.linkedLibraryCodehashes.length,
