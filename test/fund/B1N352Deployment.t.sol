@@ -25,6 +25,7 @@ import {StrategyAssetEscrow} from "../../src/fund/StrategyAssetEscrow.sol";
 import {CspFundAdapter} from "../../src/fund/CspFundAdapter.sol";
 import {FundConstants} from "../../src/fund/FundConstants.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
+import {FundAccessPolicy} from "../../src/fund/libraries/FundAccessPolicy.sol";
 import {ICspFundAdapter} from "../../src/fund/interfaces/ICspFundAdapter.sol";
 import {IStrategyManager} from "../../src/fund/interfaces/IStrategyManager.sol";
 import {B1N352Base} from "../../script/fund/B1N352Base.sol";
@@ -340,7 +341,9 @@ contract B1N352DeploymentTest is Test {
         assertEq(manager.roleMemberCount(manager.ADMIN_ROLE()), 1);
         assertEq(manager.roleMemberAt(manager.ADMIN_ROLE(), 0), address(this));
         assertEq(manager.roleMemberCount(FundConstants.REPORTER_ROLE), 0);
-        assertEq(manager.configuredSelectorCount(deployed.strategyManagerProxy), 10);
+        assertEq(
+            manager.configuredSelectorCount(deployed.strategyManagerProxy), FundAccessPolicy.strategyRules().length
+        );
 
         FundVault vault = FundVault(deployed.fundVaultProxy);
         FundFlowManager flow = FundFlowManager(deployed.fundFlowManagerProxy);
