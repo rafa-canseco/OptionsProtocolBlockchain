@@ -33,9 +33,26 @@ forge build --offline
 
 ### Test
 
+Use the repository harness rather than invoking the mixed unit/fork tree directly:
+
 ```shell
-forge test --offline
+npm run harness:doctor
+npm run harness:fast
 ```
+
+The fast gate is deterministic and offline. It excludes storage, fork, fuzz, and
+invariant work. The full gate adds forced-build storage compatibility checks, the Foundry
+security profile, and every explicit Base mainnet and Base Sepolia fork suite:
+
+```shell
+BASE_RPC_URL=<base-mainnet-rpc> \
+BASE_SEPOLIA_RPC_URL=<base-sepolia-rpc> \
+npm run harness:full
+```
+
+`harness:full` fails closed before running tests when either RPC variable is absent.
+Fork suite membership and any pinned starting block are declared in
+`scripts/harness-fork-paths.txt`.
 
 ### Format
 
@@ -45,13 +62,9 @@ forge fmt
 
 ### Fund Core Specifications
 
-```shell
-npm_config_offline=true forge test --offline --match-path 'test/fund/*' --force
-npm run storage:check
-```
-
-The `--force` flag is required because OpenZeppelin upgrade validation rejects
-incremental Foundry build-info files.
+Storage compatibility is part of `npm run harness:full`. The harness uses a forced
+offline build because OpenZeppelin upgrade validation rejects incremental Foundry
+build-info files.
 
 ### Gas Snapshots
 

@@ -1,0 +1,19 @@
+# chain          test path                                             optional pinned block
+base-mainnet      test/ForkE2E.t.sol
+base-mainnet      test/ForkMarginPoolAave.t.sol
+base-mainnet      test/ForkPhysicalRedeem.t.sol
+base-mainnet      test/ForkSmokeAaveEnable.t.sol
+base-mainnet      test/ForkSmokeFinal.t.sol
+base-mainnet      test/ForkSmokePostUpgrade.t.sol
+base-mainnet      test/ForkUpgradeV3.t.sol
+base-mainnet      test/ForkUpgradeV4V5.t.sol
+base-mainnet      test/LazyCreate2MainnetFork.t.sol
+base-mainnet      test/MainnetForkSettlement.t.sol
+base-mainnet      test/fund/CspFundAdapterFork.t.sol
+base-sepolia      test/LazyCreate2BaseSepoliaFork.t.sol
+base-sepolia      test/fund/B1N352IsolatedOnboardingFork.t.sol          44454953
+base-sepolia      test/fund/B1N394ActivePositionUpgradeFork.t.sol
+base-sepolia      test/fund/B1N394AuthorityRotationFork.t.sol
+base-sepolia      test/fund/B1N394PositionHashDomainMigrationFork.t.sol
+base-sepolia      test/fund/B1N394ProductionRunbookFork.t.sol
+base-sepolia      test/fund/B1N419MetaWheelLiveLifecycleFork.t.sol
