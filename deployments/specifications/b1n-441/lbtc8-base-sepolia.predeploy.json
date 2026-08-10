@@ -1,0 +1,137 @@
+{
+  "$schema": "./asset-neutral-manifest.schema.json",
+  "schemaVersion": "2.0.0",
+  "manifestId": "b1n-441-lbtc8-base-sepolia-predeploy-1",
+  "manifestRevision": 1,
+  "manifestContentIdentity": "sha256:fe91ee1eba2e111c071eef8988681287c1322066cd09cfb85c0ae6902286ff18",
+  "supersedes": null,
+  "status": "PREDEPLOYMENT",
+  "consumerReady": false,
+  "activationAuthorized": false,
+  "source": {
+    "originStagingCommit": "6cbd32512b8b85c60c23443f3e3f91d7da18cc5f",
+    "schema": {
+      "path": "deployments/specifications/b1n-441/asset-neutral-manifest.schema.json",
+      "sha256": "sha256:57688bfff5cef3076442748deea250753ddf25bc033a7c53cfca73d0e245fa72"
+    },
+    "policyArtifact": {
+      "path": "architecture/lbtc8-asset-neutral-units-abi.md",
+      "sha256": "sha256:a346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180"
+    },
+    "semanticValidator": {
+      "path": "scripts/validate-b1n-441-manifest.mjs",
+      "sha256": "sha256:cb48e43ef92bcd0981fad70b4ccd2c2f3e77e3fdfa7c2ff803f886cbdaa1b3d6"
+    },
+    "prerequisites": {
+      "B1N-411": {
+        "status": "NOT_PRESENT_ON_ORIGIN_STAGING",
+        "commits": []
+      },
+      "B1N-419": {
+        "status": "MERGED_ON_ORIGIN_STAGING",
+        "commits": [
+          "8e82fdd3c09ae41c5f75ae21d9a9dceb94e4cbd4",
+          "f58739fd62cf981e96f9020fa8654dc071e10908",
+          "70720568b470a433ec1be1c85b9c8e28c4e2a4f8",
+          "6cbd32512b8b85c60c23443f3e3f91d7da18cc5f"
+        ]
+      }
+    },
+    "interfaceSources": {
+      "adapter": {
+        "path": "src/fund/interfaces/IAssetNeutralOptionsAdapterV2.sol",
+        "sha256": "sha256:077daba3024e9dd6db23761fc0d385cc29858ec86528b0234eb338e7b3b51148"
+      },
+      "wheel": {
+        "path": "src/fund/interfaces/IAssetNeutralWheelV2.sol",
+        "sha256": "sha256:2564c617842622bbca113e9266666ec70266dff828606b10fb5910644b78d391"
+      }
+    },
+    "activationAuthorizationArtifact": null
+  },
+  "identity": {
+    "deploymentId": null,
+    "chainName": "base-sepolia",
+    "chainId": 84532,
+    "interfaceFamily": "b1nary.asset-neutral-options-v2",
+    "interfaceVersion": 2,
+    "policyHashAlgorithm": "sha256",
+    "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180"
+  },
+  "assets": {
+    "underlying": {
+      "symbol": "LBTC",
+      "address": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+      "decimals": 8,
+      "decimalsTrust": "MANIFEST_AND_LIVE_EXACT",
+      "runtimeCodehash": "0x599a6b80cccf2c7082103129c3725529a49d37b569dc0ecc031f0444b0ce0fff",
+      "testAssetDisclosure": {
+        "consumerLabel": "LBTC_TEST_ONLY",
+        "contractType": "VERIFIED_MOCK_ERC20",
+        "backingClaim": "NONE",
+        "mintAccess": "UNRESTRICTED_ANY_CALLER",
+        "networkScope": "BASE_SEPOLIA_ONLY"
+      }
+    },
+    "settlement": {
+      "symbol": "USDC",
+      "address": null,
+      "decimals": 6,
+      "decimalsTrust": "MANIFEST_AND_LIVE_EXACT",
+      "runtimeCodehash": null,
+      "testAssetDisclosure": null
+    },
+    "oTokenUnit": {
+      "symbol": "oToken",
+      "decimals": 8
+    },
+    "priceUnit": {
+      "symbol": "USD",
+      "decimals": 8
+    },
+    "supportedDecimalTuple": [
+      8,
+      8,
+      8,
+      6
+    ]
+  },
+  "abi": {
+    "adapter": {
+      "contractName": "IAssetNeutralOptionsAdapterV2",
+      "artifact": {
+        "path": "deployments/specifications/b1n-441/IAssetNeutralOptionsAdapterV2.abi.json",
+        "sha256": "sha256:e982066894cf68796dba26549f0d67503b550ad0bbdb939e19bfba4255fd9024"
+      }
+    },
+    "wheel": {
+      "contractName": "IAssetNeutralWheelV2",
+      "artifact": {
+        "path": "deployments/specifications/b1n-441/IAssetNeutralWheelV2.abi.json",
+        "sha256": "sha256:c180db95eab496c604fd3634b83d07ea18a4291e7de417f5bf9d39c7fa9f7868"
+      }
+    },
+    "openPositionDataEncoding": "((address,uint256,uint256,uint256,uint256,uint256),bytes,uint256,uint256)",
+    "deallocateDataEncoding": "(uint8,uint256,uint256,uint256)"
+  },
+  "deployment": {
+    "deploymentId": null,
+    "validFromBlock": null,
+    "contracts": [],
+    "canonicalReceipts": []
+  },
+  "compatibility": {
+    "wethNamedV1Fields": "VERSION_1_ONLY_DO_NOT_REINTERPRET",
+    "unknownVersionBehavior": "FAIL_CLOSED",
+    "abiSelectionKey": "chainId,deploymentId,interfaceFamily,interfaceVersion,address,kind,interfaceRole,abiArtifact.sha256,codeIdentity"
+  },
+  "trustRules": {
+    "chainId": "EXACT",
+    "decimals": "MANIFEST_AND_LIVE_EXACT_SUPPORTED_TUPLE",
+    "codehash": "EXTCODEHASH_RUNTIME_EXACT_NONZERO",
+    "proxyImplementation": "ERC1967_SLOT_AND_RUNTIME_CODEHASH_EXACT",
+    "policyHash": "EXACT",
+    "ambiguousAbi": "FAIL_CLOSED",
+    "assetIsolation": "ONE_UNDERLYING_SETTLEMENT_PAIR_PER_DEPLOYMENT"
+  }
+}
