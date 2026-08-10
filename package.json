@@ -12,6 +12,7 @@
     "b1n352:inputs:derive": "node scripts/prepare-b1n-352-inputs.mjs derive",
     "b1n352:inputs:env": "node scripts/prepare-b1n-352-inputs.mjs env",
     "b1n352:inputs:test": "node --test scripts/test-b1n-352-inputs.mjs",
+    "b1n441:spec:test": "node --test scripts/test-b1n-441-spec.mjs",
     "deps:check": "node scripts/check-contract-deps.mjs",
     "storage:check": "node scripts/check-fund-storage.mjs"
   },
@@ -22,7 +23,8 @@
   "devDependencies": {
     "@openzeppelin/defender-deploy-client-cli": "0.0.1-alpha.10",
     "@openzeppelin/foundry-upgrades": "0.4.1",
-    "@openzeppelin/upgrades-core": "1.45.0"
+    "@openzeppelin/upgrades-core": "1.45.0",
+    "ajv": "8.17.1"
   },
   "engines": {
     "node": ">=20"
