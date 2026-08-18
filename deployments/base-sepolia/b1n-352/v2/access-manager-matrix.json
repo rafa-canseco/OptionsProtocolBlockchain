@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-352",
+  "network": "base-sepolia",
+  "manager": {
+    "contract": "FundAccessManager",
+    "address": "0x729d5076C1C59a7C2676Faf3fB9133Ff80cDaB12",
+    "closed": false,
+    "enumeratesExactCurrentMembers": true,
+    "targetAdminDelaySeconds": 0,
+    "minSetbackSeconds": 0,
+    "liveSchedules": 0
+  },
+  "members": {
+    "admin": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "upgrader": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "adapterUpgrader": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "accounting": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "allocator": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "processor": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "curator": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "guardian": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "reporterReserved": []
+  },
+  "roles": [
+    {"id": 0, "name": "ADMIN", "adminRole": 0, "guardianRole": 0, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
+    {"id": 1, "name": "UPGRADER", "adminRole": 0, "guardianRole": 0, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
+    {"id": 2, "name": "ACCOUNTING", "adminRole": 0, "guardianRole": 0, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
+    {"id": 3, "name": "ALLOCATOR", "adminRole": 0, "guardianRole": 0, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
+    {"id": 4, "name": "PROCESSOR", "adminRole": 0, "guardianRole": 0, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
+    {"id": 5, "name": "CURATOR", "adminRole": 0, "guardianRole": 6, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
+    {"id": 6, "name": "GUARDIAN", "adminRole": 0, "guardianRole": 0, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0},
+    {"id": 7, "name": "REPORTER_RESERVED", "adminRole": 0, "guardianRole": 0, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": null},
+    {"id": 8, "name": "ADAPTER_UPGRADER", "adminRole": 0, "guardianRole": 0, "grantDelaySeconds": 0, "memberExecutionDelaySeconds": 0}
+  ],
+  "selectorRoles": "../v1/access-manager-matrix.json",
+  "notes": [
+    "All delays are intentionally zero for this Base Sepolia QA redeploy.",
+    "The allocator role is held by the deployer but the allocator bot is not authorized in the manifest.",
+    "Deposits remain paused; this matrix does not authorize public operation."
+  ]
+}

@@ -1,0 +1,300 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-360",
+  "deploymentStatus": "DEPLOYED",
+  "transactions": [
+    {
+      "name": "whitelistWethCollateral",
+      "to": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
+      "hash": "0x59e4dc1a7532e27c339009598734d2dceea1f487fd6058c1cb2e41aa2c93e1ae",
+      "block": 44709872,
+      "status": "confirmed"
+    },
+    {
+      "name": "whitelistCoveredCallProduct",
+      "to": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
+      "hash": "0x0476c6a439148dae1e20daf2749c1090741d7de856a26bdc691b8c65a13671a9",
+      "block": 44709873,
+      "status": "confirmed"
+    },
+    {
+      "name": "deployFundAndCoveredCallModules",
+      "artifact": "broadcast/DeployTokenizedCoveredCallFundBaseSepolia.s.sol/84532/run-latest.json",
+      "firstBlock": 44709928,
+      "lastBlock": 44709943,
+      "transactionCount": 16,
+      "status": "confirmed",
+      "createdContracts": [
+        {
+          "name": "CoveredCallFundAdapterOperations",
+          "address": "0x3AB0634fCb58D4447fd8A5469De001d64f028AEe",
+          "validFromBlock": 44709928,
+          "evidence": "creation receipt",
+          "transactionHash": "0x4b968ea0099ee304c3ee7fb1229fba28459446d3a2dfe99787cdb5ba03ea8749"
+        },
+        {
+          "name": "FundVault implementation",
+          "address": "0xAf51984EcC261a4B3052eA90c9a85768F81DE764",
+          "validFromBlock": 44709929,
+          "evidence": "creation receipt",
+          "transactionHash": "0xc5222a44e9646312752e8eaf984ce9b763128f77ca36f7bfc04455215f47eed7"
+        },
+        {
+          "name": "FundShare implementation",
+          "address": "0x900264215ED313a6cC95e8BA8BF47b20069777fC",
+          "validFromBlock": 44709930,
+          "evidence": "creation receipt",
+          "transactionHash": "0xf73785f95fa4bb421c9e31a755956da67794d36e8ed87166f38dc9608c01ed35"
+        },
+        {
+          "name": "FundAccounting implementation",
+          "address": "0xca698509f7770465A580Be3733E56D3CbC8bCd76",
+          "validFromBlock": 44709931,
+          "evidence": "creation receipt",
+          "transactionHash": "0x61d3df5a74e08f08c674126249340f42d3eb8d733cf6ba07e5f93e9b0fe7ad93"
+        },
+        {
+          "name": "FundFlowManager implementation",
+          "address": "0x20EB957dfF753074a52487CbC3F4297879E9536e",
+          "validFromBlock": 44709932,
+          "evidence": "creation receipt",
+          "transactionHash": "0xb772c8db045a483a246e6ba5fa3c47b364eb4627d1e09f8341d37c1972dc8832"
+        },
+        {
+          "name": "StrategyManager implementation",
+          "address": "0x88CDCF59F289b0346F568a751Fd8e08409B08271",
+          "validFromBlock": 44709933,
+          "evidence": "creation receipt",
+          "transactionHash": "0x0161dd391c8abd1d98f801be5c4d2859bbb18adf8e35ae0ae21be3612ff477ab"
+        },
+        {
+          "name": "NavReportVerifier",
+          "address": "0xb71252822F1Bd5F526E80A225ade2520d6903dB8",
+          "validFromBlock": 44709934,
+          "evidence": "creation receipt",
+          "transactionHash": "0x73df3eb1217d7e55fb6d26322b814b4c34c3dd49795270ca20279a4afea9d54c"
+        },
+        {
+          "name": "B1N360ZeroDelayFundFactory",
+          "address": "0x6F5b59047629730f973c75c8941d88Ed526946b8",
+          "validFromBlock": 44709935,
+          "evidence": "creation receipt",
+          "transactionHash": "0x8a6c7564e888e607a449f3f5f5b1c64526feb70fb4ded3bc491f37668c2184c9"
+        },
+        {
+          "name": "FundAccessManagerDeployer",
+          "address": "0x36CCDa1DBEbb09012Dd589821B8e3fD19dBfe4D7",
+          "validFromBlock": 44709935,
+          "evidence": "first-code check: empty at 44709934, present at 44709935",
+          "transactionHash": "0x8a6c7564e888e607a449f3f5f5b1c64526feb70fb4ded3bc491f37668c2184c9"
+        },
+        {
+          "name": "FundVault proxy",
+          "address": "0x9060946E6ACC4E430A823E90120743c7305EE2CA",
+          "validFromBlock": 44709937,
+          "evidence": "first-code check: empty at 44709936, present at 44709937",
+          "transactionHash": "0x4955ea434509e1498d526ce1f5d014beedfe3c657a268047998698c0922519db"
+        },
+        {
+          "name": "FundShare proxy",
+          "address": "0xaA1070adb74C5455320285618BF1ED804d3745C3",
+          "validFromBlock": 44709937,
+          "evidence": "first-code check: empty at 44709936, present at 44709937",
+          "transactionHash": "0x4955ea434509e1498d526ce1f5d014beedfe3c657a268047998698c0922519db"
+        },
+        {
+          "name": "FundAccounting proxy",
+          "address": "0x9a112A65FE8510bCf5DC894fFBf06aEa8d12d311",
+          "validFromBlock": 44709937,
+          "evidence": "first-code check: empty at 44709936, present at 44709937",
+          "transactionHash": "0x4955ea434509e1498d526ce1f5d014beedfe3c657a268047998698c0922519db"
+        },
+        {
+          "name": "FundFlowManager proxy",
+          "address": "0x59fc0d88aAF3D14b82696cc7E91ea37b629E48cc",
+          "validFromBlock": 44709937,
+          "evidence": "first-code check: empty at 44709936, present at 44709937",
+          "transactionHash": "0x4955ea434509e1498d526ce1f5d014beedfe3c657a268047998698c0922519db"
+        },
+        {
+          "name": "StrategyManager proxy",
+          "address": "0x745422dd14E84ee27C2E56D2845C3BB1658027d9",
+          "validFromBlock": 44709937,
+          "evidence": "first-code check: empty at 44709936, present at 44709937",
+          "transactionHash": "0x4955ea434509e1498d526ce1f5d014beedfe3c657a268047998698c0922519db"
+        },
+        {
+          "name": "FundAccessManager",
+          "address": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+          "validFromBlock": 44709937,
+          "evidence": "first-code check: empty at 44709936, present at 44709937",
+          "transactionHash": "0x4955ea434509e1498d526ce1f5d014beedfe3c657a268047998698c0922519db"
+        },
+        {
+          "name": "ClaimEscrow",
+          "address": "0x8842372431CA713402Ac15E868Eb7d8A7c98A807",
+          "validFromBlock": 44709937,
+          "evidence": "first-code check: empty at 44709936, present at 44709937",
+          "transactionHash": "0x4955ea434509e1498d526ce1f5d014beedfe3c657a268047998698c0922519db"
+        },
+        {
+          "name": "CoveredCallFundAdapter implementation",
+          "address": "0x42e603131671Aba8C9e2b0B21b0f7B376C9151Be",
+          "validFromBlock": 44709938,
+          "evidence": "creation receipt",
+          "transactionHash": "0x4aa6c29a3f4b1b441c81b6fe0514453f796e12d21b42d39eeda192e843c8593d"
+        },
+        {
+          "name": "CoveredCallFundAdapter proxy",
+          "address": "0x0BF96C5cE0D637d4D686d342aE42Bc00fDa19De9",
+          "validFromBlock": 44709939,
+          "evidence": "creation receipt",
+          "transactionHash": "0x5af0f97600e9ad949e670acb537a993eaef0de534ce42df44d6e4c07feb25470"
+        },
+        {
+          "name": "CoveredCallFundValuatorV2",
+          "address": "0xA1BFC1bE3C7fCA77CA0b32d25de1Ce58A50333A0",
+          "validFromBlock": 44709940,
+          "evidence": "creation receipt",
+          "transactionHash": "0x02897592024425506d242bc6f208baa7ba6b28d8b92b6e22be7e81d347ab9658"
+        },
+        {
+          "name": "in-kind StrategyAssetEscrow",
+          "address": "0xA267AdB9FBf02d453e3586A03b6d3853a9d20583",
+          "validFromBlock": 44709941,
+          "evidence": "creation receipt",
+          "transactionHash": "0x2a3dd03a70603edd31fafd2cf7e8799a4c0374218d62d0397f7de789da8997c4"
+        },
+        {
+          "name": "emergency StrategyAssetEscrow",
+          "address": "0x1C38ED1c7d750Ef8908C537dC4c654da9E71fd03",
+          "validFromBlock": 44709942,
+          "evidence": "creation receipt",
+          "transactionHash": "0xcf51bab6e7d335184b9f905f00419f48edd676c84bee07422c10abbd18dbeb36"
+        }
+      ]
+    },
+    {
+      "name": "configureAccess",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x726501971b2985243fa9ee78ea3176365f8125e985b95e532151ae55fa2dbf30",
+      "block": 44710016,
+      "status": "confirmed"
+    },
+    {
+      "name": "configurePolicy",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x808e8d630670e260d3e23d29fefcec219892224f5cf74282a01a0dbd2f5c5037",
+      "block": 44710037,
+      "status": "confirmed",
+      "effect": "strategy configured inactive and deposits remain paused"
+    },
+    {
+      "name": "onboardCoveredCallAdapter",
+      "to": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
+      "hash": "0x8b86f91bce60898778ababc7c8952a3096a7e3c046395cd6c3faa1d456ee3af9",
+      "block": 44710058,
+      "status": "confirmed",
+      "effect": "authorizedPhysicalDeliveryVault(adapter)=true"
+    },
+    {
+      "name": "repairAccountingRole",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x50f5db345eb841e21575b9ce052c280ba1256adc23f3d07fac54c268d249b8e7",
+      "block": 44712837,
+      "status": "confirmed",
+      "effect": "ACCOUNTING_ROLE atomically migrated from the deployer to the backend submitter; the independent reporter set was unchanged"
+    },
+    {
+      "name": "grantFinalAllocator",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x76ecf1deb697545ef1294917acf77e0373a06a76f96e672f46971bbb164315a1",
+      "block": 44713445,
+      "status": "confirmed"
+    },
+    {
+      "name": "grantInitialFinalProcessor",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0xd7291353d5b86339528c57c6cb026ec8f4b505e03a7f44002a3fcb45d256e5f0",
+      "block": 44713445,
+      "status": "confirmed"
+    },
+    {
+      "name": "revokeSchedulerAllocator",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x93f1c6c2768c3b65de6d6e2b629fa918d0082cd4c7cfb78ac9acb6b8c36187db",
+      "block": 44713445,
+      "status": "confirmed"
+    },
+    {
+      "name": "revokeSchedulerProcessor",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0xac92858d710fa9302fa0ce34eb3a45db5dec32345be9988b7b99cc98e30b98c6",
+      "block": 44713445,
+      "status": "confirmed"
+    },
+    {
+      "name": "grantRotatedProcessor",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x0775f6230bf635ec7a48380b146b2cec1d44bc206be3e7e9a8caba65ea70ede4",
+      "block": 44713589,
+      "status": "confirmed",
+      "effect": "new Railway processor received immediate PROCESSOR_ROLE before the previous processor was revoked"
+    },
+    {
+      "name": "revokePreviousProcessor",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x80a587420692f5a402bdb450c12f8e0a27b55e01f75529fe8e7784335f001295",
+      "block": 44713590,
+      "status": "confirmed"
+    },
+    {
+      "name": "activateCoveredCallStrategy",
+      "to": "0x745422dd14E84ee27C2E56D2845C3BB1658027d9",
+      "hash": "0xd785598f278c1b14635988373153d8701ed98f5369532c4f660e54bc02031752",
+      "block": 44713652,
+      "status": "confirmed",
+      "effect": "CURATOR_ROLE resumed allocation during active NAV nonce 7"
+    },
+    {
+      "name": "supersededDepositResume",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0x7500f589095e16845cf14872248e3e96b75a0fd3d7ab57fd6611398410c53ce0",
+      "block": 44713663,
+      "status": "confirmed_then_repaused",
+      "effect": "resume mined after NAV nonce 7 expired; deposits were repaused six blocks later and no Deposit events occurred in blocks 44713663-44713669"
+    },
+    {
+      "name": "rePauseDepositsAfterExpiredWindow",
+      "to": "0x9060946E6ACC4E430A823E90120743c7305EE2CA",
+      "hash": "0xb7d8b990279b5a12946a6822d5e442a533efc98f04b9022cb6c42f0bba021973",
+      "block": 44713669,
+      "status": "confirmed"
+    },
+    {
+      "name": "deployNavGatedFundVaultImplementation",
+      "to": null,
+      "createdContract": "0xCae10a81aE1aA0183A4b4283A3ACbE9A2642613A",
+      "hash": "0x0be488852a084dbfdd58ca796cc012463797c0721a66e893b686a04e7e0216fb",
+      "block": 44714399,
+      "status": "confirmed",
+      "effect": "resumeDeposits now rejects an inactive NAV window on-chain"
+    },
+    {
+      "name": "upgradeFundVaultNavGate",
+      "to": "0x9060946E6ACC4E430A823E90120743c7305EE2CA",
+      "hash": "0xa45c6c25b168c0301d0a778a7ad7384006d450340f20195cd7e906554b5e9542",
+      "block": 44714433,
+      "status": "confirmed",
+      "effect": "UUPS implementation upgraded after full build, regression test and OpenZeppelin upgrade validation passed"
+    },
+    {
+      "name": "openDepositsWithActiveNav",
+      "to": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "hash": "0xc4d792e7be898bf32ac726e98821facdcb9da8bb7cad19b54279773bd6d88650",
+      "block": 44714463,
+      "status": "confirmed",
+      "effect": "deposits opened atomically during NAV nonce 22, valid from block 44714422 through 44714472"
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-360",
+  "deploymentStatus": "DEPLOYED",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532,
+    "reconciliationBlock": 44714463
+  },
+  "gates": {
+    "approvedInputsDigestMatches": true,
+    "validationPolicyDigestMatches": true,
+    "baseSepoliaOnly": true,
+    "testnetApprovalPresent": true,
+    "mainnetAuthorizationAbsent": true
+  },
+  "v1Boundary": {
+    "activeStagingV1Touched": true,
+    "implementationsOrOwnersChanged": false,
+    "implementationsMatchPinnedBaseline": true,
+    "ownersMatchPinnedBaseline": true,
+    "onlyApprovedV1MutationsObserved": true,
+    "coveredCallCollateralWhitelisted": true,
+    "coveredCallProductWhitelisted": true,
+    "coveredCallAdapterOnboarded": true
+  },
+  "topology": {
+    "factoryOneShotAndConsumed": true,
+    "allExpectedAddressesHaveCode": true,
+    "allContractValidFromBlocksReconciled": true,
+    "nestedCreationFirstCodeChecksPassed": true,
+    "proxyImplementationsMatch": true,
+    "moduleAndEscrowBindingsMatch": true,
+    "fundVaultImplementation": "0xCae10a81aE1aA0183A4b4283A3ACbE9A2642613A",
+    "fundVaultResumeDepositsNavGated": true,
+    "accountingAssetIsWeth": true,
+    "settlementAssetIsUsdc": true
+  },
+  "accessManager": {
+    "exactRoleMembersMatch": true,
+    "accountingRoleMember": "0x195De7eDc5e912D7b7001d3F268bbE0d14f7E1C3",
+    "allocatorRoleMember": "0xc217F9F7607A479cFc531319f40463EF0666dcee",
+    "processorRoleMember": "0x3c1a3ad44785bE4386F020050213D29589d1fb17",
+    "curatorRoleMember": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "previousAccountingRoleRevoked": true,
+    "submitNavSelectorRole": 2,
+    "reporterSetUnchanged": true,
+    "allRoleGrantDelaysZero": true,
+    "allMemberExecutionDelaysZero": true,
+    "allTargetAdminDelaysZero": true,
+    "selectorRolesMatch": true
+  },
+  "policy": {
+    "depositsPausedAfterDeploy": true,
+    "strategyInactiveAfterConfigure": true,
+    "maxOpenPositions": 1,
+    "minimumIdleBps": 0,
+    "maxAllocationBps": 2500,
+    "maxLossBps": 10000,
+    "maxCollateralPerPositionWeth": "2500000000000000",
+    "liabilityBufferBps": 0,
+    "observerCount": 2,
+    "observerQuorum": 2,
+    "valuationPolicyVersion": 2,
+    "requiredModelVersion": 1,
+    "maximumObservationDivergenceBps": 500
+  },
+  "phases": {
+    "v1ProductPrepared": "PASSED",
+    "fundDeployed": "PASSED",
+    "accessConfigured": "PASSED",
+    "policyConfigured": "PASSED",
+    "adapterOnboarded": "PASSED",
+    "finalWorkersGranted": "PASSED",
+    "processorRotated": "PASSED",
+    "strategyActivated": "PASSED",
+    "navGatedVaultUpgrade": "PASSED",
+    "depositsOpen": "PASSED"
+  },
+  "finalState": {
+    "depositsPaused": false,
+    "adapterOnboarded": true,
+    "strategyActive": true,
+    "allocatorBotAuthorized": true,
+    "publicDepositsAuthorized": true,
+    "activationNavNonce": 7,
+    "depositsOpenedNavNonce": 22,
+    "depositsOpenedBlock": 44714463,
+    "depositsOpenedNavValidUntilBlock": 44714472,
+    "expiredWindowResumeWasRepaused": true,
+    "expiredWindowExposureBlocks": [44713663, 44713669],
+    "depositEventsDuringExpiredWindowExposure": 0,
+    "mainnetAuthorized": false
+  }
+}

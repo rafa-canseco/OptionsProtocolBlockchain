@@ -170,6 +170,13 @@ contract EmergencyTest is Test {
         vm.stopPrank();
     }
 
+    function _openCollateralOnlyVault(address asset, uint256 amount) internal returns (uint256 vaultId) {
+        vm.startPrank(user);
+        vaultId = controller.openVault(user);
+        controller.depositCollateral(user, vaultId, asset, amount);
+        vm.stopPrank();
+    }
+
     // ==========================================
     // Partial Pause
     // ==========================================
@@ -341,7 +348,7 @@ contract EmergencyTest is Test {
     // ==========================================
 
     function test_emergencyWithdraw_returnsCollateral() public {
-        _openAndFundVault();
+        _openCollateralOnlyVault(address(usdc), 2000e6);
 
         controller.setSystemFullyPaused(true);
 
@@ -354,7 +361,7 @@ contract EmergencyTest is Test {
         assertTrue(controller.vaultSettled(user, 1));
     }
 
-    function test_emergencyWithdraw_callOption() public {
+    function test_emergencyWithdraw_rejectsOutstandingCallOption() public {
         address oToken = _createCall();
         vm.startPrank(user);
         uint256 vaultId = controller.openVault(user);
@@ -364,17 +371,15 @@ contract EmergencyTest is Test {
 
         controller.setSystemFullyPaused(true);
 
-        uint256 balBefore = weth.balanceOf(user);
-
         vm.prank(user);
+        vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
         controller.emergencyWithdrawVault(vaultId);
 
-        assertEq(weth.balanceOf(user), balBefore + 1e18);
-        assertTrue(controller.vaultSettled(user, vaultId));
+        assertFalse(controller.vaultSettled(user, vaultId));
     }
 
     function test_emergencyWithdraw_emitsEvent() public {
-        _openAndFundVault();
+        _openCollateralOnlyVault(address(usdc), 2000e6);
 
         controller.setSystemFullyPaused(true);
 
@@ -418,7 +423,7 @@ contract EmergencyTest is Test {
     }
 
     function test_emergencyWithdraw_revertsDoubleClaim() public {
-        _openAndFundVault();
+        _openCollateralOnlyVault(address(usdc), 2000e6);
 
         controller.setSystemFullyPaused(true);
 
@@ -603,7 +608,7 @@ contract EmergencyTest is Test {
     }
 
     function test_depositAfterEmergencyWithdraw_reverts() public {
-        _openAndFundVault();
+        _openCollateralOnlyVault(address(usdc), 2000e6);
 
         controller.setSystemFullyPaused(true);
 
@@ -618,7 +623,8 @@ contract EmergencyTest is Test {
     }
 
     function test_mintAfterEmergencyWithdraw_reverts() public {
-        (address oToken,) = _openAndFundVault();
+        address oToken = _createPut();
+        _openCollateralOnlyVault(address(usdc), 2000e6);
 
         controller.setSystemFullyPaused(true);
 
@@ -715,15 +721,15 @@ contract EmergencyTest is Test {
         vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
         controller.emergencyWithdrawVault(vaultA);
 
-        // Bob can still withdraw — MM2's balance is intact
+        // Bob also cannot cancel MM2's intact claim.
         vm.prank(bob);
+        vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
         controller.emergencyWithdrawVault(vaultB);
-        assertEq(usdc.balanceOf(bob), 2000e6);
+        assertEq(usdc.balanceOf(bob), 0);
     }
 
-    function test_emergencyWithdraw_preMigrationVaultFallsBack() public {
-        // Pre-migration vault: vaultMM returns address(0)
-        // Falls back to aggregate balance check
+    function test_emergencyWithdraw_rejectsVaultWithoutExactAttribution() public {
+        // A vault without per-vault attribution must not burn pooled oTokens.
         address oToken = _createPut();
         MockSettler mockSettler = new MockSettler();
         addressBook.setBatchSettler(address(mockSettler));
@@ -736,12 +742,12 @@ contract EmergencyTest is Test {
         controller.mintOtoken(user, vaultId, oToken, 1e8, address(mockSettler));
         vm.stopPrank();
 
-        // vaultMM not set → returns address(0) (pre-migration)
-        // settler holds 1e8 oTokens → aggregate check passes
         controller.setSystemFullyPaused(true);
 
         vm.prank(user);
+        vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
         controller.emergencyWithdrawVault(vaultId);
-        assertTrue(controller.vaultSettled(user, vaultId));
+        assertFalse(controller.vaultSettled(user, vaultId));
+        assertEq(OToken(oToken).balanceOf(address(mockSettler)), 1e8);
     }
 }

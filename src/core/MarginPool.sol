@@ -36,6 +36,8 @@ contract MarginPool is Initializable, UUPSUpgradeable {
     error AaveNotConfigured();
     error AaveNotDrained(address asset, uint256 remaining);
     error AaveNotFullyDrained(address asset, uint256 aTokenBalance);
+    error CollateralTransferMismatch(uint256 expected, uint256 received);
+    error AaveWithdrawalMismatch(uint256 expected, uint256 received);
 
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
 
@@ -66,7 +68,10 @@ contract MarginPool is Initializable, UUPSUpgradeable {
     // --- Core Functions ---
 
     function transferToPool(address _asset, address _from, uint256 _amount) external onlyController {
+        uint256 balanceBefore = IERC20(_asset).balanceOf(address(this));
         IERC20(_asset).safeTransferFrom(_from, address(this), _amount);
+        uint256 received = IERC20(_asset).balanceOf(address(this)) - balanceBefore;
+        if (received != _amount) revert CollateralTransferMismatch(_amount, received);
 
         if (isAaveEnabled[_asset]) {
             aavePool.supply(_asset, _amount, address(this), 0);
@@ -81,16 +86,14 @@ contract MarginPool is Initializable, UUPSUpgradeable {
 
         if (fromAave > 0) {
             totalDeposited[_asset] = deposited - fromAave;
-            try aavePool.withdraw(_asset, fromAave, _to) {}
-            catch {
+            try aavePool.withdraw(_asset, fromAave, _to) returns (uint256 withdrawn) {
+                if (withdrawn != fromAave) revert AaveWithdrawalMismatch(fromAave, withdrawn);
+            } catch {
                 address aToken = _getAToken(_asset);
                 uint256 aBalance = IERC20(aToken).balanceOf(address(this));
-                uint256 transferAmt = fromAave < aBalance ? fromAave : aBalance;
-                if (transferAmt < fromAave) {
-                    totalDeposited[_asset] += (fromAave - transferAmt);
-                    emit ATokenFallback(_asset, _to, fromAave, transferAmt);
-                }
-                IERC20(aToken).safeTransfer(_to, transferAmt);
+                if (aBalance < fromAave) revert AaveWithdrawalMismatch(fromAave, aBalance);
+                IERC20(aToken).safeTransfer(_to, fromAave);
+                emit ATokenFallback(_asset, _to, fromAave, fromAave);
             }
         }
 
@@ -183,7 +186,8 @@ contract MarginPool is Initializable, UUPSUpgradeable {
     function drainAave(address _asset) external onlyOwner {
         uint256 deposited = totalDeposited[_asset];
         if (deposited == 0) return;
-        aavePool.withdraw(_asset, deposited, address(this));
+        uint256 withdrawn = aavePool.withdraw(_asset, deposited, address(this));
+        if (withdrawn != deposited) revert AaveWithdrawalMismatch(deposited, withdrawn);
         totalDeposited[_asset] = 0;
     }
 

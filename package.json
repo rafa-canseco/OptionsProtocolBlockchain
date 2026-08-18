@@ -1,0 +1,33 @@
+{
+  "name": "@b1nary/contracts",
+  "version": "0.8.0",
+  "private": true,
+  "scripts": {
+    "deps:foundry": "./scripts/install-forge-std.sh",
+    "harness:doctor": "./scripts/harness-check.sh doctor",
+    "harness:fast": "./scripts/harness-check.sh fast",
+    "harness:full": "./scripts/harness-check.sh full",
+    "harness:regression": "node --test scripts/test-harness-check.mjs",
+    "b1n352:inputs:template": "node scripts/prepare-b1n-352-inputs.mjs template deployments/base-sepolia/b1n-352/v1/deployment-inputs.approved.template.json",
+    "b1n352:inputs:check": "node scripts/prepare-b1n-352-inputs.mjs check",
+    "b1n352:inputs:derive": "node scripts/prepare-b1n-352-inputs.mjs derive",
+    "b1n352:inputs:env": "node scripts/prepare-b1n-352-inputs.mjs env",
+    "b1n352:inputs:test": "node --test scripts/test-b1n-352-inputs.mjs",
+    "b1n441:spec:test": "node --test scripts/test-b1n-441-spec.mjs",
+    "deps:check": "node scripts/check-contract-deps.mjs",
+    "storage:check": "node scripts/check-fund-storage.mjs"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.5.0",
+    "@openzeppelin/contracts-upgradeable": "5.5.0"
+  },
+  "devDependencies": {
+    "@openzeppelin/defender-deploy-client-cli": "0.0.1-alpha.10",
+    "@openzeppelin/foundry-upgrades": "0.4.1",
+    "@openzeppelin/upgrades-core": "1.45.0",
+    "ajv": "8.17.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

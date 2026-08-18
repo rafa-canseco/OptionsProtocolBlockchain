@@ -1,0 +1,185 @@
+{
+  "schemaVersion": "1.0.0",
+  "deploymentStatus": "NOT_DEPLOYED",
+  "issue": "B1N-352",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532,
+    "blockscout": "https://base-sepolia.blockscout.com"
+  },
+  "source": {
+    "gitCommit": "TO_BE_FILLED_AFTER_AUTHORIZED_BROADCAST",
+    "approvedInputsSha256": "TO_BE_FILLED_FROM_SEPARATELY_RECORDED_APPROVAL",
+    "branch": "feat/b1n-352-base-sepolia-fund-deploy",
+    "solc": "0.8.24",
+    "optimizerRuns": 200,
+    "viaIr": true,
+    "implementationVersion": "FROM_B1N_346",
+    "compatibilityVersion": "FROM_APPROVED_CONFIG"
+  },
+  "v1Boundary": {
+    "addressBook": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "owner": "TO_BE_FILLED_FROM_APPROVAL",
+      "pendingOwner": "TO_BE_FILLED_FROM_APPROVAL",
+      "unchanged": null
+    },
+    "accountingAsset": "TO_BE_FILLED_USDC",
+    "weth": "TO_BE_FILLED_WETH",
+    "controller": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "owner": "TO_BE_FILLED_FROM_APPROVAL",
+      "pendingOwner": "TO_BE_FILLED_FROM_APPROVAL",
+      "unchanged": null
+    },
+    "marginPool": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "authorityInheritedFrom": "addressBook",
+      "unchanged": null
+    },
+    "oTokenFactory": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "authorityInheritedFrom": "addressBook",
+      "unchanged": null
+    },
+    "oracle": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "owner": "TO_BE_FILLED_FROM_APPROVAL",
+      "pendingOwner": "TO_BE_FILLED_FROM_APPROVAL",
+      "unchanged": null
+    },
+    "whitelist": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "owner": "TO_BE_FILLED_FROM_APPROVAL",
+      "pendingOwner": "TO_BE_FILLED_FROM_APPROVAL",
+      "unchanged": null
+    },
+    "batchSettler": {
+      "proxy": "TO_BE_FILLED",
+      "expectedProxy": "TO_BE_FILLED_FROM_APPROVAL",
+      "implementationBefore": "TO_BE_FILLED",
+      "implementationCodehashBefore": "TO_BE_FILLED",
+      "implementationAfter": "TO_BE_FILLED",
+      "implementationCodehashAfter": "TO_BE_FILLED",
+      "owner": "TO_BE_FILLED_FROM_APPROVAL",
+      "pendingOwner": "TO_BE_FILLED_FROM_APPROVAL",
+      "unchanged": null
+    },
+    "custodiedRedemptionOnly": null,
+    "physicalDeliveryVaultAuthorized": null
+  },
+  "contracts": {
+    "fundFactory": "TO_BE_FILLED",
+    "fundAccessManagerDeployer": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
+    "deploymentId": "TO_BE_FILLED",
+    "accessManager": {"address": "TO_BE_FILLED", "type": "FundAccessManager", "codehash": "TO_BE_FILLED"},
+    "fundVault": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
+    "fundShare": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
+    "fundAccounting": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
+    "fundFlowManager": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
+    "strategyManager": {"proxy": "TO_BE_FILLED", "implementation": "TO_BE_FILLED"},
+    "navReportVerifier": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
+    "claimEscrow": {"address": "TO_BE_FILLED", "codehash": "TO_BE_FILLED"},
+    "cspAdapterOperations": {
+      "address": "TO_BE_FILLED_FROM_APPROVED_DRY_RUN",
+      "codehash": "TO_BE_DERIVED_FROM_APPROVED_BUILD"
+    },
+    "cspFundAdapter": {
+      "proxy": "TO_BE_FILLED",
+      "implementation": "TO_BE_FILLED",
+      "implementationCodehash": "TO_BE_DERIVED_BEFORE_BROADCAST_FROM_APPROVED_BUILD_AND_LIBRARY_ADDRESS"
+    },
+    "cspFundValuator": "TO_BE_FILLED",
+    "inKindStrategyEscrow": "TO_BE_FILLED",
+    "emergencyStrategyEscrow": "TO_BE_FILLED"
+  },
+  "policy": {
+    "artifact": "B1N-346_NOT_YET_AVAILABLE",
+    "minimumIdleBps": null,
+    "maxExitFeeBps": null,
+    "maxWindowOutflowBps": null,
+    "navActivationDelayBlocks": null,
+    "maxSnapshotAgeBlocks": null,
+    "maxNavWindowLengthBlocks": null,
+    "reporterSet": {
+      "version": null,
+      "threshold": null,
+      "reporters": []
+    },
+    "accountingComponents": {
+      "idle": {"componentId": "keccak256(IDLE_ACCOUNTING_ASSET)", "interfaceVersion": 1, "valuator": null},
+      "csp": {"componentId": "keccak256(STRATEGY,adapter)", "interfaceVersion": null, "valuator": "TO_BE_FILLED"}
+    },
+    "strategyEscrows": {
+      "inKind": "TO_BE_FILLED",
+      "emergency": "TO_BE_FILLED"
+    },
+    "strategy": {
+      "active": false,
+      "maxAllocationBps": null,
+      "maxLossBps": null,
+      "cooldownSeconds": null,
+      "absoluteCap": null
+    },
+    "adapterRisk": "TO_BE_COPIED_EXACTLY_FROM_APPROVED_CONFIG",
+    "adapterRouter": "TO_BE_COPIED_EXACTLY_FROM_APPROVED_CONFIG",
+    "adapterSwapFeeTier": null,
+    "valuator": {
+      "spotFeed": "TO_BE_COPIED_EXACTLY_FROM_APPROVED_CONFIG",
+      "spotFeedDecimals": null,
+      "maxSpotStalenessSeconds": null,
+      "maxObservationWindowBlocks": null,
+      "observationQuorum": null,
+      "liabilityBufferBps": null,
+      "approvedObservers": []
+    },
+    "fees": "TO_BE_COPIED_EXACTLY_FROM_APPROVED_CONFIG"
+  },
+  "roles": {
+    "exactMembershipRequired": true,
+    "defaultAdminRole": 0,
+    "defaultGuardianRole": 0,
+    "admin": "TO_BE_FILLED",
+    "upgrader": "TO_BE_FILLED",
+    "adapterUpgrader": "TO_BE_FILLED",
+    "accounting": "TO_BE_FILLED",
+    "allocator": "TO_BE_FILLED",
+    "processor": "TO_BE_FILLED",
+    "curator": "TO_BE_FILLED",
+    "guardian": "TO_BE_FILLED"
+  },
+  "verification": {
+    "status": "NOT_STARTED",
+    "contracts": {}
+  }
+}

@@ -103,14 +103,17 @@ contract ForkSmokeAaveEnable is Test {
         if (block.chainid != 8453) return;
 
         // ============ PHASE 1: Old positions (Aave disabled) ============
+        vm.prank(owner);
+        pool.setAaveEnabled(USDC, false);
 
         // Alice opens ETH PUT (USDC collateral, direct in pool)
         uint256 strikeOld = 5678e8;
         address oTokenOld = _createOToken(WETH, USDC, USDC, strikeOld, true);
         _executeOrder(oTokenOld, alice, 1e8, 5678e6, true);
 
-        // Verify: USDC went directly to pool, not Aave
-        assertEq(pool.totalDeposited(USDC), 0, "Phase 1: totalDeposited should be 0");
+        // Direct collateral predates Aave principal accounting and remains in the pool.
+        assertEq(pool.totalDeposited(USDC), 0, "Phase 1: Aave principal must be zero");
+        assertGe(IERC20(USDC).balanceOf(address(pool)), 5678e6, "Phase 1: direct collateral missing");
 
         // ============ PHASE 2: Enable Aave for all 3 assets ============
 
@@ -131,8 +134,8 @@ contract ForkSmokeAaveEnable is Test {
         address oTokenNew = _createOToken(WETH, USDC, USDC, strikeNew, true);
         _executeOrder(oTokenNew, bob, 1e8, 6789e6, true);
 
-        // Verify: Bob's USDC routed to Aave
-        assertEq(pool.totalDeposited(USDC), 6789e6, "Phase 3: totalDeposited should be Bob's deposit");
+        // Bob's USDC is routed to Aave; only the newly routed principal is tracked there.
+        assertEq(pool.totalDeposited(USDC), 6789e6, "Phase 3: Aave principal should equal Bob's deposit");
         assertGe(IERC20(A_USDC).balanceOf(address(pool)), 6789e6 - 1, "aUSDC not in pool");
 
         // ============ PHASE 4: Settle BOTH in one batch ============

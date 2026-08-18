@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-419",
+  "status": "NOT_ACTIVATED",
+  "sourceCommit": "FINAL_ABI_COMMIT_REQUIRED",
+  "deploymentId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "canonicalManifestSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "prepareReceipt": null,
+  "navReceipt": null,
+  "openReceipt": null,
+  "preparedReconciled": false,
+  "activatedReconciled": false
+}

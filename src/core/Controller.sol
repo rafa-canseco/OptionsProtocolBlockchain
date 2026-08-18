@@ -66,6 +66,7 @@ contract Controller is Initializable, UUPSUpgradeable {
     event SystemUnpaused(address indexed caller);
     event EmergencyWithdraw(address indexed user, uint256 vaultId, address asset, uint256 amount);
     event PartialPauserUpdated(address indexed oldPauser, address indexed newPauser);
+    event CustodiedRedemptionOnlyUpdated(bool enabled);
 
     error OnlyOwner();
     error InvalidVault();
@@ -202,7 +203,8 @@ contract Controller is Initializable, UUPSUpgradeable {
         (uint256 expiryPrice, bool isSet) = oracle.getExpiryPrice(oToken.underlying(), oToken.expiry());
         if (!isSet) revert ExpiryPriceNotSet();
 
-        uint256 payout = _calculatePayout(oToken, vault.shortAmount, expiryPrice);
+        bool isInTheMoney = oToken.isPut() ? expiryPrice < oToken.strikePrice() : expiryPrice > oToken.strikePrice();
+        uint256 payout = isInTheMoney ? _getRequiredCollateral(oToken, vault.shortAmount) : 0;
         uint256 collateralToReturn = payout >= vault.collateralAmount ? 0 : vault.collateralAmount - payout;
 
         vaultSettled[_owner][_vaultId] = true;
@@ -216,6 +218,7 @@ contract Controller is Initializable, UUPSUpgradeable {
 
     function redeem(address _oToken, uint256 _amount) external notFullyPaused {
         if (_amount == 0) revert NoOtokensToRedeem();
+        if (custodiedRedemptionOnly && msg.sender != addressBook.batchSettler()) revert Unauthorized();
 
         Whitelist wl = Whitelist(addressBook.whitelist());
         if (!wl.isWhitelistedOToken(_oToken)) revert OTokenNotWhitelisted();
@@ -312,6 +315,11 @@ contract Controller is Initializable, UUPSUpgradeable {
         }
     }
 
+    function setCustodiedRedemptionOnly(bool _enabled) external onlyOwner {
+        custodiedRedemptionOnly = _enabled;
+        emit CustodiedRedemptionOnlyUpdated(_enabled);
+    }
+
     /// @notice Allows a vault owner to rescue their collateral when the
     ///         system is fully paused (emergency circuit breaker).
     /// @dev    Marks the vault as settled to prevent double-claims.
@@ -329,27 +337,8 @@ contract Controller is Initializable, UUPSUpgradeable {
         uint256 amount = vault.collateralAmount;
         address asset = vault.collateralAsset;
 
-        // Burn oTokens and clear MM ledger to prevent phantom redemption
         if (vault.shortOtoken != address(0) && vault.shortAmount > 0) {
-            address settler = addressBook.batchSettler();
-            if (settler != address(0)) {
-                OToken ot = OToken(vault.shortOtoken);
-
-                address mm = IBatchSettlerClearance(settler).vaultMM(msg.sender, _vaultId);
-                if (mm != address(0)) {
-                    uint256 vaultBal = IBatchSettlerClearance(settler).vaultOTokenBalance(msg.sender, _vaultId);
-                    if (vaultBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
-                } else {
-                    // Pre-migration vault (no MM attribution): aggregate check
-                    uint256 settlerBal = ot.balanceOf(settler);
-                    if (settlerBal < vault.shortAmount) revert OTokensAlreadyRedeemed();
-                }
-
-                ot.burnOtoken(settler, vault.shortAmount);
-
-                IBatchSettlerClearance(settler)
-                    .clearMMBalanceForVault(msg.sender, _vaultId, vault.shortOtoken, vault.shortAmount);
-            }
+            revert OTokensAlreadyRedeemed();
         }
 
         vaultSettled[msg.sender][_vaultId] = true;
@@ -362,6 +351,9 @@ contract Controller is Initializable, UUPSUpgradeable {
     // --- Ownership ---
 
     address public pendingOwner;
+
+    /// @notice Restricts physical-settlement oToken redemption to the configured settler.
+    bool public custodiedRedemptionOnly;
 
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);

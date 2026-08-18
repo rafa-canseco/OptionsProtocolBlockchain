@@ -50,6 +50,7 @@ contract ForkUpgradeV3 is Test {
     address mm;
 
     uint256 expiry;
+    uint24 wethFeeTierBefore;
 
     function setUp() public {
         if (block.chainid != 8453) {
@@ -61,6 +62,7 @@ contract ForkUpgradeV3 is Test {
         operatorAddr = settler.operator();
         factoryOperator = factory.operator();
         mm = vm.addr(mmKey);
+        wethFeeTierBefore = settler.assetSwapFeeTier(address(weth));
 
         // --- Execute the upgrade (simulates UpgradeMainnetV3) ---
         vm.startPrank(owner);
@@ -126,7 +128,7 @@ contract ForkUpgradeV3 is Test {
         if (block.chainid != 8453) return;
 
         assertEq(settler.assetSwapFeeTier(CBBTC), 500, "cbBTC fee tier not set");
-        assertEq(settler.assetSwapFeeTier(address(weth)), 0, "WETH should have no override");
+        assertEq(settler.assetSwapFeeTier(address(weth)), wethFeeTierBefore, "WETH override changed during upgrade");
     }
 
     // ===== ETH vault + order execution still works post-upgrade =====
@@ -222,8 +224,8 @@ contract ForkUpgradeV3 is Test {
         // cbBTC has override = 500
         assertEq(settler.assetSwapFeeTier(CBBTC), 500);
 
-        // WETH has no override = 0 (falls back to global 3000)
-        assertEq(settler.assetSwapFeeTier(address(weth)), 0);
+        // The pre-existing WETH override is preserved exactly.
+        assertEq(settler.assetSwapFeeTier(address(weth)), wethFeeTierBefore);
 
         // Global fee tier preserved
         assertEq(settler.swapFeeTier(), 3000);

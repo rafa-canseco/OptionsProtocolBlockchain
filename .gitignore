@@ -4,11 +4,13 @@ out/
 
 # Dependencies
 lib/
+node_modules/
 
 # Environment / secrets
 .env
 .env.*
 .secret
+.secrets/
 *.key
 *.pem
 broadcast/
@@ -24,3 +26,7 @@ Thumbs.db
 # Coverage
 lcov.info
 coverage/
+
+# Python test fixtures
+__pycache__/
+*.py[cod]

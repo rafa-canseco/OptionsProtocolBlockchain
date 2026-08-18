@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://b1nary.example/schemas/b1n-419-meta-wheel-manifest-1.0.0.json",
+  "title": "B1N-419 Base Sepolia Meta Wheel deployment handoff",
+  "type": "object",
+  "required": ["schemaVersion", "issue", "status", "deploymentStatus", "handoffReady", "sourceCommit", "deploymentId", "network", "canonicalReceipts", "assets", "contracts", "v1Boundary", "policy", "linkedLibraries", "linkedLibraryCodehashes", "finalRoles", "standaloneBaselines", "readiness", "verificationEvidence"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "issue": {"const": "B1N-419"},
+    "status": {"enum": ["UNCONFIRMED_REQUIRES_CANONICAL_RECEIPTS", "CONFIRMED_CANONICAL_RECEIPTS"]},
+    "deploymentStatus": {"enum": ["UNCONFIRMED", "DEPLOYED"]},
+    "handoffReady": {"type": "boolean"},
+    "sourceCommit": {"type": "string"},
+    "deploymentId": {"$ref": "#/$defs/bytes32"},
+    "network": {
+      "type": "object",
+      "required": ["name", "chainId", "deploymentBlocks"],
+      "properties": {
+        "name": {"const": "base-sepolia"},
+        "chainId": {"const": 84532},
+        "deploymentBlocks": {
+          "type": "object",
+          "required": ["fundFirst", "fundLast"],
+          "properties": {"fundFirst": {"type": "integer", "minimum": 0}, "fundLast": {"type": "integer", "minimum": 0}}
+        }
+      }
+    },
+    "canonicalReceipts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["transactionHash", "blockNumber", "blockHash", "status"],
+        "properties": {
+          "transactionHash": {"$ref": "#/$defs/bytes32"},
+          "blockNumber": {"type": "integer", "minimum": 1},
+          "blockHash": {"$ref": "#/$defs/bytes32"},
+          "status": {"const": 1}
+        }
+      }
+    },
+    "assets": {
+      "type": "object",
+      "required": ["usdc", "weth", "swapRouter"],
+      "properties": {"usdc": {"$ref": "#/$defs/address"}, "weth": {"$ref": "#/$defs/address"}, "swapRouter": {"$ref": "#/$defs/address"}}
+    },
+    "contracts": {
+      "type": "object",
+      "required": ["fundVault", "fundShare", "fundAccounting", "fundFlowManager", "strategyManager", "wheelCoordinator", "claimEscrow", "accessManager", "metaWheelValuator", "navReportVerifier"],
+      "properties": {
+        "fundVault": {"$ref": "#/$defs/proxyContract"},
+        "fundShare": {"$ref": "#/$defs/proxyContract"},
+        "fundAccounting": {"$ref": "#/$defs/proxyContract"},
+        "fundFlowManager": {"$ref": "#/$defs/proxyContract"},
+        "strategyManager": {"$ref": "#/$defs/proxyContract"},
+        "wheelCoordinator": {"$ref": "#/$defs/proxyContract"},
+        "claimEscrow": {"$ref": "#/$defs/immutableContract"},
+        "accessManager": {"$ref": "#/$defs/immutableContract"},
+        "metaWheelValuator": {"$ref": "#/$defs/immutableContract"},
+        "navReportVerifier": {"$ref": "#/$defs/immutableContract"}
+      }
+    },
+    "v1Boundary": {
+      "type": "object",
+      "required": ["addressBook", "controller", "batchSettler", "marginPool", "oracle", "oTokenFactory", "whitelist"],
+      "properties": {
+        "addressBook": {"$ref": "#/$defs/v1Address"},
+        "controller": {"$ref": "#/$defs/v1Proxy"},
+        "batchSettler": {"$ref": "#/$defs/v1Proxy"},
+        "marginPool": {"$ref": "#/$defs/v1Address"},
+        "oracle": {"$ref": "#/$defs/v1Address"},
+        "oTokenFactory": {"$ref": "#/$defs/v1Address"},
+        "whitelist": {"$ref": "#/$defs/v1Address"}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": ["policyHash", "managementFeeWad", "performanceFeeBps", "premiumFeeBps"],
+      "properties": {"policyHash": {"$ref": "#/$defs/bytes32"}, "managementFeeWad": {"const": 20000000000000000}, "performanceFeeBps": {"const": 1000}, "premiumFeeBps": {"const": 1000}}
+    },
+    "linkedLibraries": {"type": "array", "minItems": 5, "items": {"$ref": "#/$defs/address"}},
+    "linkedLibraryCodehashes": {"type": "array", "minItems": 5, "items": {"$ref": "#/$defs/bytes32"}},
+    "finalRoles": {
+      "type": "object",
+      "required": ["admin", "upgrader", "accounting", "allocator", "processor", "curator", "guardian"],
+      "properties": {"admin": {"$ref": "#/$defs/address"}, "upgrader": {"$ref": "#/$defs/address"}, "accounting": {"$ref": "#/$defs/address"}, "allocator": {"$ref": "#/$defs/address"}, "processor": {"$ref": "#/$defs/address"}, "curator": {"$ref": "#/$defs/address"}, "guardian": {"$ref": "#/$defs/address"}}
+    },
+    "standaloneBaselines": {
+      "type": "object",
+      "required": ["cspVault", "cspAdapter", "coveredCallVault", "coveredCallAdapter"],
+      "properties": {"cspVault": {"$ref": "#/$defs/standalone"}, "cspAdapter": {"$ref": "#/$defs/standalone"}, "coveredCallVault": {"$ref": "#/$defs/standalone"}, "coveredCallAdapter": {"$ref": "#/$defs/standalone"}}
+    },
+    "verificationEvidence": {
+      "type": "object",
+      "required": ["method", "compilerVersion", "sourceRuntimeEvidenceSha256", "coreBuildInfoSha256", "libraryBuildInfoSha256", "coreStandardJsonInputSha256", "libraryStandardJsonInputSha256", "inventorySha256", "addressCount", "artifactCount"],
+      "properties": {
+        "method": {"const": "SOLC_STANDARD_JSON_RPC_EXACT_V2"},
+        "compilerVersion": {"const": "0.8.24+commit.e11b9ed9"},
+        "sourceRuntimeEvidenceSha256": {"$ref": "#/$defs/bytes32"},
+        "coreBuildInfoSha256": {"$ref": "#/$defs/bytes32"},
+        "libraryBuildInfoSha256": {"$ref": "#/$defs/bytes32"},
+        "coreStandardJsonInputSha256": {"$ref": "#/$defs/bytes32"},
+        "libraryStandardJsonInputSha256": {"$ref": "#/$defs/bytes32"},
+        "inventorySha256": {"$ref": "#/$defs/bytes32"},
+        "addressCount": {"type": "integer", "minimum": 0},
+        "artifactCount": {"type": "integer", "minimum": 0}
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "required": ["canonicalReceiptsRecorded", "exactSourceRuntimeBytecodeVerified", "bootstrapReconciled", "finalRolesReconciled", "standaloneBaselinesUnchanged", "backendHandoffReady", "mainnetAuthorized"],
+      "properties": {"canonicalReceiptsRecorded": {"type": "boolean"}, "exactSourceRuntimeBytecodeVerified": {"type": "boolean"}, "bootstrapReconciled": {"type": "boolean"}, "finalRolesReconciled": {"type": "boolean"}, "standaloneBaselinesUnchanged": {"type": "boolean"}, "backendHandoffReady": {"type": "boolean"}, "mainnetAuthorized": {"const": false}}
+    }
+  },
+  "allOf": [
+    {"if": {"properties": {"deploymentStatus": {"const": "UNCONFIRMED"}}}, "then": {"properties": {"status": {"const": "UNCONFIRMED_REQUIRES_CANONICAL_RECEIPTS"}, "handoffReady": {"const": false}}}},
+    {"if": {"properties": {"deploymentStatus": {"const": "DEPLOYED"}}}, "then": {"properties": {"status": {"const": "CONFIRMED_CANONICAL_RECEIPTS"}, "handoffReady": {"const": true}, "canonicalReceipts": {"minItems": 2}, "verificationEvidence": {"properties": {"addressCount": {"const": 47}, "artifactCount": {"const": 25}}}, "readiness": {"properties": {"canonicalReceiptsRecorded": {"const": true}, "exactSourceRuntimeBytecodeVerified": {"const": true}, "bootstrapReconciled": {"const": true}, "finalRolesReconciled": {"const": true}, "standaloneBaselinesUnchanged": {"const": true}, "backendHandoffReady": {"const": true}, "mainnetAuthorized": {"const": false}}}}}}
+  ],
+  "$defs": {
+    "address": {"type": "string", "pattern": "^0x[0-9a-fA-F]{40}$"},
+    "bytes32": {"type": "string", "pattern": "^0x[0-9a-fA-F]{64}$"},
+    "proxyContract": {"type": "object", "required": ["proxy", "implementation", "validFromBlock", "implementationValidFromBlock", "implementationCodehash"], "properties": {"proxy": {"$ref": "#/$defs/address"}, "implementation": {"$ref": "#/$defs/address"}, "validFromBlock": {"type": "integer", "minimum": 0}, "implementationValidFromBlock": {"type": "integer", "minimum": 0}, "implementationCodehash": {"$ref": "#/$defs/bytes32"}}},
+    "immutableContract": {"type": "object", "required": ["address", "validFromBlock", "codehash"], "properties": {"address": {"$ref": "#/$defs/address"}, "validFromBlock": {"type": "integer", "minimum": 0}, "codehash": {"$ref": "#/$defs/bytes32"}}},
+    "v1Address": {"type": "object", "required": ["proxy", "unchanged"], "properties": {"proxy": {"$ref": "#/$defs/address"}, "unchanged": {"type": "boolean"}}},
+    "v1Proxy": {"type": "object", "required": ["proxy", "implementation", "unchanged"], "properties": {"proxy": {"$ref": "#/$defs/address"}, "implementation": {"$ref": "#/$defs/address"}, "unchanged": {"type": "boolean"}}},
+    "standalone": {"type": "object", "required": ["proxy", "implementation", "implementationCodehash", "unchanged"], "properties": {"proxy": {"$ref": "#/$defs/address"}, "implementation": {"$ref": "#/$defs/address"}, "implementationCodehash": {"$ref": "#/$defs/bytes32"}, "unchanged": {"type": "boolean"}}}
+  }
+}

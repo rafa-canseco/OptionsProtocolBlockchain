@@ -1,0 +1,407 @@
+[
+  {
+    "type": "function",
+    "name": "interfaceVersion",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "verifyNavReport",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct INavReportVerifier.VerifyNavReportParams",
+        "components": [
+          {
+            "name": "fund",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "reportNonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "reporterSetVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "reporterThreshold",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "activationDelay",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "maxSnapshotAge",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "maxWindowLength",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "reportHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "digest",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      },
+      {
+        "name": "reports",
+        "type": "tuple[]",
+        "internalType": "struct FundTypes.ComponentReport[]",
+        "components": [
+          {
+            "name": "fund",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "componentId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "snapshotBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "snapshotBlockHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "validAfterBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "validUntilBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "reporterSetVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "componentNonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "positionStateHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "grossAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liabilities",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidAccountingAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "baseExitCost",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "dataHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      },
+      {
+        "name": "reporters",
+        "type": "address[]",
+        "internalType": "address[]"
+      },
+      {
+        "name": "signatures",
+        "type": "bytes[]",
+        "internalType": "bytes[]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "nav",
+        "type": "tuple",
+        "internalType": "struct FundTypes.NavCommit",
+        "components": [
+          {
+            "name": "grossAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liabilities",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "netAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidAccountingAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "baseExitCost",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "snapshotBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "validAfterBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "validUntilBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "reporterSetVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "reportNonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "positionsHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "reportHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "signaturesHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "fundFlowNonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "idleStateHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "error",
+    "name": "DuplicateComponent",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "DuplicateReporter",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ECDSAInvalidSignature",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ECDSAInvalidSignatureLength",
+    "inputs": [
+      {
+        "name": "length",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ECDSAInvalidSignatureS",
+    "inputs": [
+      {
+        "name": "s",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "IncompleteComponentSet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidChain",
+    "inputs": [
+      {
+        "name": "chainId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidFund",
+    "inputs": [
+      {
+        "name": "fund",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidPositionState",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidReportWindow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidReporter",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidReporterSet",
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidSignatureCount",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidSnapshotBlock",
+    "inputs": [
+      {
+        "name": "snapshotBlock",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LiabilityExceedsAssets",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "StaleComponent",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  }
+]

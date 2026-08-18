@@ -69,6 +69,9 @@ contract ForkUpgradeV4V5 is Test {
     address factoryOperator;
     address user = address(0xBEEF);
     uint256 expiry;
+    bool usdcAaveBefore;
+    bool wethAaveBefore;
+    bool cbbtcAaveBefore;
 
     function setUp() public {
         if (block.chainid != 8453) {
@@ -78,6 +81,9 @@ contract ForkUpgradeV4V5 is Test {
 
         owner = controller.owner();
         factoryOperator = factory.operator();
+        usdcAaveBefore = pool.isAaveEnabled(USDC);
+        wethAaveBefore = pool.isAaveEnabled(WETH);
+        cbbtcAaveBefore = pool.isAaveEnabled(CBBTC);
 
         // --- V4: Controller upgrade ---
         vm.startPrank(owner);
@@ -89,7 +95,7 @@ contract ForkUpgradeV4V5 is Test {
         MarginPool poolImpl = new MarginPool();
         pool.upgradeToAndCall(address(poolImpl), "");
 
-        pool.setAavePool(AAVE_V3_POOL);
+        if (address(pool.aavePool()) != AAVE_V3_POOL) pool.setAavePool(AAVE_V3_POOL);
         pool.setYieldRecipient(OPERATOR);
         pool.setOperator(OPERATOR);
         pool.setAToken(USDC, A_USDC);
@@ -133,7 +139,7 @@ contract ForkUpgradeV4V5 is Test {
         assertFalse(controller.systemPartiallyPaused(), "partialPause corrupted");
     }
 
-    function test_controllerUpgrade_blocksZeroCollateralPut() public {
+    function test_controllerUpgrade_roundsMinimumPutCollateralUp() public {
         if (block.chainid != 8453) return;
 
         // Create a put option with low strike
@@ -143,16 +149,15 @@ contract ForkUpgradeV4V5 is Test {
         vm.prank(owner);
         whitelist.whitelistOToken(oToken);
 
-        // Deposit 1 wei of USDC to set the collateral type, then
-        // try to mint amount=1. With strike=1e8 (=$1):
-        //   required = (1 * 1e8) / 1e10 = 0
-        // B1N-204 guard: required==0 && amount>0 → revert
+        // The upgraded controller rounds the positive collateral requirement up to one USDC unit.
+        vm.prank(owner);
+        pool.setAaveEnabled(USDC, false);
         vm.startPrank(user);
         controller.openVault(user);
         controller.depositCollateral(user, 1, USDC, 1);
-        vm.expectRevert(Controller.InsufficientCollateral.selector);
         controller.mintOtoken(user, 1, oToken, 1, user);
         vm.stopPrank();
+        assertEq(OToken(oToken).balanceOf(user), 1);
     }
 
     function test_controllerUpgrade_normalMintingWorks() public {
@@ -189,12 +194,12 @@ contract ForkUpgradeV4V5 is Test {
         assertEq(pool.operator(), OPERATOR, "operator not set");
     }
 
-    function test_marginPoolUpgrade_aaveDisabledByDefault() public {
+    function test_marginPoolUpgrade_preservesAaveCircuitBreakerState() public {
         if (block.chainid != 8453) return;
 
-        assertFalse(pool.isAaveEnabled(USDC), "USDC should be disabled");
-        assertFalse(pool.isAaveEnabled(WETH), "WETH should be disabled");
-        assertFalse(pool.isAaveEnabled(CBBTC), "cbBTC should be disabled");
+        assertEq(pool.isAaveEnabled(USDC), usdcAaveBefore, "USDC Aave state changed");
+        assertEq(pool.isAaveEnabled(WETH), wethAaveBefore, "WETH Aave state changed");
+        assertEq(pool.isAaveEnabled(CBBTC), cbbtcAaveBefore, "cbBTC Aave state changed");
     }
 
     function test_marginPoolUpgrade_aTokenMappings() public {
@@ -211,8 +216,9 @@ contract ForkUpgradeV4V5 is Test {
     function test_marginPoolUpgrade_passthroughWorks() public {
         if (block.chainid != 8453) return;
 
-        // With Aave disabled, transferToPool/transferToUser
-        // should work as pure passthrough
+        // Explicitly disable Aave on the ephemeral fork, then verify pure passthrough.
+        vm.prank(owner);
+        pool.setAaveEnabled(USDC, false);
         uint256 strike = 2345e8; // Unique strike
         vm.prank(factoryOperator);
         address oToken = factory.createOToken(WETH, USDC, USDC, strike, expiry, true);
