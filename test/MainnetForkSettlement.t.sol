@@ -46,9 +46,11 @@ contract MainnetForkSettlement is Test {
         expiry = nextDay - (nextDay % 1 days) + 8 hours;
         if (expiry <= block.timestamp) expiry += 1 days;
 
-        // Disable oracle staleness check for fork testing
-        vm.prank(owner);
+        // Disable live-feed freshness/deviation policy for deterministic synthetic expiry prices on the fork.
+        vm.startPrank(owner);
         oracle.setMaxOracleStaleness(0);
+        oracle.setPriceDeviationThreshold(0);
+        vm.stopPrank();
 
         // Fund user with tokens (whale impersonation via deal)
         deal(address(weth), user, 100e18);

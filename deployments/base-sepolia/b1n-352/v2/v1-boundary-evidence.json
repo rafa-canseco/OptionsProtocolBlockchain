@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-352",
+  "network": "base-sepolia",
+  "observedAtBlock": 44570018,
+  "source": "b1n-352/v1/manifest.json baseline plus Base Sepolia read-only reconciliation",
+  "invariant": "The isolated B1N-336 Controller and BatchSettler V1 stack was not upgraded or replaced by the v2 fund deployment.",
+  "controller": {
+    "proxy": "0xD52EFbBaA1b02BA65A7f0A1604A5dFb4C4dB1572",
+    "implementation": "0x5cfB9ca0437D4a5b3735bba0d9E2490a05F532bc",
+    "implementationCodehash": "0xd112e28c04dac654210602e73e2278e9f6ec8b847ac7f0cdac251787f51f42bf",
+    "owner": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "pendingOwner": "0x0000000000000000000000000000000000000000",
+    "custodiedRedemptionOnly": true,
+    "proxyAndImplementationUnchanged": true
+  },
+  "batchSettler": {
+    "proxy": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
+    "implementation": "0x040219e594de2862D1480a6A3c1d45c5c032aCE6",
+    "implementationCodehash": "0x5614f407be81f95e601647ed2777d2762ff5e26d64a329b525d7fab9f21c207d",
+    "owner": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "pendingOwner": "0x0000000000000000000000000000000000000000",
+    "physicalDeliveryVaultAuthorized": true,
+    "proxyAndImplementationUnchanged": true
+  },
+  "checks": {
+    "controllerProxyAddressMatchesBaseline": true,
+    "controllerImplementationAddressMatchesBaseline": true,
+    "controllerImplementationCodehashMatchesBaseline": true,
+    "batchSettlerProxyAddressMatchesBaseline": true,
+    "batchSettlerImplementationAddressMatchesBaseline": true,
+    "batchSettlerImplementationCodehashMatchesBaseline": true,
+    "noV1UpgradeTransactionInV2Transactions": true,
+    "onlyExpectedMutation": "BatchSettler physical-delivery authorization for the v2 adapter"
+  }
+}

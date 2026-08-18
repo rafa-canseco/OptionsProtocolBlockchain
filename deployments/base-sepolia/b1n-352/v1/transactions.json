@@ -1,0 +1,123 @@
+{
+  "schemaVersion": "1.0.0",
+  "deploymentStatus": "DEPLOYED_POLICY_PENDING",
+  "approvedInputsSha256": "0xa800e834bab6e16cf42b6f7f48a6c90320162d04dfa8d4ba4bbbe3cb42bb340a",
+  "transactions": [
+    {
+      "phase": "deploy-library",
+      "label": "CspFundAdapterOperations",
+      "hash": "0xa479e9329d83deebb3aad6b2ccb6b574e4fa1892b489f205e7b16db6ad88d50f",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "FundVault implementation",
+      "hash": "0x42145c66b07be8de77e32ae8344045920daf1f4613c8d88fe7beba4f368d327a",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "FundShare implementation",
+      "hash": "0xedd83cf4931c13f6027ebcbfedca855d961a2ab9f2121bc32e8a83752b66d14f",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "FundAccounting implementation",
+      "hash": "0xb8e556cc519fe8a8c2b1b936d8df57a6ec15f83f13795732c568f507d8014bab",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "FundFlowManager implementation",
+      "hash": "0x289df29d3a2ffafc7b2d01075629697b110de545b8b5d7cfacb6997442f7b196",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "StrategyManager implementation",
+      "hash": "0xe51120a1aa056d15a42dbc1429c9f360fbd8a1746d1f5506a6837c548c840c39",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "NavReportVerifier",
+      "hash": "0x0742683c62a4f13b0205c171d49aeeee22a469ff43b97ff9bd8f31ad7ce7e014",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "FundFactory",
+      "hash": "0xea245a7631c9d25a05fc6c0d4d5724a70675af2b737c8b6bc77af554467cf348",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "register implementation version",
+      "hash": "0xf27fde752959449c0bc04d1a56e1735da1e1998b3d1d93bd9746408dc546909a",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "create fund and proxies",
+      "hash": "0x05b404ab1b251240c1e0cb14b6f4274e9f9fb4d2bde44e5796784828e403cb52",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "CspFundAdapter implementation",
+      "hash": "0xccbfa832e041b19344835a4cf9f19faa7d85fc06daff1ec7010ccec8254f7d74",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "CspFundAdapter proxy",
+      "hash": "0x958d159f51108972160a91649cb3222e71593c8a19aa3bd068a7cb86940a4fb3",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "CspFundValuator",
+      "hash": "0x589c2de76a20871153601e56cb7a6aa69c2b20a1024c06b2e8c2f23b531ccfa3",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "in-kind StrategyAssetEscrow",
+      "hash": "0x5db09df4d859f55b8913f17b7d2b6dc5bf68dab32b0980b6a8c3c8daf5fe952a",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "emergency StrategyAssetEscrow",
+      "hash": "0x6d66d01083f0691c8c1e60ed55fea7a36ec8bde8ed2ad069502902bcefe4ec80",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "transfer FundFactory ownership",
+      "hash": "0x01f42cf676da39357640043f62cdd6b26d927721e3d0d7abeddedd004117d55f",
+      "status": "success"
+    },
+    {
+      "phase": "deploy-fund",
+      "label": "pause deposits",
+      "hash": "0xde30a78dfc5932d78c837c66e1634a0746320d1362f68ec103ae162516dbabed",
+      "status": "success"
+    },
+    {
+      "phase": "access",
+      "label": "schedule eight access operations",
+      "hash": "0x3a7dbf0b5ac9516ce9c4aa196067ecad9a60a62aa63a389881fa7caa5aa48f36",
+      "readyAt": 1784998928,
+      "status": "scheduled"
+    },
+    {
+      "phase": "policy",
+      "label": "schedule seven inactive-policy operations",
+      "hash": "0xacf92e02891f975a253a27fb59a50912597f5f7ff84e6060da7ca47c89677701",
+      "readyAt": 1784826378,
+      "status": "scheduled"
+    }
+  ]
+}

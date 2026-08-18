@@ -1,0 +1,1597 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "NAV_REPORT_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "UPGRADE_INTERFACE_VERSION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "accrueManagementFee",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "feeShares",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "activeComponentAt",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "activeComponentCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "activeReporterAt",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "activeReporterCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "authority",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "compatibilityVersion",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "componentNonce",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "componentState",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct FundAccountingStorage.ComponentState",
+        "components": [
+          {
+            "name": "valuator",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "interfaceVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "nonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "positionStateHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "active",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "feeConfig",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct FundTypes.FeeConfig",
+        "components": [
+          {
+            "name": "managementFeeWad",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "performanceFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxManagementFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxPerformanceFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxAccrualInterval",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "crystallizationPeriod",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "feeRecipient",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "feeState",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct FundTypes.FeeState",
+        "components": [
+          {
+            "name": "lastManagementAccrual",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "lastCrystallization",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "highWaterMark",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "distributionRemainder",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "distributionRemainderSupply",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "fund",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "inputs": [
+      {
+        "name": "fund_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "navVerifier_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "authority_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "compatibilityVersion_",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "activationDelay_",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "maxSnapshotAge_",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "maxWindowLength_",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "feeConfig_",
+        "type": "tuple",
+        "internalType": "struct FundTypes.FeeConfig",
+        "components": [
+          {
+            "name": "managementFeeWad",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "performanceFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxManagementFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxPerformanceFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxAccrualInterval",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "crystallizationPeriod",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "feeRecipient",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "isConsumingScheduledOp",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isReporter",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "lastReportNonce",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "navPolicy",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "activationDelay",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "maxSnapshotAge",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "maxWindowLength",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "navVerifier",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "navVerifierVersion",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "proxiableUUID",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "reportHash",
+    "inputs": [
+      {
+        "name": "reportNonce",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "reports",
+        "type": "tuple[]",
+        "internalType": "struct FundTypes.ComponentReport[]",
+        "components": [
+          {
+            "name": "fund",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "componentId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "snapshotBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "snapshotBlockHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "validAfterBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "validUntilBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "reporterSetVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "componentNonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "positionStateHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "grossAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liabilities",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidAccountingAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "baseExitCost",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "dataHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "reporterSetVersion",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "reporterThreshold",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "setAuthority",
+    "inputs": [
+      {
+        "name": "newAuthority",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setComponent",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "valuator",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "interfaceVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setComponentState",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "positionStateHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setFeeConfig",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct FundTypes.FeeConfig",
+        "components": [
+          {
+            "name": "managementFeeWad",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "performanceFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxManagementFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxPerformanceFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxAccrualInterval",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "crystallizationPeriod",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "feeRecipient",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setReporterSet",
+    "inputs": [
+      {
+        "name": "reporters",
+        "type": "address[]",
+        "internalType": "address[]"
+      },
+      {
+        "name": "threshold",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "version",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "signatureDigest",
+    "inputs": [
+      {
+        "name": "reportNonce",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "reports",
+        "type": "tuple[]",
+        "internalType": "struct FundTypes.ComponentReport[]",
+        "components": [
+          {
+            "name": "fund",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "componentId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "snapshotBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "snapshotBlockHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "validAfterBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "validUntilBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "reporterSetVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "componentNonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "positionStateHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "grossAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liabilities",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidAccountingAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "baseExitCost",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "dataHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "strategyComponentId",
+    "inputs": [
+      {
+        "name": "adapter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "submitNav",
+    "inputs": [
+      {
+        "name": "reportNonce",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "reports",
+        "type": "tuple[]",
+        "internalType": "struct FundTypes.ComponentReport[]",
+        "components": [
+          {
+            "name": "fund",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "componentId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "snapshotBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "snapshotBlockHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "validAfterBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "validUntilBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "reporterSetVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "componentNonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "positionStateHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "grossAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liabilities",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidAccountingAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "baseExitCost",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "dataHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      },
+      {
+        "name": "reporters",
+        "type": "address[]",
+        "internalType": "address[]"
+      },
+      {
+        "name": "signatures",
+        "type": "bytes[]",
+        "internalType": "bytes[]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "nav",
+        "type": "tuple",
+        "internalType": "struct FundTypes.NavCommit",
+        "components": [
+          {
+            "name": "grossAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liabilities",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "netAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidAccountingAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "baseExitCost",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "snapshotBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "validAfterBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "validUntilBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "reporterSetVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "reportNonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "positionsHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "reportHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "signaturesHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "fundFlowNonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "idleStateHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "syncStrategyComponent",
+    "inputs": [
+      {
+        "name": "adapter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "positionStateHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "upgradeToAndCall",
+    "inputs": [
+      {
+        "name": "newImplementation",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "event",
+    "name": "AuthorityUpdated",
+    "inputs": [
+      {
+        "name": "authority",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ComponentStateUpdated",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "positionStateHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ComponentUpdated",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "valuator",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "interfaceVersion",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FeeConfigUpdated",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "managementFeeWad",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "performanceFeeBps",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Initialized",
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "NavSubmitted",
+    "inputs": [
+      {
+        "name": "reportNonce",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "reportHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "netAssets",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "feeShares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ReporterSetUpdated",
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "threshold",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      },
+      {
+        "name": "reporters",
+        "type": "address[]",
+        "indexed": false,
+        "internalType": "address[]"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Upgraded",
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AccessManagedInvalidAuthority",
+    "inputs": [
+      {
+        "name": "authority",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AccessManagedRequiredDelay",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "delay",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AccessManagedUnauthorized",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AddressEmptyCode",
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "DuplicateComponent",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "DuplicateReporter",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ERC1967InvalidImplementation",
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ERC1967NonPayable",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FailedCall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FeeExceedsNav",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "IncompleteComponentSet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidBps",
+    "inputs": [
+      {
+        "name": "bps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidChain",
+    "inputs": [
+      {
+        "name": "chainId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidFeeConfig",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidFund",
+    "inputs": [
+      {
+        "name": "fund",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidInitialization",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidPositionState",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidReportNonce",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "actual",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidReportWindow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidReporter",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidReporterSet",
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidReporterThreshold",
+    "inputs": [
+      {
+        "name": "threshold",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "reporterCount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidSignatureCount",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidSnapshotBlock",
+    "inputs": [
+      {
+        "name": "snapshotBlock",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidValuator",
+    "inputs": [
+      {
+        "name": "valuator",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LiabilityExceedsAssets",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotInitializing",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "StaleComponent",
+    "inputs": [
+      {
+        "name": "componentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UUPSUnauthorizedCallContext",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UUPSUnsupportedProxiableUUID",
+    "inputs": [
+      {
+        "name": "slot",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnauthorizedFeeAccrual",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnauthorizedStrategyManager",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  }
+]

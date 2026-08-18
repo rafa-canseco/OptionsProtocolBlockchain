@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-352",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532
+  },
+  "approval": {
+    "status": "APPROVED_FOR_MANUAL_QA",
+    "approvedBy": "Rafa Canseco",
+    "approvedAt": "2026-07-21",
+    "evidence": "Explicit user instruction to deploy and test B1N-352 on Base Sepolia"
+  },
+  "b1n346": {
+    "decision": "NO_GO_FOR_AUTOMATION",
+    "preserved": true,
+    "exception": "Manual, supervised Base Sepolia validation only"
+  },
+  "scope": {
+    "manualQaOnly": true,
+    "allocatorBotEnabled": false,
+    "publicDepositsEnabled": false,
+    "mainnetAuthorized": false,
+    "activeStagingV1MutationAuthorized": false,
+    "isolatedB1N336CoreOnly": true
+  },
+  "limits": {
+    "initialDepositsPaused": true,
+    "minimumIdleBps": 7500,
+    "strategyMaxAllocationBps": 2500,
+    "strategyAbsoluteCap": 25000000,
+    "maxCollateralPerPosition": 25000000,
+    "maxOpenPositions": 3,
+    "managementFeeWad": 0,
+    "performanceFeeBps": 0
+  },
+  "qaControls": {
+    "useOnlyControlledTestAccounts": true,
+    "pauseDepositsImmediatelyAfterDepositSmokeTest": true,
+    "pauseAllocationImmediatelyAfterStrategySmokeTest": true,
+    "requireReadOnlyReconciliationAfterEachPhase": true,
+    "requireFreshMainnetProxies": true
+  }
+}

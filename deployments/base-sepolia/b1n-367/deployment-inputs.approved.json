@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-367",
+  "network": {"name": "base-sepolia", "chainId": 84532},
+  "approval": {
+    "status": "APPROVED",
+    "approvedBy": "Rafa Canseco",
+    "approvedAt": "2026-07-26"
+  },
+  "source": {
+    "branch": "feat/b1n-367-csp-fair-nav",
+    "solc": "0.8.24",
+    "optimizerRuns": 200,
+    "viaIr": true,
+    "artifact": "out/CspFundValuatorV2.sol/CspFundValuatorV2.json"
+  },
+  "environment": {
+    "FUND_PHASE_SCHEDULER": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "FUND_CSP_SPOT_FEED": "0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1",
+    "FUND_CSP_SPOT_FEED_DECIMALS": 8,
+    "FUND_CSP_MAX_SPOT_STALENESS_SECONDS": 3600,
+    "FUND_CSP_MAX_OBSERVATION_WINDOW_BLOCKS": 120,
+    "FUND_CSP_OBSERVATION_QUORUM": 2,
+    "FUND_CSP_LIABILITY_BUFFER_BPS": 0,
+    "FUND_CSP_APPROVED_OBSERVERS": [
+      "0x3d17E7448914D1a2D8b761055722F7d4dCd99606",
+      "0x989260c638356C6F671dA7dcF5339C7236C556e9"
+    ]
+  }
+}

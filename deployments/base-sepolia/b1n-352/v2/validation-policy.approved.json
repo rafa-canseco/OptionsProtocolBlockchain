@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "2.0.0",
+  "issue": "B1N-352",
+  "network": {"name": "base-sepolia", "chainId": 84532},
+  "approval": {
+    "status": "APPROVED_FOR_SUPERVISED_TESTNET_VALIDATION",
+    "approvedBy": "Rafa Canseco",
+    "approvedAt": "2026-07-23",
+    "evidence": "Redeploy only the B1N-352 Fund without timelocks; reuse isolated B1N-336 and current authority"
+  },
+  "scope": {
+    "fundRedeployOnly": true,
+    "isolatedB1N336CoreOnly": true,
+    "v1UpgradeAuthorized": false,
+    "authorityRotationAuthorized": false,
+    "allocatorBotEnabled": false,
+    "mainnetAuthorized": false
+  },
+  "limits": {
+    "initialDepositsPaused": true,
+    "initialStrategyActive": false,
+    "minimumIdleBps": 7500,
+    "strategyMaxAllocationBps": 2500,
+    "strategyAbsoluteCap": 25000000,
+    "maxCollateralPerPosition": 25000000,
+    "maxOpenPositions": 3,
+    "managementFeeWad": 0,
+    "performanceFeeBps": 0,
+    "exitFeeBps": 0,
+    "navActivationBlocks": 1,
+    "strategyCooldownSeconds": 0,
+    "governanceDelaysSeconds": 0
+  },
+  "controls": {
+    "factoryOneShotOwnerOnly": true,
+    "approvedInputDigestRequired": true,
+    "v1BaselineAndCodehashChecksRequired": true,
+    "reconcileAfterEveryPhase": true,
+    "openDepositsRequiresSeparateExplicitPhase": true
+  }
+}

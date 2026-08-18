@@ -1,0 +1,307 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-360",
+  "deploymentStatus": "DEPLOYED",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532,
+    "blockscout": "https://base-sepolia.blockscout.com",
+    "deploymentBlocks": {
+      "v1ProductFirst": 44709872,
+      "v1ProductLast": 44709873,
+      "fundFirst": 44709928,
+      "fundLast": 44709943,
+      "accessConfigured": 44710016,
+      "policyConfigured": 44710037,
+      "adapterOnboarded": 44710058,
+      "reconciled": 44710111,
+      "workersFinalized": 44713445,
+      "processorRotated": 44713590,
+      "strategyActivated": 44713652,
+      "navGatedVaultImplementation": 44714399,
+      "navGatedVaultUpgrade": 44714433,
+      "depositsOpened": 44714463
+    }
+  },
+  "source": {
+    "gitCommit": "eaeb0a0536d4534850ae4fc1ec3eea8a64f1296a",
+    "approvedInputsSha256": "0x7c85a4ab27f62e824bcd8a3501e36eb37b919565a6d71e36746cf38f9189e9d4",
+    "validationPolicySha256": "0x4ecb60fc6a19ac0a10c37ca380998b3566a3193693a10fb211f86bb61a2bebf3",
+    "policySourceCommit": "73e21a2e2df0a8dbe2aa480bf3c76777e1531f8b",
+    "branch": "feat/b1n-360-covered-call-base-sepolia-deploy",
+    "solc": "0.8.24",
+    "optimizerRuns": 200,
+    "viaIr": true,
+    "implementationVersion": 1,
+    "compatibilityVersion": 1
+  },
+  "identity": {
+    "fundKey": "base-sepolia:covered-call",
+    "strategyKind": "covered_call",
+    "name": "b1nary Base Sepolia Covered Call Fund",
+    "symbol": "b1CALL"
+  },
+  "v1Boundary": {
+    "stack": "isolated-b1n-336",
+    "activeStagingV1Touched": true,
+    "implementationsOrOwnersChanged": false,
+    "accountingAsset": "0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6",
+    "weth": "0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6",
+    "usdc": "0xAB51a471493832C1D70cef8ff937A850cf37c860",
+    "approvedMutations": [
+      {
+        "target": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
+        "operation": "whitelistCollateral(address)",
+        "selector": "0xa34626c4",
+        "arguments": ["0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6"],
+        "transactionHash": "0x59e4dc1a7532e27c339009598734d2dceea1f487fd6058c1cb2e41aa2c93e1ae",
+        "block": 44709872
+      },
+      {
+        "target": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
+        "operation": "whitelistProduct(address,address,address,bool)",
+        "selector": "0x82d90ebf",
+        "arguments": [
+          "0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6",
+          "0xAB51a471493832C1D70cef8ff937A850cf37c860",
+          "0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6",
+          false
+        ],
+        "transactionHash": "0x0476c6a439148dae1e20daf2749c1090741d7de856a26bdc691b8c65a13671a9",
+        "block": 44709873
+      },
+      {
+        "target": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
+        "operation": "setPhysicalDeliveryVault(address,bool)",
+        "selector": "0x067e3d23",
+        "arguments": ["0x0BF96C5cE0D637d4D686d342aE42Bc00fDa19De9", true],
+        "transactionHash": "0x8b86f91bce60898778ababc7c8952a3096a7e3c046395cd6c3faa1d456ee3af9",
+        "block": 44710058
+      }
+    ],
+    "addressBook": {
+      "proxy": "0x033d9d37Baf83dBc71935239b6fA22a6905dbaa0",
+      "implementation": "0x21aBa53771dDfE58DB867D5C47Cd0DA94ba5c5A4",
+      "implementationCodehash": "0x941c8e4f854e594128e56573002d5ec2195af2f8a0496741472a65a6d0be4eb5",
+      "unchanged": true
+    },
+    "controller": {
+      "proxy": "0xD52EFbBaA1b02BA65A7f0A1604A5dFb4C4dB1572",
+      "implementation": "0x5cfB9ca0437D4a5b3735bba0d9E2490a05F532bc",
+      "implementationCodehash": "0xd112e28c04dac654210602e73e2278e9f6ec8b847ac7f0cdac251787f51f42bf",
+      "unchanged": true
+    },
+    "marginPool": {
+      "proxy": "0xeEab53b8022C32349A80C8d905492EBa6b2deaE9",
+      "implementation": "0x972E135596451001D01cB78417E1A2dB968954b3",
+      "implementationCodehash": "0x6498cd1d70f247cc91984ebcc9c7a4dca8f663bf806e26e85692c1345d3d0b6a",
+      "unchanged": true
+    },
+    "oTokenFactory": {
+      "proxy": "0x193ED89eB64d0179b4dB08E87E541b7b3c30002A",
+      "implementation": "0xC5A9aCe7B4cFf1471e32286532398E2B3c090B46",
+      "implementationCodehash": "0xebdd9e1867ce0105e8690b0b59c733fda64325aaade0339821b3c378af49cb1a",
+      "unchanged": true
+    },
+    "oracle": {
+      "proxy": "0xF95CC4aED4a0bD68e0F1BE7c779BC281189F8187",
+      "implementation": "0xaB1D8DD33909600a593261c6D26fDCfc65EF2816",
+      "implementationCodehash": "0xab27c7303a3b87fd44d46d546414f84c9332930d2f966b4e0def72b00623a74c",
+      "unchanged": true
+    },
+    "whitelist": {
+      "proxy": "0xe0Ca66a93341eB0af0C136651c8B57C187aa60Ab",
+      "implementation": "0x440FF0Bba13D35dD9bCe388C8A5970ceeCdB53b9",
+      "implementationCodehash": "0x6236288208616a5bb50b9a6a792966c3de4c408010d717ee7785752c0882cc8b",
+      "ownerBefore": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+      "ownerAfter": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+      "implementationBefore": "0x440FF0Bba13D35dD9bCe388C8A5970ceeCdB53b9",
+      "implementationAfter": "0x440FF0Bba13D35dD9bCe388C8A5970ceeCdB53b9",
+      "wethCollateralWhitelisted": true,
+      "coveredCallProductWhitelisted": true
+    },
+    "batchSettler": {
+      "proxy": "0xb94D6270B336dca566C2077d50c2C50F06398cB8",
+      "implementation": "0x040219e594de2862D1480a6A3c1d45c5c032aCE6",
+      "implementationCodehash": "0x5614f407be81f95e601647ed2777d2762ff5e26d64a329b525d7fab9f21c207d",
+      "ownerBefore": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+      "ownerAfter": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+      "implementationBefore": "0x040219e594de2862D1480a6A3c1d45c5c032aCE6",
+      "implementationAfter": "0x040219e594de2862D1480a6A3c1d45c5c032aCE6",
+      "physicalDeliveryVaultAuthorized": true
+    }
+  },
+  "contracts": {
+    "fundFactory": {
+      "address": "0x6F5b59047629730f973c75c8941d88Ed526946b8",
+      "validFromBlock": 44709935,
+      "codehash": "0x55711227f32266b6bfe6418a08c413e16d38ef4c862675c9687a1813249bedca"
+    },
+    "fundAccessManagerDeployer": {
+      "address": "0x36CCDa1DBEbb09012Dd589821B8e3fD19dBfe4D7",
+      "validFromBlock": 44709935,
+      "codehash": "0x090404a35957266b4163a2a8c1399f25c74dcbee607bb1031b13e6674e9842bd"
+    },
+    "deploymentId": "0x642e01014a44b6b6236b5de3ac50b10b3d693f9991a580d48e7ce926672608dc",
+    "accessManager": {
+      "address": "0x5AfD3d840ec2f7fE078b44b75462C2dCD3DC3F6D",
+      "validFromBlock": 44709937,
+      "type": "FundAccessManager",
+      "codehash": "0xb12b4f94beba48fe8a7b463894c1fd4a385ada50e36d15da0b1df9c394185840"
+    },
+    "fundVault": {
+      "proxy": "0x9060946E6ACC4E430A823E90120743c7305EE2CA",
+      "implementation": "0xCae10a81aE1aA0183A4b4283A3ACbE9A2642613A",
+      "previousImplementation": "0xAf51984EcC261a4B3052eA90c9a85768F81DE764",
+      "implementationCodehash": "0xc1e204e369fe3cf5816952e1779f67bc47de58db2274b7aaaa8f77381e8b3231",
+      "upgradeTransactionHash": "0xa45c6c25b168c0301d0a778a7ad7384006d450340f20195cd7e906554b5e9542",
+      "validFromBlock": {"proxy": 44709937, "implementation": 44714433}
+    },
+    "fundShare": {
+      "proxy": "0xaA1070adb74C5455320285618BF1ED804d3745C3",
+      "implementation": "0x900264215ED313a6cC95e8BA8BF47b20069777fC",
+      "validFromBlock": {"proxy": 44709937, "implementation": 44709930}
+    },
+    "fundAccounting": {
+      "proxy": "0x9a112A65FE8510bCf5DC894fFBf06aEa8d12d311",
+      "implementation": "0xca698509f7770465A580Be3733E56D3CbC8bCd76",
+      "validFromBlock": {"proxy": 44709937, "implementation": 44709931}
+    },
+    "fundFlowManager": {
+      "proxy": "0x59fc0d88aAF3D14b82696cc7E91ea37b629E48cc",
+      "implementation": "0x20EB957dfF753074a52487CbC3F4297879E9536e",
+      "validFromBlock": {"proxy": 44709937, "implementation": 44709932}
+    },
+    "strategyManager": {
+      "proxy": "0x745422dd14E84ee27C2E56D2845C3BB1658027d9",
+      "implementation": "0x88CDCF59F289b0346F568a751Fd8e08409B08271",
+      "validFromBlock": {"proxy": 44709937, "implementation": 44709933}
+    },
+    "navReportVerifier": {
+      "address": "0xb71252822F1Bd5F526E80A225ade2520d6903dB8",
+      "validFromBlock": 44709934,
+      "codehash": "0xcb8a15664d9cdbf3f9d98b8dee60fe0497d5eae8185a3f991748b68c013e7d9f"
+    },
+    "claimEscrow": {
+      "address": "0x8842372431CA713402Ac15E868Eb7d8A7c98A807",
+      "validFromBlock": 44709937,
+      "codehash": "0xab3f03123182bd134a6430c4263918396b91ae06365115096c127c8d271892e7"
+    },
+    "coveredCallAdapterOperations": {
+      "address": "0x3AB0634fCb58D4447fd8A5469De001d64f028AEe",
+      "validFromBlock": 44709928,
+      "codehash": "0xb53473d452fdf245e23e18ca4e35822f9bcac110cb4b685ca73e6b99252df567"
+    },
+    "coveredCallFundAdapter": {
+      "proxy": "0x0BF96C5cE0D637d4D686d342aE42Bc00fDa19De9",
+      "implementation": "0x42e603131671Aba8C9e2b0B21b0f7B376C9151Be",
+      "validFromBlock": {"proxy": 44709939, "implementation": 44709938},
+      "implementationCodehash": "0x27d4cc680034e7bc5a86cf020120338ee657c5bc3e090a4167ae90832922d43c"
+    },
+    "coveredCallFundValuator": {
+      "address": "0xA1BFC1bE3C7fCA77CA0b32d25de1Ce58A50333A0",
+      "validFromBlock": 44709940,
+      "codehash": "0x1e133012a9ecf688ce473d2925c0595188117121e970423f5b822208a9d2eee5",
+      "valuationPolicyVersion": 2,
+      "requiredModelVersion": 1
+    },
+    "inKindStrategyEscrow": {
+      "address": "0xA267AdB9FBf02d453e3586A03b6d3853a9d20583",
+      "validFromBlock": 44709941
+    },
+    "emergencyStrategyEscrow": {
+      "address": "0x1C38ED1c7d750Ef8908C537dC4c654da9E71fd03",
+      "validFromBlock": 44709942
+    }
+  },
+  "policy": {
+    "artifact": "validation-policy.approved.json",
+    "decision": "go_testnet_only",
+    "adapterRouter": "0x7442287A564D7A7f412a12Ff986a242E1A969abB",
+    "adapterSwapFeeTier": 3000,
+    "depositsPausedAtCreation": true,
+    "strategyActiveAtConfiguration": false,
+    "maximumVaultAumWeth": "10000000000000000",
+    "maxCollateralPerPosition": "2500000000000000",
+    "maxOpenPositions": 1,
+    "minimumIdleBps": 0,
+    "maxAllocationBps": 2500,
+    "maxLossBps": 10000,
+    "minimumExpiryDelaySeconds": 129600,
+    "maximumExpiryDelaySeconds": 216000,
+    "settlementDefaultDelaySeconds": 3600,
+    "minimumPremiumBps": 10,
+    "maxSwapSlippageBps": 500,
+    "liabilityBufferBps": 0,
+    "observationQuorum": 2
+  },
+  "roles": {
+    "admin": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "upgrader": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "adapterUpgrader": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "accounting": "0x195De7eDc5e912D7b7001d3F268bbE0d14f7E1C3",
+    "allocator": "0xc217F9F7607A479cFc531319f40463EF0666dcee",
+    "processor": "0x3c1a3ad44785bE4386F020050213D29589d1fb17",
+    "curator": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "guardian": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+    "finalAllocator": "0xc217F9F7607A479cFc531319f40463EF0666dcee",
+    "finalProcessor": "0x3c1a3ad44785bE4386F020050213D29589d1fb17",
+    "accountingRoleTransition": {
+      "previousMember": "0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382",
+      "currentMember": "0x195De7eDc5e912D7b7001d3F268bbE0d14f7E1C3",
+      "transactionHash": "0x50f5db345eb841e21575b9ce052c280ba1256adc23f3d07fac54c268d249b8e7",
+      "block": 44712837,
+      "executionDelay": 0,
+      "reporterSetChanged": false
+    }
+  },
+  "readiness": {
+    "handoffReady": true,
+    "initialDeploymentReconciled": true,
+    "strictReconciliationComplete": true,
+    "onlyApprovedV1MutationsObserved": true,
+    "depositsPaused": false,
+    "adapterOnboarded": true,
+    "strategyActive": true,
+    "publicDepositsAuthorized": true,
+    "allocatorBotAuthorized": true,
+    "navGatedDepositResume": true,
+    "activationNavNonce": 7,
+    "depositsOpenedNavNonce": 22,
+    "mainnetAuthorized": false
+  },
+  "verification": {
+    "status": "PARTIAL_VERIFIED_BLOCKSCOUT",
+    "explorer": "https://base-sepolia.blockscout.com",
+    "verifiedContracts": 18,
+    "totalContracts": 22,
+    "coveredCallFundAdapterVerified": true,
+    "coveredCallFundValuatorVerified": true,
+    "adapterLibraryBinding": {
+      "library": "src/fund/libraries/CoveredCallFundAdapterOperations.sol:CoveredCallFundAdapterOperations",
+      "address": "0x3AB0634fCb58D4447fd8A5469De001d64f028AEe",
+      "runtimeReproduced": true,
+      "blockscoutConfirmed": false
+    },
+    "failed": [
+      {
+        "contract": "CoveredCallFundAdapterOperations",
+        "address": "0x3AB0634fCb58D4447fd8A5469De001d64f028AEe",
+        "guid": "3ab0634fcb58d4447fd8a5469de001d64f028aee6a67d792",
+        "details": "Fail - Unable to verify"
+      },
+      {
+        "contract": "FundVault implementation",
+        "address": "0xAf51984EcC261a4B3052eA90c9a85768F81DE764",
+        "guid": "af51984ecc261a4b3052ea90c9a85768f81de7646a67d7e2",
+        "details": "Fail - Unable to verify"
+      },
+      {
+        "contract": "FundFlowManager implementation",
+        "address": "0x20EB957dfF753074a52487CbC3F4297879E9536e",
+        "guid": "20eb957dff753074a52487cbc3f4297879e9536e6a67d7e3",
+        "details": "Fail - Unable to verify"
+      }
+    ]
+  }
+}

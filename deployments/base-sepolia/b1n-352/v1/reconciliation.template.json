@@ -1,0 +1,173 @@
+{
+  "schemaVersion": "1.0.0",
+  "deploymentStatus": "NOT_DEPLOYED",
+  "issue": "B1N-352",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532,
+    "reconciliationBlock": null
+  },
+  "gates": {
+    "b1n346ApprovedPolicyArtifact": null,
+    "approvedInputsDigestMatchesSeparatelyRecordedApproval": null,
+    "custodialPreflightPassed": null,
+    "broadcastSeparatelyApproved": null
+  },
+  "v1Boundary": {
+    "custodiedRedemptionOnly": null,
+    "addressBook": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "ownerMatchesApprovedInputs": null,
+      "pendingOwnerMatchesApprovedInputs": null,
+      "unchanged": null
+    },
+    "controller": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "ownerMatchesApprovedInputs": null,
+      "pendingOwnerMatchesApprovedInputs": null,
+      "unchanged": null
+    },
+    "marginPool": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "authorityInheritedFromAddressBook": null,
+      "unchanged": null
+    },
+    "oTokenFactory": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "authorityInheritedFromAddressBook": null,
+      "unchanged": null
+    },
+    "oracle": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "ownerMatchesApprovedInputs": null,
+      "pendingOwnerMatchesApprovedInputs": null,
+      "unchanged": null
+    },
+    "whitelist": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "ownerMatchesApprovedInputs": null,
+      "pendingOwnerMatchesApprovedInputs": null,
+      "unchanged": null
+    },
+    "batchSettler": {
+      "proxy": null,
+      "implementationBefore": null,
+      "codehashBefore": null,
+      "implementationAfter": null,
+      "codehashAfter": null,
+      "ownerMatchesApprovedInputs": null,
+      "pendingOwnerMatchesApprovedInputs": null,
+      "unchanged": null,
+      "adapterOnboardedBefore": null,
+      "adapterOnboardedAfter": null
+    },
+    "onlyExpectedMutationObserved": null
+  },
+  "topology": {
+    "allAddressesHaveCode": null,
+    "proxyImplementationsMatchManifest": null,
+    "fundModulesPointToExpectedVault": null,
+    "authoritiesMatchAccessManager": null,
+    "adapterPointsToExpectedFundAndStrategyManager": null,
+    "valuatorsAndEscrowsMatchManifest": null,
+    "escrowsReleaseOnlyToFund": null
+  },
+  "accessManager": {
+    "implementation": "FundAccessManager",
+    "accessExecutionTimestamp": null,
+    "minimumSetbackSeconds": 432000,
+    "targetAdminDelayEffectiveAfter": null,
+    "roleAccountsMatchManifest": null,
+    "exactRoleMemberSetsMatchManifest": null,
+    "allRoleAdminsMatchMatrix": null,
+    "allRoleGuardiansMatchMatrix": null,
+    "memberExecutionDelaysMatchMatrix": null,
+    "grantDelaysMatchMatrix": null,
+    "selectorRolesMatchMatrix": null,
+    "exactConfiguredSelectorSetsMatchMatrix": null,
+    "allGovernedTargetsOpen": null,
+    "targetAdminDelaysMatchMatrix": null,
+    "curatorGuardianRoleMatchesMatrix": null
+  },
+  "policy": {
+    "valuesMatchApprovedB1N346Artifact": null,
+    "reporterSetAndThresholdMatch": null,
+    "accountingComponentsAndValuatorMatch": null,
+    "navAndFeePolicyMatch": null,
+    "exitPolicyAndStrategyEscrowsMatch": null,
+    "minimumIdleAndStrategyLimitsMatch": null,
+    "exactRegisteredAdapterSetMatch": null,
+    "adapterRiskRouterAndFeeTierMatch": null,
+    "valuatorFeedObserversQuorumAndBufferMatch": null,
+    "strategyConfiguredInactiveBeforeOnboarding": null,
+    "strategyActiveAfterAuthorizedActivation": null
+  },
+  "immutableArtifacts": {
+    "factoryDeploymentRecordMatches": null,
+    "fundAccessManagerDeployerBindingAndCodehashMatch": null,
+    "navReportVerifierAddressBindingAndCodehashMatch": null,
+    "claimEscrowAddressBindingsAndCodehashMatch": null,
+    "cspAdapterOperationsAddressBindingAndCodehashMatch": null,
+    "linkedCspAdapterCodehashDerivedFromApprovedBuildAndBothLinkReferences": null,
+    "linkedCspAdapterImplementationCodehashMatch": null,
+    "fundAccessManagerCodehashMatch": null
+  },
+  "state": {
+    "nav": {
+      "reportAccepted": null,
+      "activationDelayObserved": null,
+      "activeWindowValid": null
+    },
+    "balances": {
+      "vaultAccountingAsset": null,
+      "adapterAccountingAsset": null,
+      "adapterWeth": null,
+      "claimEscrowAccountingAsset": null,
+      "inKindEscrowAssets": {},
+      "emergencyEscrowAssets": {}
+    },
+    "shares": {
+      "totalSupply": null,
+      "sumOfKnownBalances": null,
+      "supplyReconciled": null
+    },
+    "redemptions": {
+      "pendingShares": null,
+      "claimableShares": null,
+      "reservedAssets": null,
+      "escrowedAssets": null,
+      "reconciled": null
+    }
+  },
+  "smokeTests": {
+    "deposit": "NOT_RUN",
+    "nav": "NOT_RUN",
+    "allocation": "NOT_RUN",
+    "redeemRequest": "NOT_RUN",
+    "cancellation": "NOT_RUN"
+  }
+}

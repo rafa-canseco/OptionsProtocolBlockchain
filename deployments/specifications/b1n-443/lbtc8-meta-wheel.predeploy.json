@@ -1,0 +1,589 @@
+{
+  "issue": "B1N-443",
+  "status": "PREDEPLOYMENT",
+  "network": {
+    "name": "base-sepolia",
+    "chainId": 84532
+  },
+  "interfaceFamily": "b1nary.asset-neutral-options-v2",
+  "interfaceVersion": 2,
+  "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180",
+  "assets": {
+    "underlying": {
+      "symbol": "LBTC_TEST_ONLY",
+      "address": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+      "decimals": 8,
+      "runtimeCodehash": "0x599a6b80cccf2c7082103129c3725529a49d37b569dc0ecc031f0444b0ce0fff",
+      "testAssetDisclosure": {
+        "contractType": "VERIFIED_MOCK_ERC20",
+        "backingClaim": "NONE",
+        "mintAccess": "UNRESTRICTED_ANY_CALLER",
+        "networkScope": "BASE_SEPOLIA_ONLY"
+      }
+    },
+    "settlement": {
+      "symbol": "USDC",
+      "address": null,
+      "decimals": 6
+    }
+  },
+  "deploymentId": null,
+  "executionCostBufferUsd8": null,
+  "allocationsPaused": true,
+  "activationAuthorized": false,
+  "consumerReady": false,
+  "deploymentGraph": {
+    "deploymentId": null,
+    "fund": null,
+    "strategyManager": null,
+    "authority": null,
+    "linkedLibraries": {
+      "wheelManagedOperationDispatcher": {
+        "address": null,
+        "runtimeCodehash": "0x0a79234ddb348d5218af2c95980d28301623c1854baf3d4a8ad3afac4a9c36d0",
+        "deploymentTransaction": null,
+        "compilerLinkReferencesSha256": "0x5ed3b6880dde63d60196f90e95216868ba1fc9d5c3bace4a04a8926633f1aa54",
+        "fullyLinkedCoordinatorCreationCodeSha256": null,
+        "fullyLinkedCoordinatorRuntimeCodehash": null,
+        "upgradeRelinkAttestationSha256": null,
+        "requiredBeforeCoordinatorDeployment": true,
+        "consumerLinkReferencesSha256": {
+          "coordinator": "0x5ed3b6880dde63d60196f90e95216868ba1fc9d5c3bace4a04a8926633f1aa54",
+          "cspAdapter": "0x1fe75eecb8a2e3b275455e91bce8601a2042ef43f2dcbedabda90f6129a59efa",
+          "coveredCallAdapter": "0xb4bbe53ff64cd70ee78d269111bb4c1ee943cf3f62b0c6c34e0ae39f3c2e93db"
+        }
+      }
+    },
+    "coordinator": {
+      "proxy": null,
+      "implementation": null,
+      "implementationRuntimeCodehash": null,
+      "linkedDispatcherAddress": null,
+      "linkedDispatcherRuntimeCodehash": null,
+      "interfaceFamily": "b1nary.asset-neutral-options-v2",
+      "interfaceVersion": 2,
+      "abiPath": null,
+      "abiSha256": null,
+      "initializerCalldataSha256": null,
+      "authority": null,
+      "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180",
+      "maxCspLanes": 4,
+      "maxCoveredCallLanes": 4,
+      "executionCostBufferUsd8": null,
+      "allocationsPaused": true
+    },
+    "metaValuator": {
+      "address": null,
+      "runtimeCodehash": null,
+      "interfaceVersion": 2,
+      "coordinatorProxy": null,
+      "underlying": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+      "settlement": null,
+      "spotFeed": null,
+      "spotFeedRuntimeCodehash": null,
+      "maxSpotStaleness": null,
+      "cspValuatorInterfaceVersion": 2,
+      "coveredCallValuatorInterfaceVersion": 2,
+      "constructorArgsSha256": null
+    },
+    "lanes": [
+      {
+        "laneId": "lbtc8-csp-1",
+        "laneKind": "CSP",
+        "active": false,
+        "maxAssets": null,
+        "executionCostBufferUsd8": null,
+        "coordinatorProxy": null,
+        "lane": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null
+        },
+        "adapter": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "linkedDispatcherAddress": null,
+          "linkedDispatcherRuntimeCodehash": "0x0a79234ddb348d5218af2c95980d28301623c1854baf3d4a8ad3afac4a9c36d0",
+          "dispatcherLinkReferencesSha256": "0x1fe75eecb8a2e3b275455e91bce8601a2042ef43f2dcbedabda90f6129a59efa",
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null,
+          "strategyKind": "CSP",
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180",
+          "underlying": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+          "settlement": null
+        },
+        "valuator": {
+          "address": null,
+          "runtimeCodehash": null,
+          "interfaceVersion": 2,
+          "adapterProxy": null,
+          "fund": null,
+          "addressBook": null,
+          "spotFeed": null,
+          "maxSpotStaleness": null,
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180"
+        },
+        "readbackEvidence": {
+          "proxyImplementationSlot": null,
+          "runtimeCodehash": null,
+          "initializerTransaction": null,
+          "paused": null,
+          "adapterLinkage": null,
+          "valuatorLinkage": null
+        }
+      },
+      {
+        "laneId": "lbtc8-csp-2",
+        "laneKind": "CSP",
+        "active": false,
+        "maxAssets": null,
+        "executionCostBufferUsd8": null,
+        "coordinatorProxy": null,
+        "lane": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null
+        },
+        "adapter": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "linkedDispatcherAddress": null,
+          "linkedDispatcherRuntimeCodehash": "0x0a79234ddb348d5218af2c95980d28301623c1854baf3d4a8ad3afac4a9c36d0",
+          "dispatcherLinkReferencesSha256": "0x1fe75eecb8a2e3b275455e91bce8601a2042ef43f2dcbedabda90f6129a59efa",
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null,
+          "strategyKind": "CSP",
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180",
+          "underlying": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+          "settlement": null
+        },
+        "valuator": {
+          "address": null,
+          "runtimeCodehash": null,
+          "interfaceVersion": 2,
+          "adapterProxy": null,
+          "fund": null,
+          "addressBook": null,
+          "spotFeed": null,
+          "maxSpotStaleness": null,
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180"
+        },
+        "readbackEvidence": {
+          "proxyImplementationSlot": null,
+          "runtimeCodehash": null,
+          "initializerTransaction": null,
+          "paused": null,
+          "adapterLinkage": null,
+          "valuatorLinkage": null
+        }
+      },
+      {
+        "laneId": "lbtc8-csp-3",
+        "laneKind": "CSP",
+        "active": false,
+        "maxAssets": null,
+        "executionCostBufferUsd8": null,
+        "coordinatorProxy": null,
+        "lane": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null
+        },
+        "adapter": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "linkedDispatcherAddress": null,
+          "linkedDispatcherRuntimeCodehash": "0x0a79234ddb348d5218af2c95980d28301623c1854baf3d4a8ad3afac4a9c36d0",
+          "dispatcherLinkReferencesSha256": "0x1fe75eecb8a2e3b275455e91bce8601a2042ef43f2dcbedabda90f6129a59efa",
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null,
+          "strategyKind": "CSP",
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180",
+          "underlying": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+          "settlement": null
+        },
+        "valuator": {
+          "address": null,
+          "runtimeCodehash": null,
+          "interfaceVersion": 2,
+          "adapterProxy": null,
+          "fund": null,
+          "addressBook": null,
+          "spotFeed": null,
+          "maxSpotStaleness": null,
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180"
+        },
+        "readbackEvidence": {
+          "proxyImplementationSlot": null,
+          "runtimeCodehash": null,
+          "initializerTransaction": null,
+          "paused": null,
+          "adapterLinkage": null,
+          "valuatorLinkage": null
+        }
+      },
+      {
+        "laneId": "lbtc8-csp-4",
+        "laneKind": "CSP",
+        "active": false,
+        "maxAssets": null,
+        "executionCostBufferUsd8": null,
+        "coordinatorProxy": null,
+        "lane": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null
+        },
+        "adapter": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "linkedDispatcherAddress": null,
+          "linkedDispatcherRuntimeCodehash": "0x0a79234ddb348d5218af2c95980d28301623c1854baf3d4a8ad3afac4a9c36d0",
+          "dispatcherLinkReferencesSha256": "0x1fe75eecb8a2e3b275455e91bce8601a2042ef43f2dcbedabda90f6129a59efa",
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null,
+          "strategyKind": "CSP",
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180",
+          "underlying": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+          "settlement": null
+        },
+        "valuator": {
+          "address": null,
+          "runtimeCodehash": null,
+          "interfaceVersion": 2,
+          "adapterProxy": null,
+          "fund": null,
+          "addressBook": null,
+          "spotFeed": null,
+          "maxSpotStaleness": null,
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180"
+        },
+        "readbackEvidence": {
+          "proxyImplementationSlot": null,
+          "runtimeCodehash": null,
+          "initializerTransaction": null,
+          "paused": null,
+          "adapterLinkage": null,
+          "valuatorLinkage": null
+        }
+      },
+      {
+        "laneId": "lbtc8-covered-call-1",
+        "laneKind": "COVERED_CALL",
+        "active": false,
+        "maxAssets": null,
+        "executionCostBufferUsd8": null,
+        "coordinatorProxy": null,
+        "lane": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null
+        },
+        "adapter": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "linkedDispatcherAddress": null,
+          "linkedDispatcherRuntimeCodehash": "0x0a79234ddb348d5218af2c95980d28301623c1854baf3d4a8ad3afac4a9c36d0",
+          "dispatcherLinkReferencesSha256": "0xb4bbe53ff64cd70ee78d269111bb4c1ee943cf3f62b0c6c34e0ae39f3c2e93db",
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null,
+          "strategyKind": "COVERED_CALL",
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180",
+          "underlying": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+          "settlement": null
+        },
+        "valuator": {
+          "address": null,
+          "runtimeCodehash": null,
+          "interfaceVersion": 2,
+          "adapterProxy": null,
+          "fund": null,
+          "addressBook": null,
+          "spotFeed": null,
+          "maxSpotStaleness": null,
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180"
+        },
+        "readbackEvidence": {
+          "proxyImplementationSlot": null,
+          "runtimeCodehash": null,
+          "initializerTransaction": null,
+          "paused": null,
+          "adapterLinkage": null,
+          "valuatorLinkage": null
+        }
+      },
+      {
+        "laneId": "lbtc8-covered-call-2",
+        "laneKind": "COVERED_CALL",
+        "active": false,
+        "maxAssets": null,
+        "executionCostBufferUsd8": null,
+        "coordinatorProxy": null,
+        "lane": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null
+        },
+        "adapter": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "linkedDispatcherAddress": null,
+          "linkedDispatcherRuntimeCodehash": "0x0a79234ddb348d5218af2c95980d28301623c1854baf3d4a8ad3afac4a9c36d0",
+          "dispatcherLinkReferencesSha256": "0xb4bbe53ff64cd70ee78d269111bb4c1ee943cf3f62b0c6c34e0ae39f3c2e93db",
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null,
+          "strategyKind": "COVERED_CALL",
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180",
+          "underlying": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+          "settlement": null
+        },
+        "valuator": {
+          "address": null,
+          "runtimeCodehash": null,
+          "interfaceVersion": 2,
+          "adapterProxy": null,
+          "fund": null,
+          "addressBook": null,
+          "spotFeed": null,
+          "maxSpotStaleness": null,
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180"
+        },
+        "readbackEvidence": {
+          "proxyImplementationSlot": null,
+          "runtimeCodehash": null,
+          "initializerTransaction": null,
+          "paused": null,
+          "adapterLinkage": null,
+          "valuatorLinkage": null
+        }
+      },
+      {
+        "laneId": "lbtc8-covered-call-3",
+        "laneKind": "COVERED_CALL",
+        "active": false,
+        "maxAssets": null,
+        "executionCostBufferUsd8": null,
+        "coordinatorProxy": null,
+        "lane": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null
+        },
+        "adapter": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "linkedDispatcherAddress": null,
+          "linkedDispatcherRuntimeCodehash": "0x0a79234ddb348d5218af2c95980d28301623c1854baf3d4a8ad3afac4a9c36d0",
+          "dispatcherLinkReferencesSha256": "0xb4bbe53ff64cd70ee78d269111bb4c1ee943cf3f62b0c6c34e0ae39f3c2e93db",
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null,
+          "strategyKind": "COVERED_CALL",
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180",
+          "underlying": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+          "settlement": null
+        },
+        "valuator": {
+          "address": null,
+          "runtimeCodehash": null,
+          "interfaceVersion": 2,
+          "adapterProxy": null,
+          "fund": null,
+          "addressBook": null,
+          "spotFeed": null,
+          "maxSpotStaleness": null,
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180"
+        },
+        "readbackEvidence": {
+          "proxyImplementationSlot": null,
+          "runtimeCodehash": null,
+          "initializerTransaction": null,
+          "paused": null,
+          "adapterLinkage": null,
+          "valuatorLinkage": null
+        }
+      },
+      {
+        "laneId": "lbtc8-covered-call-4",
+        "laneKind": "COVERED_CALL",
+        "active": false,
+        "maxAssets": null,
+        "executionCostBufferUsd8": null,
+        "coordinatorProxy": null,
+        "lane": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null
+        },
+        "adapter": {
+          "proxy": null,
+          "implementation": null,
+          "implementationRuntimeCodehash": null,
+          "linkedDispatcherAddress": null,
+          "linkedDispatcherRuntimeCodehash": "0x0a79234ddb348d5218af2c95980d28301623c1854baf3d4a8ad3afac4a9c36d0",
+          "dispatcherLinkReferencesSha256": "0xb4bbe53ff64cd70ee78d269111bb4c1ee943cf3f62b0c6c34e0ae39f3c2e93db",
+          "interfaceFamily": "b1nary.asset-neutral-options-v2",
+          "interfaceVersion": 2,
+          "abiPath": null,
+          "abiSha256": null,
+          "initializerCalldataSha256": null,
+          "authority": null,
+          "strategyKind": "COVERED_CALL",
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180",
+          "underlying": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+          "settlement": null
+        },
+        "valuator": {
+          "address": null,
+          "runtimeCodehash": null,
+          "interfaceVersion": 2,
+          "adapterProxy": null,
+          "fund": null,
+          "addressBook": null,
+          "spotFeed": null,
+          "maxSpotStaleness": null,
+          "policyHash": "0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180"
+        },
+        "readbackEvidence": {
+          "proxyImplementationSlot": null,
+          "runtimeCodehash": null,
+          "initializerTransaction": null,
+          "paused": null,
+          "adapterLinkage": null,
+          "valuatorLinkage": null
+        }
+      }
+    ]
+  },
+  "ethDeploymentBeforeSnapshot": {
+    "required": true,
+    "manifestPath": null,
+    "manifestSha256": null,
+    "snapshotBlock": null,
+    "addressesAndCodehashesSha256": null,
+    "rolesAndPolicySha256": null,
+    "afterSnapshotMustMatch": true
+  },
+  "requiredEvidence": {
+    "baseMainnetFork": {
+      "required": true,
+      "pinnedBlock": 50104319,
+      "testPath": "test/fund/B1N444AssetNeutralMetaWheelMainnetFork.t.sol",
+      "resultSha256": null
+    },
+    "baseSepoliaFork": {
+      "required": true,
+      "pinnedBlock": 45614849,
+      "testPath": "test/fund/B1N444AssetNeutralMetaWheelFork.t.sol",
+      "resultSha256": null
+    },
+    "liveReadback": {
+      "required": true,
+      "confirmedBlock": null,
+      "chainId": 84532,
+      "deploymentGraphSha256": null,
+      "pausedStateAttested": false
+    },
+    "storage": {
+      "required": true,
+      "layoutSha256": null,
+      "upgradeSimulationResultSha256": null,
+      "namespaceCollisionCheck": null
+    },
+    "source": {
+      "commit": null,
+      "compilerInputsSha256": null,
+      "buildInfoSha256": null,
+      "dispatcherLinkReferencesSha256": "0x5ed3b6880dde63d60196f90e95216868ba1fc9d5c3bace4a04a8926633f1aa54",
+      "fullyLinkedCoordinatorBytecodeSha256": null,
+      "dispatcherRuntimeCodehash": "0x0a79234ddb348d5218af2c95980d28301623c1854baf3d4a8ad3afac4a9c36d0",
+      "coordinatorDispatcherLinkReferencesSha256": "0x5ed3b6880dde63d60196f90e95216868ba1fc9d5c3bace4a04a8926633f1aa54",
+      "cspAdapterDispatcherLinkReferencesSha256": "0x1fe75eecb8a2e3b275455e91bce8601a2042ef43f2dcbedabda90f6129a59efa",
+      "coveredCallAdapterDispatcherLinkReferencesSha256": "0xb4bbe53ff64cd70ee78d269111bb4c1ee943cf3f62b0c6c34e0ae39f3c2e93db"
+    },
+    "receipts": [],
+    "activationAuthorization": null
+  }
+}

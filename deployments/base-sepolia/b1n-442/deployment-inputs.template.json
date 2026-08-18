@@ -1,0 +1,78 @@
+{
+  "schemaVersion": "1.1.0",
+  "ticket": "B1N-442",
+  "network": { "name": "base-sepolia", "chainId": 84532 },
+  "status": "RELEASE_READBACK_REQUIRED",
+  "broadcastAuthorized": false,
+  "activationAuthorized": false,
+  "consumerReady": false,
+  "assets": {
+    "underlying": {
+      "label": "LBTC_TEST_ONLY",
+      "address": "0x39fA11EbBE82699Fd9F79C566D7384064571d2b4",
+      "decimals": 8,
+      "runtimeCodehash": "0x599a6b80cccf2c7082103129c3725529a49d37b569dc0ecc031f0444b0ce0fff",
+      "verifiedSourceArtifactSha256": "0xb56bda7d0ad8c8cd7519779294d53af692da257ea41b31769d19a5826b012cec",
+      "verifiedSourceSha256": "0x736cb364367e0b2c03a3b8c98968554cd586c9850b517ae904c3f46a9772fa79",
+      "creationTransaction": "0x840289b3d7c49de8d281e1ed09d0f31d5a42ae57601537fc632f27f02b216a61",
+      "verifiedSourcePath": "src/mocks/MockERC20.sol",
+      "contractType": "VERIFIED_MOCK_ERC20",
+      "backingClaim": "NONE",
+      "mintAccess": "UNRESTRICTED_ANY_CALLER",
+      "mintEvidence": "READ_ONLY_ETH_CALL_ONLY_NO_BROADCAST",
+      "networkScope": "BASE_SEPOLIA_ONLY"
+    },
+    "settlement": { "address": null, "decimals": 6, "runtimeCodehash": null }
+  },
+  "protocol": {
+    "addressBook": null,
+    "oracle": null,
+    "whitelist": null,
+    "controller": null,
+    "marginPool": null,
+    "batchSettler": null,
+    "oTokenFactory": null,
+    "swapRouter": null,
+    "swapFactory": null,
+    "derivedSwapPool": null,
+    "swapFeeTier": null,
+    "maxOracleStalenessSeconds": 1200,
+    "routeEvidenceRequired": {
+      "exactSettlerRouterReadback": true,
+      "routerFactoryReadback": true,
+      "factoryDerivedPool": true,
+      "poolTokenPairAndFeeReadback": true,
+      "nonzeroPoolLiquidity": true,
+      "arbitraryPoolInputAccepted": false
+    }
+  },
+  "requiredReadbacks": [
+    "release check always requires both adapter proxies and both valuators with non-empty code",
+    "all protocol identities have non-empty code and match AddressBook",
+    "LBTC8 oracle feed exists and is current",
+    "LBTC8 underlying and CSP/covered-call collateral products are whitelisted",
+    "settler router, router factory, factory-derived pool, fee tier, token pair and liquidity match",
+    "adapter interfaceVersion, strategyKind, policyHash and 8/8/8/6 asset config match",
+    "adapter fund, manager, authority and AddressBook bindings match",
+    "valuator adapter/fund/AddressBook/assets/policy/feed/staleness/decimals linkage matches",
+    "StrategyManager registers each exact valuator for its adapter",
+    "both deployed funds are deposit-paused and both adapter strategy configs are inactive"
+  ],
+  "deployment": {
+    "readbackRequired": true,
+    "cspImplementation": null,
+    "cspProxy": null,
+    "coveredCallImplementation": null,
+    "coveredCallProxy": null,
+    "cspValuator": null,
+    "coveredCallValuator": null
+  },
+  "strategyParameters": null,
+  "roles": null,
+  "notes": [
+    "checkIdentityOnly() is token identity evidence and can never satisfy release readiness.",
+    "No ETH/BITA or legacy beta value is an authority for null fields.",
+    "Every deployed identity must remain paused/inert pending a separately reviewed activation artifact.",
+    "LBTC is an unrestricted-mint, unbacked test token and must never be represented as cbBTC or production-backed BTC. No mint transaction is broadcast by this artifact."
+  ]
+}

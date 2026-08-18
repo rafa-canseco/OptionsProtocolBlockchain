@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": "B1N-419",
+  "approval": "NOT_APPROVED_ACTIVATION_STAGE",
+  "sourceCommit": "FINAL_ABI_COMMIT_REQUIRED",
+  "deploymentId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "canonicalManifestSha256": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "readinessHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "nav": {
+    "reportNonce": 0,
+    "reportHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "positionsHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "validAfterBlock": 0,
+    "validUntilBlock": 0
+  },
+  "qa": {
+    "twoCycleForkPassed": false,
+    "backendReady": false,
+    "frontendReady": false,
+    "marketMakerReady": false,
+    "standaloneRegressionPassed": false,
+    "noUnresolvedCriticalOrHigh": false
+  }
+}
