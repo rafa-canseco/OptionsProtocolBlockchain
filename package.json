@@ -3,6 +3,7 @@
   "version": "0.8.0",
   "private": true,
   "scripts": {
+    "deps:foundry": "./scripts/install-forge-std.sh",
     "harness:doctor": "./scripts/harness-check.sh doctor",
     "harness:fast": "./scripts/harness-check.sh fast",
     "harness:full": "./scripts/harness-check.sh full",

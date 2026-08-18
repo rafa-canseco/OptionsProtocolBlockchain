@@ -20,7 +20,16 @@ import {
     AssetNeutralMetaWheelValuatorV2
 } from "../../src/fund/AssetNeutralMetaWheelV2.sol";
 
-contract B1N443FundCode {}
+contract B1N443FundCode {
+    address public strategyManager;
+    address public asset;
+
+    function configure(address manager_, address asset_) external {
+        require(strategyManager == address(0));
+        strategyManager = manager_;
+        asset = asset_;
+    }
+}
 
 contract B1N443WrongVersionValuator {
     function interfaceVersion() external pure returns (uint64) {
@@ -32,8 +41,11 @@ contract B1N443MockValuator is IPositionValuator {
     FundTypes.PositionValue internal configured;
     address public expectedAdapter;
     address public expectedFund;
+    address public expectedAddressBook = address(0xB00C);
     address public expectedUnderlying;
     address public expectedSettlement;
+    address public spotFeed;
+    uint64 public maxSpotStaleness;
     bytes32 public expectedPolicyHash;
     IAdapter.StrategyKind public expectedStrategyKind;
 
@@ -50,6 +62,12 @@ contract B1N443MockValuator is IPositionValuator {
         expectedSettlement = settlement_;
         expectedPolicyHash = 0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180;
         expectedStrategyKind = kind_;
+    }
+
+    function bindDomain(address book_, address feed_, uint64 stale_) external {
+        expectedAddressBook = book_;
+        spotFeed = feed_;
+        maxSpotStaleness = stale_;
     }
 
     function configure(uint256 gross, uint256 liabilities, uint256 exitCost) external {
@@ -70,6 +88,10 @@ abstract contract B1N443MockAdapterBase is IAdapter {
     address public immutable override underlyingAsset;
     address public immutable override settlementAsset;
     bytes32 public constant POLICY = 0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180;
+
+    function addressBook() external pure returns (address) {
+        return address(0xB00C);
+    }
 
     constructor(address f, address u, address s) {
         fund = f;
@@ -112,6 +134,10 @@ abstract contract B1N443MockAdapterBase is IAdapter {
 
     function positionV2(uint256) external pure returns (PositionV2 memory p) {
         return p;
+    }
+
+    function activePositionIdAt(uint256) external pure returns (uint256) {
+        return 0;
     }
 
     function positionStateHash() external pure returns (bytes32) {
@@ -161,6 +187,7 @@ abstract contract B1N443MockAdapterBase is IAdapter {
         address public immutable override adapter;
         address immutable underlying;
         address immutable settlement;
+        bytes32 public constant POLICY = 0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180;
         IWheel.LaneKind public immutable override laneKind;
         uint256 public immutable override executionCostBufferUsd8;
         uint256 public override childShares;
@@ -179,6 +206,26 @@ abstract contract B1N443MockAdapterBase is IAdapter {
             settlement = s;
             laneKind = k;
             executionCostBufferUsd8 = buffer;
+        }
+
+        function fund() external view returns (address) {
+            return address(this);
+        }
+
+        function underlyingAsset() external view returns (address) {
+            return underlying;
+        }
+
+        function settlementAsset() external view returns (address) {
+            return settlement;
+        }
+
+        function policyHash() external pure returns (bytes32) {
+            return POLICY;
+        }
+
+        function adapterBound() external pure returns (bool) {
+            return true;
         }
 
         function configure(
@@ -254,9 +301,19 @@ abstract contract B1N443MockAdapterBase is IAdapter {
         contract B1N443Manager is Test {
             MockERC20 public usdc;
             AssetNeutralMetaWheelCoordinatorV2 public wheel;
+            address public fundBinding;
 
             constructor(MockERC20 u) {
                 usdc = u;
+            }
+
+            function fund() external view returns (address) {
+                return fundBinding;
+            }
+
+            function bindFund(address fund_) external {
+                require(fundBinding == address(0));
+                fundBinding = fund_;
             }
 
             function bind(AssetNeutralMetaWheelCoordinatorV2 w) external {
@@ -313,10 +370,13 @@ abstract contract B1N443MockAdapterBase is IAdapter {
             uint256 constant TEST_BUFFER = 1e8;
 
             function setUp() public {
+                vm.chainId(84532);
                 lbtc = new MockERC20("Loot BTC", "LBTC", 8);
                 usdc = new MockERC20("USDC", "USDC", 6);
                 manager = new B1N443Manager(usdc);
                 B1N443FundCode fund = new B1N443FundCode();
+                fund.configure(address(manager), address(usdc));
+                manager.bindFund(address(fund));
                 AccessManager authority = new AccessManager(address(this));
                 wheel = AssetNeutralMetaWheelCoordinatorV2(
                     address(
@@ -369,6 +429,26 @@ abstract contract B1N443MockAdapterBase is IAdapter {
                     WheelTypes.ManagedOperationClass.Configuration,
                     WheelTypes.ManagedOperation.RegisterLane,
                     abi.encode(address(callLane), WheelTypes.LaneKind.CoveredCall)
+                );
+                B1N443MockValuator csp = new B1N443MockValuator();
+                csp.bind(cspLane.adapter(), address(cspLane), address(lbtc), address(usdc), IAdapter.StrategyKind.Csp);
+                B1N443MockValuator call = new B1N443MockValuator();
+                call.bind(
+                    callLane.adapter(),
+                    address(callLane),
+                    address(lbtc),
+                    address(usdc),
+                    IAdapter.StrategyKind.CoveredCall
+                );
+                _managed(
+                    WheelTypes.ManagedOperationClass.Configuration,
+                    WheelTypes.ManagedOperation.SetLaneValuator,
+                    abi.encode(address(cspLane), address(csp))
+                );
+                _managed(
+                    WheelTypes.ManagedOperationClass.Configuration,
+                    WheelTypes.ManagedOperation.SetLaneValuator,
+                    abi.encode(address(callLane), address(call))
                 );
                 _managed(
                     WheelTypes.ManagedOperationClass.Configuration, WheelTypes.ManagedOperation.ResumeAllocations, ""
@@ -546,7 +626,7 @@ abstract contract B1N443MockAdapterBase is IAdapter {
                 assertEq(remaining.principalSettlementAmount + returned.principalSettlementAmount, 30_000e6);
             }
 
-            function test_callAwayRequiresOpenedBufferedStrikeWithCeilingRounding() public {
+            function test_callAwayUsesCanonicalFloorForNonDivisibleOpenedStrikeConversion() public {
                 _enable();
                 uint256 id = _queue(1_000e6);
                 _openCsp(id);
@@ -555,19 +635,12 @@ abstract contract B1N443MockAdapterBase is IAdapter {
                 _settleCsp(id);
                 uint256 strike = literal + TEST_BUFFER;
                 _openCall(id, strike, 1);
-                uint256 exactCeiling = 301;
-                callLane.configure(IWheel.SettlementKind.CallAway, exactCeiling - 1, 0, literal, exactCeiling - 1);
-                _op(
-                    WheelTypes.ManagedOperationClass.Processing,
-                    WheelTypes.ManagedOperation.SettleCoveredCall,
-                    abi.encode(id)
-                );
-                vm.expectRevert(AssetNeutralMetaWheelCoordinatorV2.InvalidSettlement.selector);
-                _op(
-                    WheelTypes.ManagedOperationClass.Processing,
-                    WheelTypes.ManagedOperation.HandoffCoveredCall,
-                    abi.encode(id)
-                );
+                uint256 canonicalFloor = 300;
+                assertEq((uint256(1) * strike) % 1e10, 1e8);
+                callLane.configure(IWheel.SettlementKind.CallAway, canonicalFloor, 0, literal, canonicalFloor);
+                _settleCall(id);
+                assertEq(uint8(wheel.trancheV2(id).leg), uint8(IWheel.TrancheLeg.PendingCsp));
+                assertEq(wheel.trancheV2(id).pendingSettlementAmount, canonicalFloor);
             }
 
             function test_cspOtmReturnsPremiumAndReopensWithoutDoubleCounting() public {
@@ -765,17 +838,25 @@ abstract contract B1N443MockAdapterBase is IAdapter {
                     IAdapter.StrategyKind.CoveredCall
                 );
                 MockChainlinkFeed feed = new MockChainlinkFeed(25_000e8);
+                cspChild.bindDomain(address(0xB00C), address(feed), 1_200);
+                callChild.bindDomain(address(0xB00C), address(feed), 1_200);
+                _mockOracleDomain(address(feed));
 
-                vm.expectRevert(AssetNeutralMetaWheelValuatorV2.InvalidAdapter.selector);
-                new AssetNeutralMetaWheelValuatorV2(
+                AssetNeutralMetaWheelValuatorV2 valuator = new AssetNeutralMetaWheelValuatorV2(
                     address(wheel),
                     address(lbtc),
                     address(usdc),
                     address(feed),
                     address(callChild),
                     address(cspChild),
-                    1 hours
+                    1_200
                 );
+                IWheel.LaneValuationV2[] memory reports = new IWheel.LaneValuationV2[](1);
+                reports[0] = IWheel.LaneValuationV2(
+                    address(cspLane), uint64(block.number), cspLane.childShares(), cspLane.positionStateHash(), ""
+                );
+                vm.expectRevert(AssetNeutralMetaWheelValuatorV2.InvalidLaneSet.selector);
+                valuator.value(address(wheel), uint64(block.number), abi.encode(reports));
 
                 B1N443WrongVersionValuator wrongVersion = new B1N443WrongVersionValuator();
                 vm.expectRevert(AssetNeutralMetaWheelValuatorV2.InvalidAdapter.selector);
@@ -786,11 +867,12 @@ abstract contract B1N443MockAdapterBase is IAdapter {
                     address(feed),
                     address(wrongVersion),
                     address(callChild),
-                    1 hours
+                    1_200
                 );
             }
 
-            function test_parentValuatorCountsTransitionLbtcExactlyOnce() public {
+            function test_parentValuatorTransitionLbtcEnforcesRotatedFeedAndStrictOracleBoundary() public {
+                vm.warp(1_700_000_000);
                 _enable();
                 uint256 id = _queue(25_000e6);
                 _openCsp(id);
@@ -809,6 +891,9 @@ abstract contract B1N443MockAdapterBase is IAdapter {
                     IAdapter.StrategyKind.CoveredCall
                 );
                 MockChainlinkFeed feed = new MockChainlinkFeed(25_000e8);
+                cspChild.bindDomain(address(0xB00C), address(feed), 1_200);
+                callChild.bindDomain(address(0xB00C), address(feed), 1_200);
+                _mockOracleDomain(address(feed));
                 AssetNeutralMetaWheelValuatorV2 valuator = new AssetNeutralMetaWheelValuatorV2(
                     address(wheel),
                     address(lbtc),
@@ -816,9 +901,30 @@ abstract contract B1N443MockAdapterBase is IAdapter {
                     address(feed),
                     address(cspChild),
                     address(callChild),
-                    1 hours
+                    1_200
                 );
                 IWheel.LaneValuationV2[] memory reports = new IWheel.LaneValuationV2[](0);
+
+                MockChainlinkFeed rotatedFeed = new MockChainlinkFeed(25_000e8);
+                vm.mockCall(
+                    address(0xB00D),
+                    abi.encodeWithSignature("priceFeed(address)", address(lbtc)),
+                    abi.encode(address(rotatedFeed))
+                );
+                vm.expectRevert(AssetNeutralMetaWheelValuatorV2.InvalidSpot.selector);
+                valuator.value(address(wheel), uint64(block.number), abi.encode(reports));
+
+                vm.mockCall(
+                    address(0xB00D),
+                    abi.encodeWithSignature("priceFeed(address)", address(lbtc)),
+                    abi.encode(address(feed))
+                );
+                vm.mockCall(address(0xB00D), abi.encodeWithSignature("maxOracleStaleness()"), abi.encode(uint256(600)));
+                _mockFeedObservation(address(feed), block.timestamp - 601);
+                vm.expectRevert(AssetNeutralMetaWheelValuatorV2.InvalidSpot.selector);
+                valuator.value(address(wheel), uint64(block.number), abi.encode(reports));
+
+                _mockFeedObservation(address(feed), block.timestamp - 600);
                 FundTypes.PositionValue memory v = valuator.value(
                     address(wheel), uint64(block.number), abi.encode(reports)
                 );
@@ -829,8 +935,38 @@ abstract contract B1N443MockAdapterBase is IAdapter {
                 assertEq(wheel.summaryV2().transitionUnderlyingAmount, 1e8);
             }
 
-            function test_runtimeBudgetsRetainEip170Margin() public {
-                assertLt(address(new AssetNeutralMetaWheelCoordinatorV2()).code.length, 24_576);
+            function _mockFeedObservation(address feed_, uint256 updatedAt) internal {
+                vm.mockCall(
+                    feed_,
+                    abi.encodeWithSignature("latestRoundData()"),
+                    abi.encode(uint80(1), int256(25_000e8), uint256(0), updatedAt, uint80(1))
+                );
+            }
+
+            function _mockOracleDomain(address feed_) internal {
+                vm.mockCall(address(0xB00C), abi.encodeWithSignature("oracle()"), abi.encode(address(0xB00D)));
+                vm.mockCall(
+                    address(0xB00D), abi.encodeWithSignature("priceFeed(address)", address(lbtc)), abi.encode(feed_)
+                );
+                vm.mockCall(
+                    address(0xB00D), abi.encodeWithSignature("maxOracleStaleness()"), abi.encode(uint256(1_200))
+                );
+            }
+
+            function test_runtimeBudgetsRetainEip170Margin() public view {
+                assertLt(
+                    vm.getDeployedCode("AssetNeutralMetaWheelV2.sol:AssetNeutralMetaWheelCoordinatorV2").length, 24_576
+                );
+                assertLt(
+                    vm.getDeployedCode("AssetNeutralMetaWheelV2.sol:AssetNeutralCspWheelChildLaneV2").length, 24_576
+                );
+                assertLt(
+                    vm.getDeployedCode("AssetNeutralMetaWheelV2.sol:AssetNeutralCoveredCallWheelChildLaneV2").length,
+                    24_576
+                );
+                assertLt(
+                    vm.getDeployedCode("AssetNeutralMetaWheelV2.sol:AssetNeutralMetaWheelValuatorV2").length, 24_576
+                );
             }
 
             function test_wrongDecimalsAndNonCanonicalPolicyFailPreflight() public {
@@ -866,10 +1002,13 @@ abstract contract B1N443MockAdapterBase is IAdapter {
             AssetNeutralMetaWheelCoordinatorV2 wheel;
 
             function setUp() public {
+                vm.chainId(84532);
                 usdc = new MockERC20("USDC", "USDC", 6);
                 lbtc = new MockERC20("LBTC", "LBTC", 8);
                 handler = new B1N443Manager(usdc);
                 B1N443FundCode f = new B1N443FundCode();
+                f.configure(address(handler), address(usdc));
+                handler.bindFund(address(f));
                 AccessManager a = new AccessManager(address(this));
                 wheel = AssetNeutralMetaWheelCoordinatorV2(
                     address(

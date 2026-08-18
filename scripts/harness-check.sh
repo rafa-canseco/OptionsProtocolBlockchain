@@ -77,11 +77,13 @@ run_doctor() {
     node_modules/@openzeppelin/foundry-upgrades/package.json \
     node_modules/@openzeppelin/upgrades-core/package.json; do
     [[ -f "$REPOSITORY_ROOT/$required_file" ]] ||
-      fail "missing prerequisite: $required_file (run npm ci --ignore-scripts and install forge-std)"
+      fail "missing prerequisite: $required_file (run npm ci --ignore-scripts && npm run deps:foundry)"
   done
 
   node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 20) process.exit(1)' ||
     fail "Node.js 20 or newer is required"
+  "$SCRIPT_DIR/install-forge-std.sh" --check ||
+    fail "forge-std content does not match the pinned dependency (run npm run deps:foundry)"
   validate_fork_manifest
   printf 'harness: doctor passed\n'
 }

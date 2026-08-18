@@ -5,6 +5,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {AddressBook} from "../core/AddressBook.sol";
+import {Oracle} from "../core/Oracle.sol";
 import {OToken} from "../core/OToken.sol";
 import {FundUpgradeable} from "./FundUpgradeable.sol";
 import {FundConstants} from "./FundConstants.sol";
@@ -23,10 +25,13 @@ interface IAssetNeutralOptionsValuatorReadbackV2 {
     function interfaceVersion() external view returns (uint64);
     function expectedAdapter() external view returns (address);
     function expectedFund() external view returns (address);
+    function expectedAddressBook() external view returns (address);
     function expectedUnderlying() external view returns (address);
     function expectedSettlement() external view returns (address);
     function expectedPolicyHash() external view returns (bytes32);
     function expectedStrategyKind() external view returns (IAdapter.StrategyKind);
+    function spotFeed() external view returns (address);
+    function maxSpotStaleness() external view returns (uint64);
 }
 
 library AssetNeutralReadbackV2 {
@@ -59,6 +64,15 @@ library AssetNeutralReadbackV2 {
     }
 }
 
+interface IAssetNeutralFundManagerBindingV2 {
+    function fund() external view returns (address);
+}
+
+interface IAssetNeutralFundBindingV2 {
+    function strategyManager() external view returns (address);
+    function asset() external view returns (address);
+}
+
 interface IAssetNeutralWheelChildLaneV2 {
     enum LaneState {
         Idle,
@@ -80,6 +94,11 @@ interface IAssetNeutralWheelChildLaneV2 {
     }
     function coordinator() external view returns (address);
     function adapter() external view returns (address);
+    function fund() external view returns (address);
+    function underlyingAsset() external view returns (address);
+    function settlementAsset() external view returns (address);
+    function policyHash() external view returns (bytes32);
+    function adapterBound() external view returns (bool);
     function laneKind() external view returns (IWheel.LaneKind);
     function childShares() external view returns (uint256);
     function activePositionId() external view returns (uint256);
@@ -131,7 +150,7 @@ abstract contract AssetNeutralWheelChildLaneV2 is FundUpgradeable, IAssetNeutral
 
     struct InitializeParams {
         address coordinator;
-        address adapter;
+        address adapter; // Deprecated bootstrap field; MUST be zero and bound after adapter initialization.
         address underlyingAsset;
         address settlementAsset;
         address authority;
@@ -149,6 +168,7 @@ abstract contract AssetNeutralWheelChildLaneV2 is FundUpgradeable, IAssetNeutral
     error InvalidPositionHash(bytes32 expected, bytes32 actual);
     error OnlyCoordinator();
     error TransferMismatch();
+    error UnsupportedChain(uint256 chainId);
 
     event AssetNeutralLaneOpenedV2(
         uint256 indexed trancheId,
@@ -170,6 +190,7 @@ abstract contract AssetNeutralWheelChildLaneV2 is FundUpgradeable, IAssetNeutral
         uint256 indexed trancheId, bytes32 indexed transitionHash, uint256 settlementAmount, uint256 underlyingAmount
     );
     event AssetNeutralLaneAllocationPauseSetV2(bool paused);
+    event AssetNeutralLaneAdapterBoundV2(address indexed adapter);
 
     constructor() {
         _disableInitializers();
@@ -183,27 +204,18 @@ abstract contract AssetNeutralWheelChildLaneV2 is FundUpgradeable, IAssetNeutral
     }
 
     function _initialize(InitializeParams calldata p) internal onlyInitializing {
+        if (block.chainid != 84532) revert UnsupportedChain(block.chainid);
         if (
-            p.coordinator == address(0) || p.adapter == address(0) || p.underlyingAsset == address(0)
-                || p.settlementAsset == address(0) || p.coordinator.code.length == 0 || p.adapter.code.length == 0
+            p.coordinator == address(0) || p.adapter != address(0) || p.underlyingAsset == address(0)
+                || p.settlementAsset == address(0) || p.coordinator.code.length == 0
                 || p.underlyingAsset.code.length == 0 || p.settlementAsset.code.length == 0 || p.maxAssets == 0
                 || p.policyHash == bytes32(0)
-        ) revert InvalidAddress();
-        IAdapter a = IAdapter(p.adapter);
-        IAdapter.StrategyKind expected =
-            laneKind() == IWheel.LaneKind.Csp ? IAdapter.StrategyKind.Csp : IAdapter.StrategyKind.CoveredCall;
-        IAdapter.AssetConfigV2 memory cfg = a.assetConfigV2();
-        if (
-            a.interfaceVersion() != 2 || a.strategyKind() != expected || a.underlyingAsset() != p.underlyingAsset
-                || a.settlementAsset() != p.settlementAsset || a.policyHash() != p.policyHash || cfg.oTokenDecimals != 8
-                || cfg.underlyingDecimals != 8 || cfg.priceDecimals != 8 || cfg.settlementDecimals != 6
-                || IOperations(address(a)).fund() != address(this)
-                || IOperations(address(a)).strategyManager() != address(this)
+                || (laneKind() == IWheel.LaneKind.CoveredCall && p.executionCostBufferUsd8 > type(uint256).max / 2)
         ) revert InvalidAddress();
         __FundUpgradeable_init(p.authority);
         Layout storage $ = _layout();
         $.coordinator = p.coordinator;
-        $.adapter = p.adapter;
+        $.adapter = address(0);
         $.underlying = p.underlyingAsset;
         $.settlement = p.settlementAsset;
         $.maxAssets = p.maxAssets;
@@ -218,12 +230,62 @@ abstract contract AssetNeutralWheelChildLaneV2 is FundUpgradeable, IAssetNeutral
         _;
     }
 
+    function _checkNotDelegated() internal view override {
+        if (block.chainid != 84532) revert UnsupportedChain(block.chainid);
+        super._checkNotDelegated();
+    }
+
+    function _authorizeUpgrade(address) internal view override {
+        if (block.chainid != 84532) revert UnsupportedChain(block.chainid);
+    }
+
     function coordinator() external view returns (address) {
         return _layout().coordinator;
     }
 
     function adapter() external view returns (address) {
         return _layout().adapter;
+    }
+
+    function fund() external view returns (address) {
+        return address(this);
+    }
+
+    function underlyingAsset() external view returns (address) {
+        return _layout().underlying;
+    }
+
+    function settlementAsset() external view returns (address) {
+        return _layout().settlement;
+    }
+
+    function policyHash() external view returns (bytes32) {
+        return _layout().policyHash;
+    }
+
+    function adapterBound() external view returns (bool) {
+        return _layout().adapter != address(0);
+    }
+
+    function bindAdapter(address adapter_) external restricted {
+        Layout storage $ = _layout();
+        if ($.adapter != address(0) || !_validAdapter(adapter_, $)) revert InvalidAddress();
+        $.adapter = adapter_;
+        _checkpoint($, keccak256(abi.encode("BIND_ADAPTER", adapter_)));
+        emit AssetNeutralLaneAdapterBoundV2(adapter_);
+    }
+
+    function _validAdapter(address adapter_, Layout storage $) private view returns (bool) {
+        if (adapter_ == address(0) || adapter_.code.length == 0) return false;
+        IAdapter a = IAdapter(adapter_);
+        IAdapter.StrategyKind expected =
+            laneKind() == IWheel.LaneKind.Csp ? IAdapter.StrategyKind.Csp : IAdapter.StrategyKind.CoveredCall;
+        IAdapter.AssetConfigV2 memory cfg = a.assetConfigV2();
+        return a.interfaceVersion() == 2 && a.strategyKind() == expected && a.underlyingAsset() == $.underlying
+            && a.settlementAsset() == $.settlement && a.policyHash() == $.policyHash
+            && cfg.underlyingAsset == $.underlying && cfg.settlementAsset == $.settlement && cfg.oTokenDecimals == 8
+            && cfg.underlyingDecimals == 8 && cfg.priceDecimals == 8 && cfg.settlementDecimals == 6
+            && IOperations(adapter_).fund() == address(this) && IOperations(adapter_).strategyManager() == address(this);
     }
 
     function asset() external view returns (address) {
@@ -301,7 +363,10 @@ abstract contract AssetNeutralWheelChildLaneV2 is FundUpgradeable, IAssetNeutral
         bytes calldata data
     ) external onlyCoordinator returns (uint256 shares, uint256 positionId, uint64 expiry, bytes32 positionHash) {
         Layout storage $ = _layout();
-        if ($.allocationsPaused || $.state != LaneState.Idle || trancheId == 0 || amount == 0 || amount > $.maxAssets) {
+        if (
+            $.adapter == address(0) || $.allocationsPaused || $.state != LaneState.Idle || trancheId == 0 || amount == 0
+                || amount > $.maxAssets
+        ) {
             revert InvalidLaneState();
         }
         _consume($, transitionHash);
@@ -325,6 +390,9 @@ abstract contract AssetNeutralWheelChildLaneV2 is FundUpgradeable, IAssetNeutral
         token.safeTransferFrom(msg.sender, address(this), amount);
         if (token.balanceOf(address(this)) - before_ != amount) revert TransferMismatch();
         token.safeTransfer($.adapter, amount);
+        // The covered-call adapter evaluates utilization against lane totalAssets. Publish only the pending share
+        // basis before the external allocation; the transaction remains atomic and committed lane state stays Idle.
+        $.shares = amount;
         IOperations($.adapter).allocate(collateral, amount, data);
         IAdapter.AdapterStateV2 memory state = IAdapter($.adapter).adapterStateV2();
         positionId = state.positionCount;
@@ -336,7 +404,6 @@ abstract contract AssetNeutralWheelChildLaneV2 is FundUpgradeable, IAssetNeutral
         $.activeTrancheId = trancheId;
         $.activePositionId = positionId;
         $.consumedLotId = lotId;
-        $.shares = amount;
         $.literalStrikeUsd8 = p.strikePriceUsd8;
         $.expiry = uint64(o.expiry());
         _checkpoint($, transitionHash);
@@ -357,6 +424,8 @@ abstract contract AssetNeutralWheelChildLaneV2 is FundUpgradeable, IAssetNeutral
         }
         bytes32 current = executionStateHash();
         if (current != expectedHash) revert InvalidPositionHash(expectedHash, current);
+        uint256 sb = IERC20($.settlement).balanceOf(address(this));
+        uint256 ub = IERC20($.underlying).balanceOf(address(this));
         IOperations($.adapter)
             .deallocate(
                 1,
@@ -372,6 +441,8 @@ abstract contract AssetNeutralWheelChildLaneV2 is FundUpgradeable, IAssetNeutral
             );
         IAdapter.PositionV2 memory p = IAdapter($.adapter).positionV2($.activePositionId);
         if (p.lifecycle == IAdapter.Lifecycle.AwaitingPhysicalDelivery) {
+            $.accountedSettlement += IERC20($.settlement).balanceOf(address(this)) - sb;
+            $.accountedUnderlying += IERC20($.underlying).balanceOf(address(this)) - ub;
             $.state = LaneState.Settling;
             _checkpoint($, keccak256(abi.encode("SETTLING", p.lifecycleHash)));
             positionHash = executionStateHash();
@@ -391,8 +462,6 @@ abstract contract AssetNeutralWheelChildLaneV2 is FundUpgradeable, IAssetNeutral
             else if (p.lifecycle == IAdapter.Lifecycle.CashFallback) kind = IWheel.SettlementKind.UnderlyingFallback;
             else revert InvalidLaneState();
         }
-        uint256 sb = IERC20($.settlement).balanceOf(address(this));
-        uint256 ub = IERC20($.underlying).balanceOf(address(this));
         IOperations($.adapter).deallocateInKind(FundConstants.WAD, address(this), "");
         $.accountedSettlement += IERC20($.settlement).balanceOf(address(this)) - sb;
         $.accountedUnderlying += IERC20($.underlying).balanceOf(address(this)) - ub;
@@ -562,6 +631,8 @@ contract AssetNeutralMetaWheelCoordinatorV2 is FundUpgradeable, IWheel, IManaged
         mapping(uint256 => AssignmentLotV2) lots;
         mapping(uint256 => uint256) openedCallStrikeUsd8;
         mapping(bytes32 => bool) consumed;
+        mapping(address => address) laneValuators;
+        address valuationReference;
     }
 
     struct InitializeParams {
@@ -589,6 +660,7 @@ contract AssetNeutralMetaWheelCoordinatorV2 is FundUpgradeable, IWheel, IManaged
     error OnlyStrategyManager();
     error ReentrantOperation();
     error TransferMismatch();
+    error UnsupportedChain(uint256 chainId);
     event AssetNeutralWheelTrancheQueuedV2(
         uint256 indexed trancheId, bytes32 indexed allocationId, uint256 amount, bytes32 stateHash
     );
@@ -611,6 +683,7 @@ contract AssetNeutralMetaWheelCoordinatorV2 is FundUpgradeable, IWheel, IManaged
     event AssetNeutralWheelRedemptionReserveChangedV2(uint256 reserved, uint256 pending);
     event AssetNeutralWheelAllocationPauseSetV2(bool paused);
     event AssetNeutralWheelLaneRegisteredV2(address indexed lane, LaneKind kind);
+    event AssetNeutralWheelLaneValuatorSetV2(address indexed lane, address indexed valuator);
 
     constructor() {
         _disableInitializers();
@@ -622,14 +695,18 @@ contract AssetNeutralMetaWheelCoordinatorV2 is FundUpgradeable, IWheel, IManaged
     }
 
     function initialize(InitializeParams calldata p) external initializer {
-        if (
-            p.fund == address(0) || p.strategyManager == address(0) || p.underlyingAsset == address(0)
-                || p.settlementAsset == address(0) || p.fund.code.length == 0 || p.strategyManager.code.length == 0
-                || p.underlyingAsset.code.length == 0 || p.settlementAsset.code.length == 0 || p.maxCspLanes == 0
-                || p.maxCoveredCallLanes == 0 || p.maxCspLanes > 32 || p.maxCoveredCallLanes > 32
-                || p.policyHash != LBTC8_POLICY_HASH || IERC20Metadata(p.underlyingAsset).decimals() != 8
-                || IERC20Metadata(p.settlementAsset).decimals() != 6
-        ) revert InvalidAddress();
+        if (block.chainid != 84532) revert UnsupportedChain(block.chainid);
+        if (!WheelManagedOperationDispatcher.validCoordinatorInitialize(
+                p.fund,
+                p.strategyManager,
+                p.underlyingAsset,
+                p.settlementAsset,
+                p.maxCspLanes,
+                p.maxCoveredCallLanes,
+                p.executionCostBufferUsd8,
+                p.policyHash,
+                LBTC8_POLICY_HASH
+            )) revert InvalidAddress();
         __FundUpgradeable_init(p.authority);
         Layout storage $ = _layout();
         $.fund = p.fund;
@@ -656,6 +733,15 @@ contract AssetNeutralMetaWheelCoordinatorV2 is FundUpgradeable, IWheel, IManaged
         $.executing = true;
         _;
         $.executing = false;
+    }
+
+    function _checkNotDelegated() internal view override {
+        if (block.chainid != 84532) revert UnsupportedChain(block.chainid);
+        super._checkNotDelegated();
+    }
+
+    function _authorizeUpgrade(address) internal view override {
+        if (block.chainid != 84532) revert UnsupportedChain(block.chainid);
     }
 
     function interfaceVersion() external pure returns (uint64) {
@@ -733,6 +819,10 @@ contract AssetNeutralMetaWheelCoordinatorV2 is FundUpgradeable, IWheel, IManaged
         return (lane, c.kind, c.active);
     }
 
+    function laneValuator(address lane) external view returns (address) {
+        return _layout().laneValuators[lane];
+    }
+
     function positionStateHash() public view returns (bytes32) {
         Layout storage $ = _layout();
         return keccak256(
@@ -778,7 +868,9 @@ contract AssetNeutralMetaWheelCoordinatorV2 is FundUpgradeable, IWheel, IManaged
             lane == address(0) || lane.code.length == 0 || $.lanes[lane].kind != LaneKind.None
                 || (kind != LaneKind.Csp && kind != LaneKind.CoveredCall)
         ) revert InvalidLane();
-        if (!_validLane(lane, kind, $)) revert InvalidLane();
+        if (!WheelManagedOperationDispatcher.validLane(
+                lane, rawKind, address(this), $.underlying, $.settlement, $.bufferUsd8, LBTC8_POLICY_HASH
+            )) revert InvalidLane();
         uint256 count;
         for (uint256 i; i < $.laneList.length; i++) {
             if ($.lanes[$.laneList[i]].kind == kind) count++;
@@ -790,34 +882,20 @@ contract AssetNeutralMetaWheelCoordinatorV2 is FundUpgradeable, IWheel, IManaged
         emit AssetNeutralWheelLaneRegisteredV2(lane, kind);
     }
 
-    function _validLane(address lane, LaneKind kind, Layout storage $) private view returns (bool) {
-        (bool okCoordinator, address coordinator_) =
-            AssetNeutralReadbackV2.readAddress(lane, IAssetNeutralWheelChildLaneV2.coordinator.selector);
-        if (!okCoordinator || coordinator_ != address(this)) return false;
-        (bool okKind, uint256 laneKind_) =
-            AssetNeutralReadbackV2.readUint(lane, IAssetNeutralWheelChildLaneV2.laneKind.selector);
-        if (!okKind || laneKind_ != uint256(kind)) return false;
-        (bool okAdapter, address adapter_) =
-            AssetNeutralReadbackV2.readAddress(lane, IAssetNeutralWheelChildLaneV2.adapter.selector);
-        if (!okAdapter || adapter_.code.length == 0) return false;
-        if (kind == LaneKind.CoveredCall) {
-            (bool okBuffer, uint256 buffer_) =
-                AssetNeutralReadbackV2.readUint(lane, IAssetNeutralWheelChildLaneV2.executionCostBufferUsd8.selector);
-            if (!okBuffer || buffer_ != $.bufferUsd8) return false;
-        }
-        return _validLaneAdapter(adapter_, lane, kind);
-    }
-
-    function _validLaneAdapter(address adapter_, address lane, LaneKind kind) private view returns (bool) {
-        (bool okKind, uint256 strategyKind_) = AssetNeutralReadbackV2.readUint(adapter_, IAdapter.strategyKind.selector);
-        uint256 expectedKind =
-            uint256(kind == LaneKind.Csp ? IAdapter.StrategyKind.Csp : IAdapter.StrategyKind.CoveredCall);
-        if (!okKind || strategyKind_ != expectedKind) return false;
-        (bool okFund, address fund_) = AssetNeutralReadbackV2.readAddress(adapter_, IOperations.fund.selector);
-        if (!okFund || fund_ != lane) return false;
-        (bool okManager, address manager_) =
-            AssetNeutralReadbackV2.readAddress(adapter_, IOperations.strategyManager.selector);
-        return okManager && manager_ == lane;
+    function setLaneValuator(address lane, address valuator) external onlySelf {
+        Layout storage $ = _layout();
+        LaneKind kind = $.lanes[lane].kind;
+        address domainRef = $.valuationReference == address(0) ? valuator : $.valuationReference;
+        if (
+            kind == LaneKind.None
+                || !WheelManagedOperationDispatcher.validLaneValuator(
+                    lane, valuator, WheelTypes.LaneKind(uint8(kind)), domainRef
+                )
+        ) revert InvalidLane();
+        if ($.valuationReference == address(0)) $.valuationReference = valuator;
+        $.laneValuators[lane] = valuator;
+        _global($, keccak256(abi.encode("LANE_VALUATOR", lane, valuator)));
+        emit AssetNeutralWheelLaneValuatorSetV2(lane, valuator);
     }
 
     function setLaneActive(address lane, bool active) external onlySelf {
@@ -1038,7 +1116,7 @@ contract AssetNeutralMetaWheelCoordinatorV2 is FundUpgradeable, IWheel, IManaged
         AssignmentLotV2 storage lot = $.lots[t.assignmentLotId];
         if (b.settlementKind == SettlementKind.CallAway) {
             uint256 openedStrike = $.openedCallStrikeUsd8[id];
-            uint256 protectedPrincipal = Math.mulDiv(t.childShares, openedStrike, 1e10, Math.Rounding.Ceil);
+            uint256 protectedPrincipal = Math.mulDiv(t.childShares, openedStrike, 1e10);
             if (
                 openedStrike == 0 || b.underlyingAmount != 0 || b.callAwaySettlementAmount < protectedPrincipal
                     || b.settlementAmount < b.callAwaySettlementAmount
@@ -1162,13 +1240,18 @@ contract AssetNeutralMetaWheelCoordinatorV2 is FundUpgradeable, IWheel, IManaged
     }
 
     function resumeAllocations() external onlySelf {
-        _layout().paused = false;
+        Layout storage $ = _layout();
+        for (uint256 i; i < $.laneList.length; ++i) {
+            address lane = $.laneList[i];
+            if ($.lanes[lane].active && $.laneValuators[lane] == address(0)) revert InvalidLane();
+        }
+        $.paused = false;
         emit AssetNeutralWheelAllocationPauseSetV2(false);
     }
 
     function _lane(Layout storage $, address lane, LaneKind k) private view {
         if (
-            !$.lanes[lane].active || $.lanes[lane].kind != k
+            !$.lanes[lane].active || $.lanes[lane].kind != k || $.laneValuators[lane] == address(0)
                 || IAssetNeutralWheelChildLaneV2(lane).coordinator() != address(this)
         ) revert InvalidLane();
     }
@@ -1274,8 +1357,7 @@ contract AssetNeutralMetaWheelValuatorV2 is IPositionValuator {
     address public immutable underlying;
     address public immutable settlement;
     address public immutable spotFeed;
-    address public immutable cspValuator;
-    address public immutable callValuator;
+    address public immutable expectedAddressBook;
     uint64 public immutable maxSpotStaleness;
     error InvalidAdapter();
     error InvalidSnapshot();
@@ -1287,20 +1369,24 @@ contract AssetNeutralMetaWheelValuatorV2 is IPositionValuator {
         if (
             c == address(0) || u == address(0) || s == address(0) || feed == address(0) || cv == address(0)
                 || av == address(0) || c.code.length == 0 || u.code.length == 0 || s.code.length == 0
-                || feed.code.length == 0 || cv.code.length == 0 || av.code.length == 0 || stale == 0
+                || feed.code.length == 0 || cv.code.length == 0 || av.code.length == 0 || stale == 0 || stale > 1_200
                 || IERC20Metadata(u).decimals() != 8 || IERC20Metadata(s).decimals() != 6
                 || IERC20Metadata(feed).decimals() != 8
         ) revert InvalidSpot();
+        if (!_validCoordinator(c, u, s)) revert InvalidAdapter();
+        (bool okCspBook, address cspBook) =
+            AssetNeutralReadbackV2.readAddress(cv, IAssetNeutralOptionsValuatorReadbackV2.expectedAddressBook.selector);
+        (bool okCallBook, address callBook) =
+            AssetNeutralReadbackV2.readAddress(av, IAssetNeutralOptionsValuatorReadbackV2.expectedAddressBook.selector);
         if (
-            !_validCoordinator(c, u, s) || !_validChildValuator(c, cv, u, s, IAdapter.StrategyKind.Csp)
-                || !_validChildValuator(c, av, u, s, IAdapter.StrategyKind.CoveredCall)
+            !okCspBook || !okCallBook || cspBook == address(0) || cspBook != callBook
+                || !_validChildDomain(cv, feed, stale) || !_validChildDomain(av, feed, stale)
         ) revert InvalidAdapter();
         coordinator = c;
         underlying = u;
         settlement = s;
         spotFeed = feed;
-        cspValuator = cv;
-        callValuator = av;
+        expectedAddressBook = cspBook;
         maxSpotStaleness = stale;
     }
 
@@ -1316,6 +1402,14 @@ contract AssetNeutralMetaWheelValuatorV2 is IPositionValuator {
         if (!okSettlement || settlement_ != s) return false;
         (bool okPolicy, bytes32 policy_) = AssetNeutralReadbackV2.readBytes32(c, IWheel.policyHash.selector);
         return okPolicy && policy_ == LBTC8_POLICY_HASH;
+    }
+
+    function _validChildDomain(address valuator, address feed, uint64 stale) private view returns (bool) {
+        (bool okFeed, address childFeed) =
+            AssetNeutralReadbackV2.readAddress(valuator, IAssetNeutralOptionsValuatorReadbackV2.spotFeed.selector);
+        (bool okStale, uint256 childStale) =
+            AssetNeutralReadbackV2.readUint(valuator, IAssetNeutralOptionsValuatorReadbackV2.maxSpotStaleness.selector);
+        return okFeed && childFeed == feed && okStale && childStale != 0 && stale <= childStale;
     }
 
     function _validChildValuator(address c, address valuator, address u, address s, IAdapter.StrategyKind kind)
@@ -1343,6 +1437,11 @@ contract AssetNeutralMetaWheelValuatorV2 is IPositionValuator {
             valuator, IAssetNeutralOptionsValuatorReadbackV2.expectedPolicyHash.selector
         );
         if (!okPolicy || policy_ != LBTC8_POLICY_HASH) return false;
+        (bool okBook, address book_) = AssetNeutralReadbackV2.readAddress(
+            valuator, IAssetNeutralOptionsValuatorReadbackV2.expectedAddressBook.selector
+        );
+        if (!okBook || book_ != expectedAddressBook) return false;
+        if (!_validChildDomain(valuator, spotFeed, maxSpotStaleness)) return false;
         (bool okAdapter, address adapter_) = AssetNeutralReadbackV2.readAddress(
             valuator, IAssetNeutralOptionsValuatorReadbackV2.expectedAdapter.selector
         );
@@ -1412,9 +1511,13 @@ contract AssetNeutralMetaWheelValuatorV2 is IPositionValuator {
                 || IWheel(adapter).underlyingAsset() != underlying || IWheel(adapter).settlementAsset() != settlement
         ) revert InvalidAdapter();
         if (snapshot != block.number) revert InvalidSnapshot();
+        Oracle boundOracle = Oracle(AddressBook(expectedAddressBook).oracle());
+        uint256 oracleAge = boundOracle.maxOracleStaleness();
+        if (boundOracle.priceFeed(underlying) != spotFeed || oracleAge == 0) revert InvalidSpot();
+        uint256 effectiveMaxAge = Math.min(oracleAge, uint256(maxSpotStaleness));
         (uint80 round, int256 answer,, uint256 updated, uint80 answered) = IAssetNeutralFeed(spotFeed).latestRoundData();
         if (
-            answer <= 0 || updated == 0 || updated > block.timestamp || block.timestamp - updated > maxSpotStaleness
+            answer <= 0 || updated == 0 || updated > block.timestamp || block.timestamp - updated > effectiveMaxAge
                 || answered < round
         ) {
             revert InvalidSpot();
@@ -1439,9 +1542,14 @@ contract AssetNeutralMetaWheelValuatorV2 is IPositionValuator {
                     || reports[cursor].childShares != IAssetNeutralWheelChildLaneV2(lane).childShares()
                     || reports[cursor].positionHash != IAssetNeutralWheelChildLaneV2(lane).positionStateHash()
             ) revert InvalidLaneSet();
-            FundTypes.PositionValue memory child = IPositionValuator(
-                    kind == IWheel.LaneKind.Csp ? cspValuator : callValuator
-                ).value(IAssetNeutralWheelChildLaneV2(lane).adapter(), snapshot, reports[cursor].valuationData);
+            address childValuator = IWheel(adapter).laneValuator(lane);
+            IAdapter.StrategyKind expectedKind =
+                kind == IWheel.LaneKind.Csp ? IAdapter.StrategyKind.Csp : IAdapter.StrategyKind.CoveredCall;
+            if (!_validChildValuator(adapter, childValuator, underlying, settlement, expectedKind)) {
+                revert InvalidLaneSet();
+            }
+            FundTypes.PositionValue memory child = IPositionValuator(childValuator)
+                .value(IAssetNeutralWheelChildLaneV2(lane).adapter(), snapshot, reports[cursor].valuationData);
             (uint256 idleS, uint256 idleU) = IAssetNeutralWheelChildLaneV2(lane).accountingState();
             if (IERC20(settlement).balanceOf(lane) < idleS || IERC20(underlying).balanceOf(lane) < idleU) {
                 revert AccountingDeficit();

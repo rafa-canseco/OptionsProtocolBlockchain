@@ -144,6 +144,8 @@ contract ForkSmokePostUpgrade is Test {
 
     function test_smoke_zeroCollateralPutBlocked() public {
         if (block.chainid != 8453) return;
+        vm.prank(owner);
+        pool.setAaveEnabled(USDC, false);
 
         uint256 strike = 1e8;
         vm.prank(factoryOperator);
@@ -163,6 +165,8 @@ contract ForkSmokePostUpgrade is Test {
 
     function test_smoke_poolPassthrough() public {
         if (block.chainid != 8453) return;
+        vm.prank(owner);
+        pool.setAaveEnabled(USDC, false);
 
         uint256 poolUsdcBefore = IERC20(USDC).balanceOf(address(pool));
 

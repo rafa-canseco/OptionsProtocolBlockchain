@@ -19,5 +19,6 @@ interface IWheelCoordinatorManagedActions {
     function setLaneActive(address lane, bool active) external;
     function setPolicyHash(bytes32 newPolicyHash) external;
     function setFloorBufferUsd8(uint256 newFloorBufferUsd8) external;
+    function setLaneValuator(address lane, address valuator) external;
     function resumeAllocations() external;
 }
