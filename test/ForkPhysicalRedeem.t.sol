@@ -216,7 +216,7 @@ contract ForkPhysicalRedeemTest is Test {
 
         uint256 before_ = IERC20(WETH).balanceOf(user);
         vm.prank(mm);
-        settler.physicalRedeem(putOToken, user, amount, collateral, mm);
+        settler.operatorPhysicalRedeemVault(user, vaultId, collateral);
 
         assertEq(IERC20(WETH).balanceOf(user) - before_, amount * 1e10, "Exact WETH");
         assertEq(IERC20(USDC).balanceOf(address(settler)), 0, "Settler 0 USDC");
@@ -241,7 +241,7 @@ contract ForkPhysicalRedeemTest is Test {
         uint256 expectedUsdc = (amount * callStrike) / 1e10;
 
         vm.prank(mm);
-        settler.physicalRedeem(callOToken, user, amount, expectedUsdc, mm);
+        settler.operatorPhysicalRedeemVault(user, vaultId, expectedUsdc);
 
         assertEq(IERC20(USDC).balanceOf(user) - before_, expectedUsdc, "Exact USDC");
         assertEq(IERC20(USDC).balanceOf(address(settler)), 0, "Settler 0 USDC");
@@ -267,7 +267,7 @@ contract ForkPhysicalRedeemTest is Test {
         uint256 expectedUsdc = (amount * callStrike) / 1e10;
 
         vm.prank(mm);
-        settler.physicalRedeem(callOToken, user, amount, expectedUsdc, mm);
+        settler.operatorPhysicalRedeemVault(user, vaultId, expectedUsdc);
 
         assertGt(IERC20(USDC).balanceOf(mm) - mmUsdcBefore, 0, "MM gets USDC surplus");
         assertEq(IERC20(WETH).balanceOf(mm), mmWethBefore, "MM gets no WETH");
@@ -290,7 +290,7 @@ contract ForkPhysicalRedeemTest is Test {
         uint256 userUsdcBefore = IERC20(USDC).balanceOf(user);
 
         vm.prank(mm);
-        settler.physicalRedeem(putOToken, user, amount, collateral, mm);
+        settler.operatorPhysicalRedeemVault(user, vaultId, collateral);
 
         assertEq(IERC20(USDC).balanceOf(user), userUsdcBefore, "User USDC unchanged");
         assertGt(IERC20(USDC).balanceOf(mm) - mmUsdcBefore, 0, "MM gets surplus");
@@ -368,7 +368,7 @@ contract ForkPhysicalRedeemTest is Test {
 
     // --- ITM payout: exact contra-asset amount ---
 
-    function test_itmSettlement_put_exactPayout() public onlyFork {
+    function test_itmSettlement_put_requiresExactPhysicalDelivery() public onlyFork {
         uint256 amount = 2e8;
         uint256 collateral = (amount * putStrike) / 1e10; // 4000 USDC
 
@@ -381,11 +381,11 @@ contract ForkPhysicalRedeemTest is Test {
 
         _settleVault(user, vaultId);
 
-        // MM redeems oTokens — gets full collateral (ITM put)
-        uint256 mmBefore = IERC20(USDC).balanceOf(mm);
-        _batchRedeem(putOToken, amount);
-        uint256 payout = IERC20(USDC).balanceOf(mm) - mmBefore;
-        assertEq(payout, collateral, "ITM PUT: MM gets full collateral");
+        // Attributed ITM oTokens require the exact physical-delivery path, not generic cash redemption.
+        uint256 userWethBefore = IERC20(WETH).balanceOf(user);
+        vm.prank(mm);
+        settler.operatorPhysicalRedeemVault(user, vaultId, collateral);
+        assertEq(IERC20(WETH).balanceOf(user) - userWethBefore, amount * 1e10, "ITM PUT: exact WETH delivered");
     }
 
     function _settleVault(address _owner, uint256 _vaultId) private {

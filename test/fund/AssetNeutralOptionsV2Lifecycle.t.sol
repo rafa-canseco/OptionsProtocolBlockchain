@@ -20,6 +20,10 @@ import {
     AssetNeutralOptionsFundAdapterV2
 } from "../../src/fund/AssetNeutralOptionsFundAdapterV2.sol";
 import {
+    AssetNeutralWheelChildLaneV2,
+    AssetNeutralCoveredCallWheelChildLaneV2
+} from "../../src/fund/AssetNeutralMetaWheelV2.sol";
+import {
     AssetNeutralCspFundValuatorV2,
     AssetNeutralOptionsFundValuatorV2
 } from "../../src/fund/AssetNeutralOptionsFundValuatorV2.sol";
@@ -79,6 +83,7 @@ contract AssetNeutralOptionsV2LifecycleTest is Test {
     uint256 private quoteId;
 
     function setUp() public {
+        vm.chainId(84532);
         vm.warp(1_700_000_000);
         mm = vm.addr(MM_KEY);
         lbtc = new MockERC20("Loot BTC", "LBTC", 8);
@@ -355,6 +360,77 @@ contract AssetNeutralOptionsV2LifecycleTest is Test {
         assertEq(usdc.balanceOf(address(call)), PREMIUM + strikeProceeds + 1);
     }
 
+    function test_coveredCallPhysicalDeliveryUsesBatchSettlerFloorForNonDivisibleStrikeProceeds() public {
+        uint256 nonDivisibleStrike = STRIKE + 1;
+        (IAdapter.OpenPositionDataV2 memory open,) = _openAt(false, OPTION, nonDivisibleStrike);
+        lbtc.mint(address(call), OPTION);
+        vm.prank(address(callManager));
+        call.allocate(address(lbtc), OPTION, abi.encode(open));
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(lbtc), expiry, nonDivisibleStrike + 1e8);
+        vm.prank(address(callManager));
+        call.deallocate(1, 0, _settle(1));
+
+        uint256 floorProceeds = OPTION * nonDivisibleStrike / 1e10;
+        assertEq((OPTION * nonDivisibleStrike) % 1e10, 1e8);
+        settler.operatorPhysicalRedeemVault(address(call), 1, floorProceeds);
+        vm.prank(address(callManager));
+        call.deallocate(1, 0, _settle(1));
+
+        assertEq(call.positionV2(1).calledAwaySettlementAmount, floorProceeds);
+        assertEq(call.adapterStateV2().accountedSettlementAmount, PREMIUM + floorProceeds);
+    }
+
+    function test_activePositionIdsSwapPopAndValuatorIgnoresTerminalHistory() public {
+        (IAdapter.OpenPositionDataV2 memory first, address oToken) = _open(true);
+        IAdapter.OpenPositionDataV2 memory second = _openExisting(oToken, OPTION, CSP_COLLATERAL);
+        IAdapter.OpenPositionDataV2 memory third = _openExisting(oToken, OPTION, CSP_COLLATERAL);
+        usdc.mint(address(csp), CSP_COLLATERAL * 3);
+        vm.startPrank(address(cspManager));
+        csp.allocate(address(usdc), CSP_COLLATERAL, abi.encode(first));
+        csp.allocate(address(usdc), CSP_COLLATERAL, abi.encode(second));
+        csp.allocate(address(usdc), CSP_COLLATERAL, abi.encode(third));
+        vm.stopPrank();
+        assertEq(csp.activePositionIdAt(0), 1);
+        assertEq(csp.activePositionIdAt(1), 2);
+        assertEq(csp.activePositionIdAt(2), 3);
+
+        vm.warp(expiry + 1);
+        oracle.setExpiryPrice(address(lbtc), expiry, STRIKE + 1);
+        vm.prank(address(cspManager));
+        csp.deallocate(1, 0, _settle(2));
+        assertEq(csp.activePositionIdAt(0), 1);
+        assertEq(csp.activePositionIdAt(1), 3);
+        vm.prank(address(cspManager));
+        csp.deallocate(1, 0, _settle(1));
+        assertEq(csp.activePositionIdAt(0), 3);
+
+        address[] memory observers = new address[](2);
+        observers[0] = mm;
+        observers[1] = vm.addr(OBSERVER_KEY);
+        AssetNeutralCspFundValuatorV2 valuator = new AssetNeutralCspFundValuatorV2(
+            address(feed),
+            1_200,
+            10,
+            2,
+            observers,
+            address(csp),
+            address(cspFund),
+            address(book),
+            address(lbtc),
+            address(usdc),
+            csp.policyHash()
+        );
+        AssetNeutralOptionsFundValuatorV2.Observation[] memory marks =
+            new AssetNeutralOptionsFundValuatorV2.Observation[](0);
+        FundTypes.PositionValue memory value = valuator.value(
+            address(csp), uint64(block.number), abi.encode(AssetNeutralOptionsFundValuatorV2.ValuationData(marks))
+        );
+        assertEq(csp.adapterStateV2().positionCount, 3);
+        assertEq(csp.adapterStateV2().activePositionCount, 1);
+        assertEq(value.liabilities, 0);
+    }
+
     function test_coveredCallItmDefaultUsesExplicitAssetFallbackAndRejectsReplay() public {
         (IAdapter.OpenPositionDataV2 memory open,) = _open(false);
         lbtc.mint(address(call), OPTION);
@@ -439,6 +515,96 @@ contract AssetNeutralOptionsV2LifecycleTest is Test {
         assertEq(lbtc.balanceOf(address(pool)), half);
     }
 
+    function test_actualCoveredCallLaneFirstAllocationHonorsUtilizationAndRevertsAtomicallyAboveBoundary() public {
+        vm.chainId(84532);
+        (AssetNeutralCoveredCallWheelChildLaneV2 exactLane, AssetNeutralCoveredCallFundAdapterV2 exactAdapter) =
+            _actualCallLanePair(10_000);
+        settler.setPhysicalDeliveryVault(address(exactAdapter), true);
+        (IAdapter.OpenPositionDataV2 memory exactOpen,) = _open(false);
+        lbtc.mint(address(this), OPTION);
+        lbtc.approve(address(exactLane), OPTION);
+        (uint256 shares, uint256 positionId,,) =
+            exactLane.open(1, keccak256("EXACT_UTILIZATION"), 1, STRIKE, OPTION, abi.encode(exactOpen));
+        assertEq(shares, OPTION);
+        assertEq(exactLane.childShares(), OPTION);
+        assertEq(positionId, 1);
+        assertEq(exactLane.activePositionId(), 1);
+        assertEq(exactAdapter.adapterStateV2().activePositionCount, 1);
+
+        (AssetNeutralCoveredCallWheelChildLaneV2 aboveLane, AssetNeutralCoveredCallFundAdapterV2 aboveAdapter) =
+            _actualCallLanePair(9_999);
+        settler.setPhysicalDeliveryVault(address(aboveAdapter), true);
+        (IAdapter.OpenPositionDataV2 memory aboveOpen,) = _openAt(false, OPTION, STRIKE + 1);
+        lbtc.mint(address(this), OPTION);
+        lbtc.approve(address(aboveLane), OPTION);
+        bytes32 stateBefore = aboveLane.executionStateHash();
+        uint256 callerBefore = lbtc.balanceOf(address(this));
+        uint256 laneBefore = lbtc.balanceOf(address(aboveLane));
+        uint256 adapterBefore = lbtc.balanceOf(address(aboveAdapter));
+        uint256 poolBefore = lbtc.balanceOf(address(pool));
+
+        vm.expectRevert(IOperations.InvalidRiskConfig.selector);
+        aboveLane.open(2, keccak256("ABOVE_UTILIZATION"), 2, STRIKE, OPTION, abi.encode(aboveOpen));
+
+        assertEq(aboveLane.executionStateHash(), stateBefore);
+        assertEq(aboveLane.childShares(), 0);
+        assertEq(aboveLane.activePositionId(), 0);
+        assertEq(aboveAdapter.adapterStateV2().positionCount, 0);
+        assertEq(aboveAdapter.adapterStateV2().activePositionCount, 0);
+        assertEq(lbtc.balanceOf(address(this)), callerBefore);
+        assertEq(lbtc.balanceOf(address(aboveLane)), laneBefore);
+        assertEq(lbtc.balanceOf(address(aboveAdapter)), adapterBefore);
+        assertEq(lbtc.balanceOf(address(pool)), poolBefore);
+    }
+
+    function test_maxOpenPositionsOperationalCapAcceptsSixteenAndRejectsSeventeen() public {
+        AccessManager authority = new AccessManager(address(this));
+        AssetNeutralOptionsFundAdapterV2.InitializeParamsV2 memory p =
+            _params(address(cspFund), address(cspManager), address(usdc), address(authority));
+        p.riskConfig.maxOpenPositions = 16;
+        new ERC1967Proxy(
+            address(new AssetNeutralCspFundAdapterV2()), abi.encodeCall(AssetNeutralCspFundAdapterV2.initialize, (p))
+        );
+        p.riskConfig.maxOpenPositions = 17;
+        AssetNeutralCspFundAdapterV2 invalidImplementation = new AssetNeutralCspFundAdapterV2();
+        vm.expectRevert(IOperations.InvalidRiskConfig.selector);
+        new ERC1967Proxy(address(invalidImplementation), abi.encodeCall(AssetNeutralCspFundAdapterV2.initialize, (p)));
+    }
+
+    function _actualCallLanePair(uint16 maxUtilizationBps)
+        private
+        returns (AssetNeutralCoveredCallWheelChildLaneV2 lane, AssetNeutralCoveredCallFundAdapterV2 adapter)
+    {
+        AccessManager authority = new AccessManager(address(this));
+        AssetNeutralWheelChildLaneV2.InitializeParams memory laneParams = AssetNeutralWheelChildLaneV2.InitializeParams({
+            coordinator: address(this),
+            adapter: address(0),
+            underlyingAsset: address(lbtc),
+            settlementAsset: address(usdc),
+            authority: address(authority),
+            maxAssets: 100e8,
+            executionCostBufferUsd8: 0,
+            policyHash: 0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180
+        });
+        lane = AssetNeutralCoveredCallWheelChildLaneV2(
+            _proxy(
+                address(new AssetNeutralCoveredCallWheelChildLaneV2()),
+                abi.encodeCall(AssetNeutralCoveredCallWheelChildLaneV2.initialize, (laneParams))
+            )
+        );
+        AssetNeutralOptionsFundAdapterV2.InitializeParamsV2 memory adapterParams =
+            _params(address(lane), address(lane), address(lbtc), address(authority));
+        adapterParams.riskConfig.maxUtilizationBps = maxUtilizationBps;
+        adapter = AssetNeutralCoveredCallFundAdapterV2(
+            _proxy(
+                address(new AssetNeutralCoveredCallFundAdapterV2()),
+                abi.encodeCall(AssetNeutralCoveredCallFundAdapterV2.initialize, (adapterParams))
+            )
+        );
+        lane.bindAdapter(address(adapter));
+        lane.resumeAllocations();
+    }
+
     function _params(address fund_, address manager_, address accountingAsset, address authority)
         private
         view
@@ -472,22 +638,36 @@ contract AssetNeutralOptionsV2LifecycleTest is Test {
     }
 
     function _open(bool put) private returns (IAdapter.OpenPositionDataV2 memory open, address oToken) {
+        return _openAt(put, OPTION, STRIKE);
+    }
+
+    function _openAt(bool put, uint256 optionAmount, uint256 strike)
+        private
+        returns (IAdapter.OpenPositionDataV2 memory open, address oToken)
+    {
         address collateral = put ? address(usdc) : address(lbtc);
-        oToken = factory.createOToken(address(lbtc), address(usdc), collateral, STRIKE, expiry, put);
+        oToken = factory.createOToken(address(lbtc), address(usdc), collateral, strike, expiry, put);
+        open = _openExisting(oToken, optionAmount, put ? CSP_COLLATERAL : optionAmount);
+    }
+
+    function _openExisting(address oToken, uint256 optionAmount, uint256 collateralAmount)
+        private
+        returns (IAdapter.OpenPositionDataV2 memory open)
+    {
         BatchSettler.Quote memory quote = BatchSettler.Quote({
             oToken: oToken,
             bidPrice: PREMIUM,
             deadline: block.timestamp + 1 hours,
             quoteId: ++quoteId,
-            maxAmount: OPTION,
+            maxAmount: optionAmount,
             makerNonce: settler.makerNonce(mm)
         });
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(MM_KEY, settler.hashQuote(quote));
-        open = IAdapter.OpenPositionDataV2({
+        return IAdapter.OpenPositionDataV2({
             quote: quote,
             signature: abi.encodePacked(r, s, v),
-            optionAmount8: OPTION,
-            collateralAmount: put ? CSP_COLLATERAL : OPTION
+            optionAmount8: optionAmount,
+            collateralAmount: collateralAmount
         });
     }
 

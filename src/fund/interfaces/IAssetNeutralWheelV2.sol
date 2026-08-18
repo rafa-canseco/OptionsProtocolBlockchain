@@ -135,4 +135,5 @@ interface IAssetNeutralWheelV2 is IFundStrategyAdapter {
     function assignmentLotV2(uint256 lotId) external view returns (AssignmentLotV2 memory);
     function registeredLaneCount() external view returns (uint256);
     function registeredLaneAt(uint256 index) external view returns (address lane, LaneKind kind, bool active);
+    function laneValuator(address lane) external view returns (address);
 }

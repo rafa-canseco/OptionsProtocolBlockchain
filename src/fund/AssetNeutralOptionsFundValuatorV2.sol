@@ -202,14 +202,13 @@ abstract contract AssetNeutralOptionsFundValuatorV2 is IPositionValuator {
         }
         ValuationData memory marks = abi.decode(data, (ValuationData));
         uint256 used;
-        uint256 active;
         uint256 activeCollateral;
-        for (uint256 id = 1; id <= state.positionCount; ++id) {
+        for (uint256 index; index < state.activePositionCount; ++index) {
+            uint256 id = a.activePositionIdAt(index);
+            if (id == 0 || id > state.positionCount) revert InvalidObservation(id);
             IAdapter.PositionV2 memory p = a.positionV2(id);
-            if (p.lifecycle == IAdapter.Lifecycle.None) revert InvalidObservation(id);
+            activeCollateral += p.collateralAmount;
             if (p.lifecycle == IAdapter.Lifecycle.Open) {
-                ++active;
-                activeCollateral += p.collateralAmount;
                 v.grossAssets += p.collateralAmount;
                 if (block.timestamp >= OToken(p.oToken).expiry()) {
                     (uint256 expiry, bool set) = Oracle(
@@ -234,15 +233,14 @@ abstract contract AssetNeutralOptionsFundValuatorV2 is IPositionValuator {
                     used += count;
                 }
             } else if (p.lifecycle == IAdapter.Lifecycle.AwaitingPhysicalDelivery) {
-                ++active;
-                activeCollateral += p.collateralAmount;
                 v.liabilities += p.collateralAmount;
+            } else {
+                revert InvalidObservation(id);
             }
         }
-        if (
-            used != marks.observations.length || active != state.activePositionCount
-                || activeCollateral != state.activeCollateralAmount
-        ) revert InvalidObservation(0);
+        if (used != marks.observations.length || activeCollateral != state.activeCollateralAmount) {
+            revert InvalidObservation(0);
+        }
         v.dataHash = keccak256(
             abi.encode(
                 adapter,

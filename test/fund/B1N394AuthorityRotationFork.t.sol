@@ -22,6 +22,7 @@ interface IOwnedDependency {
 }
 
 contract B1N394AuthorityRotationForkTest is Test {
+    uint256 private constant SNAPSHOT_BLOCK = 45_614_849;
     address private constant RETIRED = 0x9386365F8c1aF88B4A7Bfb3DB71E5Fa6d1f20382;
     address private constant GOVERNANCE = 0x376a4c54623fe24D0Ffc1032D0b6CcC03A32fd7D;
     address private constant OPERATOR = 0xEa99E3C48D68D1614d6454643135FD93e5cD18cE;
@@ -45,7 +46,8 @@ contract B1N394AuthorityRotationForkTest is Test {
     address private constant WETH = 0x8A6Aa2304797898d46eC1d342Fedc817D3a973B6;
 
     function test_rotationRemovesRetiredAuthorityAcrossSharedDependencies() external {
-        vm.createSelectFork(vm.envString("BASE_SEPOLIA_RPC_URL"));
+        vm.createSelectFork(vm.envString("BASE_SEPOLIA_RPC_URL"), SNAPSHOT_BLOCK);
+        assertEq(block.number, SNAPSHOT_BLOCK);
         vm.setEnv("B1N394_NEW_GOVERNANCE", vm.toString(GOVERNANCE));
         vm.deal(GOVERNANCE, 1 ether);
 

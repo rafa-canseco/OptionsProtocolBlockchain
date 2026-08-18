@@ -68,7 +68,8 @@ library WheelTypes {
         SetLaneActive,
         SetPolicyHash,
         SetFloorBuffer,
-        ResumeAllocations
+        ResumeAllocations,
+        SetLaneValuator
     }
 
     struct Tranche {

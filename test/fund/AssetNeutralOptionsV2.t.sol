@@ -13,6 +13,7 @@ import {OTokenFactory} from "../../src/core/OTokenFactory.sol";
 import {Whitelist} from "../../src/core/Whitelist.sol";
 import {FundTypes} from "../../src/fund/FundTypes.sol";
 import {AssetNeutralUnitsV2} from "../../src/fund/libraries/AssetNeutralUnitsV2.sol";
+import {WheelManagedOperationDispatcher} from "../../src/fund/libraries/WheelManagedOperationDispatcher.sol";
 import {
     AssetNeutralCspFundAdapterV2,
     AssetNeutralCoveredCallFundAdapterV2,
@@ -35,7 +36,7 @@ contract CspStorageLocationHarness is AssetNeutralCspFundAdapterV2 {
     }
 
     function cspPremium(uint256 before_, uint256 after_, uint256 collateral) external pure returns (uint256) {
-        return _cspPremiumEarned(before_, after_, collateral);
+        return WheelManagedOperationDispatcher.cspPremiumEarned(before_, after_, collateral);
     }
 }
 
@@ -279,6 +280,7 @@ contract AssetNeutralOptionsV2Test is Test {
     }
 
     function test_initializeRejectsManagerFundOrAccountingAssetMismatch() external {
+        vm.chainId(84532);
         MockERC20 underlying = new MockERC20("LBTC", "LBTC", 8);
         MockERC20 settlement = new MockERC20("USDC", "USDC", 6);
         MockBindingManagerV2 manager = new MockBindingManagerV2();

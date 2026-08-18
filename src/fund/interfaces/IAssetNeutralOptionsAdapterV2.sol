@@ -130,4 +130,5 @@ interface IAssetNeutralOptionsAdapterV2 is IFundStrategyAdapter {
     function policyHash() external view returns (bytes32);
     function adapterStateV2() external view returns (AdapterStateV2 memory);
     function positionV2(uint256 positionId) external view returns (PositionV2 memory);
+    function activePositionIdAt(uint256 index) external view returns (uint256);
 }

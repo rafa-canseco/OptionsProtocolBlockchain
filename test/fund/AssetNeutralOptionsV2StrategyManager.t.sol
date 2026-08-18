@@ -161,6 +161,7 @@ contract AssetNeutralManagerReturnAdapterV2 is IFundStrategyAdapter {
         }
 
         function test_actualAdapterTerminalLossCannotUnderReportPrincipalWithCallerTarget() public {
+            vm.chainId(84532);
             _depositAssets(100e6);
             (AssetNeutralCspFundAdapterV2ManagerHarness adapter, AssetNeutralManagerValuatorV2 valuator) =
                 _deployActualAdapter();
@@ -189,6 +190,7 @@ contract AssetNeutralManagerReturnAdapterV2 is IFundStrategyAdapter {
         }
 
         function test_actualAdapterPartialTerminalLotReleasesExactPrincipalAndKeepsRemainderAllocated() public {
+            vm.chainId(84532);
             _depositAssets(100e6);
             (AssetNeutralCspFundAdapterV2ManagerHarness adapter, AssetNeutralManagerValuatorV2 valuator) =
                 _deployActualAdapter();

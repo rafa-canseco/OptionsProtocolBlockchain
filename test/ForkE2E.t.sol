@@ -251,21 +251,22 @@ contract ForkE2E is Test {
         vm.expectRevert(abi.encodeWithSignature("EscapeNotReady()"));
         settler.mmSelfRedeem(oToken, amount);
 
-        // After escape delay (3 days)
+        // ITM vaults are reserved for exact physical delivery and cannot use the generic escape hatch.
         vm.warp(expiry + 3 days + 1);
         uint256 mmUsdcBefore = IERC20(USDC).balanceOf(mm);
         vm.prank(mm);
+        vm.expectRevert(BatchSettler.ReservedPhysicalDelivery.selector);
         settler.mmSelfRedeem(oToken, amount);
 
-        assertEq(IERC20(USDC).balanceOf(mm) - mmUsdcBefore, collateral, "mm self-redeems full collateral");
-        assertEq(settler.mmOTokenBalance(mm, oToken), 0, "mm ledger cleared");
+        assertEq(IERC20(USDC).balanceOf(mm), mmUsdcBefore, "reserved delivery cannot move MM assets");
+        assertEq(settler.mmOTokenBalance(mm, oToken), amount, "reserved MM ledger remains intact");
     }
 
     // ================================================================
     //              TEST: EMERGENCY WITHDRAW
     // ================================================================
 
-    function test_emergencyWithdraw_returnsCollateral() public {
+    function test_emergencyWithdraw_rejectsOutstandingReservedDelivery() public {
         address oToken = _createPut(strikePrice);
         uint256 amount = 1e8;
         uint256 bidPrice = 50e6;
@@ -278,13 +279,11 @@ contract ForkE2E is Test {
 
         uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
         vm.prank(alice);
+        vm.expectRevert(Controller.OTokensAlreadyRedeemed.selector);
         controller.emergencyWithdrawVault(1);
 
-        assertEq(
-            IERC20(USDC).balanceOf(alice) - aliceUsdcBefore, collateral, "alice gets full collateral back in emergency"
-        );
-
-        assertEq(settler.mmOTokenBalance(mm, oToken), 0, "mm ledger cleared after emergency");
+        assertEq(IERC20(USDC).balanceOf(alice), aliceUsdcBefore, "failed emergency cannot move collateral");
+        assertEq(settler.mmOTokenBalance(mm, oToken), amount, "MM claim remains intact");
     }
 
     // ================================================================
@@ -330,26 +329,23 @@ contract ForkE2E is Test {
         assertEq(settler.mmOTokenBalance(mm2, oToken), amount, "mm2 has 1 oToken");
         assertEq(IERC20(oToken).balanceOf(address(settler)), 2 * amount, "settler holds total");
 
-        // ITM settlement
+        // OTM settlement lets each MM redemption burn independently without physical-delivery reservation.
         vm.warp(expiry + 1);
-        _mockChainlinkFresh(1800e8);
+        _mockChainlinkFresh(2100e8);
         vm.prank(deployer);
-        oracle.setExpiryPrice(WETH, expiry, 1800e8);
+        oracle.setExpiryPrice(WETH, expiry, 2100e8);
         _settleVault(alice, 1);
         _settleVault(alice, 2);
 
-        // Redeem mm1 only
-        _redeemForMM(oToken, amount);
+        // Redeem the exact vault-attributed MM balance; generic redemption intentionally cannot consume attribution.
+        vm.prank(operatorBot);
+        settler.operatorRedeemVaultForMM(alice, 1, mm);
         assertEq(settler.mmOTokenBalance(mm, oToken), 0, "mm1 cleared");
         assertEq(settler.mmOTokenBalance(mm2, oToken), amount, "mm2 untouched");
 
         // Redeem mm2
-        address[] memory tokens = new address[](1);
-        uint256[] memory amts = new uint256[](1);
-        tokens[0] = oToken;
-        amts[0] = amount;
         vm.prank(operatorBot);
-        settler.operatorRedeemForMM(mm2, tokens, amts);
+        settler.operatorRedeemVaultForMM(alice, 2, mm2);
         assertEq(settler.mmOTokenBalance(mm2, oToken), 0, "mm2 cleared");
     }
 

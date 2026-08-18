@@ -5,34 +5,20 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {AddressBook} from "../core/AddressBook.sol";
 import {BatchSettler} from "../core/BatchSettler.sol";
 import {Controller} from "../core/Controller.sol";
 import {MarginPool} from "../core/MarginPool.sol";
 import {OToken} from "../core/OToken.sol";
 import {Oracle} from "../core/Oracle.sol";
-import {ISwapRouter} from "../interfaces/ISwapRouter.sol";
 import {FundUpgradeable} from "./FundUpgradeable.sol";
 import {FundConstants} from "./FundConstants.sol";
 import {IAssetNeutralOptionsAdapterV2 as IAdapter} from "./interfaces/IAssetNeutralOptionsAdapterV2.sol";
 import {
     IAssetNeutralOptionsAdapterOperationsV2 as IOperations
 } from "./interfaces/IAssetNeutralOptionsAdapterOperationsV2.sol";
-
-interface IAssetNeutralFundTotalAssets {
-    function totalAssets() external view returns (uint256);
-    function asset() external view returns (address);
-    function strategyManager() external view returns (address);
-}
-
-interface IAssetNeutralStrategyManagerBinding {
-    function fund() external view returns (address);
-}
-
-interface IAssetNeutralPriceFeedV2 {
-    function decimals() external view returns (uint8);
-    function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80);
-}
+import {WheelManagedOperationDispatcher} from "./libraries/WheelManagedOperationDispatcher.sol";
 
 /// @notice Shared hardened execution path for the standalone 8/8/8/6 option adapters.
 /// @dev Concrete CSP and covered-call contracts use distinct ERC-7201 namespaces and proxy identities.
@@ -40,7 +26,6 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
     using SafeERC20 for IERC20;
 
     bytes32 internal constant LBTC8_POLICY_HASH = 0xa346ca8b9d7988dd0a4212417b1ca38e61d744213f748f426ba9e61f2c70a180;
-    uint256 internal constant MAX_ORACLE_STALENESS = 1_200;
     bytes32 internal constant INITIAL_POSITIONS_HASH = keccak256("b1nary Asset Neutral Options V2 Positions");
 
     struct Layout {
@@ -62,6 +47,8 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
         RiskConfigV2 riskConfig;
         mapping(uint256 => PositionV2) positions;
         mapping(uint256 => uint256) balanceBeforeDelivery;
+        uint256[] activePositionIds;
+        mapping(uint256 => uint256) activePositionIndexPlusOne;
     }
 
     struct InitializeParamsV2 {
@@ -76,6 +63,8 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
         RiskConfigV2 riskConfig;
     }
 
+    error UnsupportedChain(uint256 chainId);
+
     constructor() {
         _disableInitializers();
     }
@@ -89,27 +78,24 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
     }
 
     function _initialize(InitializeParamsV2 calldata p) internal onlyInitializing {
-        if (
-            p.fund == address(0) || p.strategyManager == address(0) || p.addressBook == address(0)
-                || p.underlyingAsset == address(0) || p.settlementAsset == address(0) || p.swapRouter == address(0)
-                || p.fund.code.length == 0 || p.strategyManager.code.length == 0 || p.addressBook.code.length == 0
-                || p.underlyingAsset.code.length == 0 || p.settlementAsset.code.length == 0
-                || p.swapRouter.code.length == 0 || p.underlyingAsset == p.settlementAsset
-        ) revert InvalidAddress();
+        if (block.chainid != 84532) revert UnsupportedChain(block.chainid);
+        if (!WheelManagedOperationDispatcher.validAdapterInitialize(
+                p.fund,
+                p.strategyManager,
+                p.addressBook,
+                p.underlyingAsset,
+                p.settlementAsset,
+                p.swapRouter,
+                uint8(strategyKind())
+            )) revert InvalidAddress();
         if (IERC20Metadata(p.underlyingAsset).decimals() != 8) {
             revert UnsupportedDecimals(p.underlyingAsset, IERC20Metadata(p.underlyingAsset).decimals());
         }
         if (IERC20Metadata(p.settlementAsset).decimals() != 6) {
             revert UnsupportedDecimals(p.settlementAsset, IERC20Metadata(p.settlementAsset).decimals());
         }
-        address expectedAccountingAsset = strategyKind() == StrategyKind.Csp ? p.settlementAsset : p.underlyingAsset;
-        if (
-            IAssetNeutralStrategyManagerBinding(p.strategyManager).fund() != p.fund
-                || IAssetNeutralFundTotalAssets(p.fund).strategyManager() != p.strategyManager
-                || IAssetNeutralFundTotalAssets(p.fund).asset() != expectedAccountingAsset
-        ) revert InvalidAddress();
         _validateRisk(p.riskConfig);
-        if (!_feeTier(p.swapFeeTier)) revert InvalidRiskConfig();
+        if (!WheelManagedOperationDispatcher.validFeeTier(p.swapFeeTier)) revert InvalidRiskConfig();
         __FundUpgradeable_init(p.authority);
         Layout storage $ = _layout();
         $.fund = p.fund;
@@ -124,8 +110,21 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
     }
 
     modifier onlyStrategyManager() {
-        if (msg.sender != _layout().strategyManager) revert OnlyStrategyManager();
+        _checkStrategyManager();
         _;
+    }
+
+    function _checkStrategyManager() private view {
+        if (msg.sender != _layout().strategyManager) revert OnlyStrategyManager();
+    }
+
+    function _checkNotDelegated() internal view override {
+        if (block.chainid != 84532) revert UnsupportedChain(block.chainid);
+        super._checkNotDelegated();
+    }
+
+    function _authorizeUpgrade(address) internal view override {
+        if (block.chainid != 84532) revert UnsupportedChain(block.chainid);
     }
 
     function interfaceVersion() external pure returns (uint64) {
@@ -193,33 +192,31 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
 
     function positionStateHash() public view returns (bytes32) {
         Layout storage $ = _layout();
-        return keccak256(
-            abi.encode(
-                block.chainid,
-                address(this),
-                $.fund,
-                $.stateNonce,
-                $.positionsHash,
-                $.activePositionCount,
-                $.activeCollateral,
-                $.accountedSettlement,
-                $.accountedUnderlying,
-                IERC20($.settlement).balanceOf(address(this)),
-                IERC20($.underlying).balanceOf(address(this))
-            )
+        return WheelManagedOperationDispatcher.adapterPositionStateHash(
+            $.fund,
+            $.stateNonce,
+            $.positionsHash,
+            $.activePositionCount,
+            $.activeCollateral,
+            $.accountedSettlement,
+            $.accountedUnderlying,
+            $.settlement,
+            $.underlying
         );
     }
 
     function freeAssets(address asset) external view returns (uint256) {
         Layout storage $ = _layout();
-        if (asset == $.settlement) return Math.min($.accountedSettlement, IERC20(asset).balanceOf(address(this)));
-        if (asset == $.underlying) return Math.min($.accountedUnderlying, IERC20(asset).balanceOf(address(this)));
-        return 0;
+        return WheelManagedOperationDispatcher.adapterFreeAssets(
+            asset, $.settlement, $.underlying, $.accountedSettlement, $.accountedUnderlying
+        );
     }
 
     function setAdapterConfigV2(RiskConfigV2 calldata risk, address router, uint24 tier) external restricted {
         _validateRisk(risk);
-        if (router == address(0) || router.code.length == 0 || !_feeTier(tier)) revert InvalidAddress();
+        if (router == address(0) || router.code.length == 0 || !WheelManagedOperationDispatcher.validFeeTier(tier)) {
+            revert InvalidAddress();
+        }
         Layout storage $ = _layout();
         $.riskConfig = risk;
         $.swapRouter = router;
@@ -229,40 +226,8 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
 
     function isOnboarded() public view returns (bool) {
         Layout storage $ = _layout();
-        AddressBook b = AddressBook($.addressBook);
-        address c = b.controller();
-        address s = b.batchSettler();
-        address p = b.marginPool();
-        address f = b.oTokenFactory();
-        address o = b.oracle();
-        address w = b.whitelist();
-        if (
-            c.code.length == 0 || s.code.length == 0 || p.code.length == 0 || f.code.length == 0 || o.code.length == 0
-                || w.code.length == 0 || $.swapRouter.code.length == 0
-        ) return false;
-        if (
-            !_addressEq(c, bytes4(keccak256("addressBook()")), "", $.addressBook)
-                || !_addressEq(s, bytes4(keccak256("addressBook()")), "", $.addressBook)
-                || !_addressEq(p, bytes4(keccak256("addressBook()")), "", $.addressBook)
-                || !_addressEq(f, bytes4(keccak256("addressBook()")), "", $.addressBook)
-                || !_addressEq(o, bytes4(keccak256("addressBook()")), "", $.addressBook)
-        ) return false;
-        if (!_bool(c, bytes4(keccak256("custodiedRedemptionOnly()")), "")) return false;
-        if (!_bool(s, bytes4(keccak256("authorizedPhysicalDeliveryVault(address)")), abi.encode(address(this)))) {
-            return false;
-        }
-        if (!_addressEq(s, bytes4(keccak256("swapRouter()")), "", $.swapRouter)) return false;
-        uint24 settlerTier = BatchSettler(s).assetSwapFeeTier($.underlying);
-        if (settlerTier == 0) settlerTier = BatchSettler(s).swapFeeTier();
-        if (settlerTier != $.swapFeeTier) return false;
-        if (!_freshSpotAvailable(o, $.underlying)) return false;
-        if (!_bool(w, bytes4(keccak256("isWhitelistedUnderlying(address)")), abi.encode($.underlying))) return false;
-        address collateral = strategyKind() == StrategyKind.Csp ? $.settlement : $.underlying;
-        if (!_bool(w, bytes4(keccak256("isWhitelistedCollateral(address)")), abi.encode(collateral))) return false;
-        return _bool(
-            w,
-            bytes4(keccak256("isProductWhitelisted(address,address,address,bool)")),
-            abi.encode($.underlying, $.settlement, collateral, strategyKind() == StrategyKind.Csp)
+        return WheelManagedOperationDispatcher.isAdapterOnboarded(
+            $.addressBook, address(this), $.swapRouter, $.underlying, $.settlement, $.swapFeeTier, uint8(strategyKind())
         );
     }
 
@@ -270,47 +235,28 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
         Layout storage $ = _layout();
         _noDeficit($);
         if (!isOnboarded()) revert AdapterNotOnboarded();
-        address collateralAsset = strategyKind() == StrategyKind.Csp ? $.settlement : $.underlying;
-        if (asset != collateralAsset || amount == 0) revert InvalidAmount();
+        if (amount == 0) revert InvalidAmount();
         OpenPositionDataV2 memory d = abi.decode(data, (OpenPositionDataV2));
-        if (
-            d.optionAmount8 == 0 || d.collateralAmount != amount
-                || $.activePositionCount >= $.riskConfig.maxOpenPositions
-        ) revert InvalidAmount();
+        if (d.collateralAmount != amount) revert InvalidAmount();
+        (address collateralAsset, uint256 freshSpot) = WheelManagedOperationDispatcher.validateAdapterAllocation(
+            $.addressBook,
+            $.fund,
+            $.underlying,
+            $.settlement,
+            $.riskConfig,
+            uint8(strategyKind()),
+            d.quote.oToken,
+            d.optionAmount8,
+            amount,
+            $.activePositionCount,
+            $.activeCollateral,
+            $.accountedSettlement
+        );
+        if (asset != collateralAsset) revert InvalidAmount();
         OToken ot = OToken(d.quote.oToken);
-        if (
-            d.quote.oToken == address(0) || ot.decimals() != 8 || ot.underlying() != $.underlying
-                || ot.strikeAsset() != $.settlement || ot.collateralAsset() != collateralAsset
-                || ot.isPut() != (strategyKind() == StrategyKind.Csp)
-        ) revert InvalidSeries(d.quote.oToken);
-        uint256 delay = ot.expiry() > block.timestamp ? ot.expiry() - block.timestamp : 0;
-        if (
-            delay < $.riskConfig.minExpiryDelay || delay > $.riskConfig.maxExpiryDelay
-                || ot.strikePrice() < $.riskConfig.minStrikeUsd8 || ot.strikePrice() > $.riskConfig.maxStrikeUsd8
-                || amount > $.riskConfig.maxCollateralPerPosition
-        ) revert InvalidRiskConfig();
-        uint256 required = strategyKind() == StrategyKind.Csp
-            ? Math.mulDiv(d.optionAmount8, ot.strikePrice(), 1e10, Math.Rounding.Ceil)
-            : d.optionAmount8;
-        if (amount != required) revert InvalidAmount();
-        if (strategyKind() == StrategyKind.CoveredCall) {
-            if ($.riskConfig.protectedBasisUsd8 != 0 && ot.strikePrice() < $.riskConfig.protectedBasisUsd8) {
-                revert InvalidRiskConfig();
-            }
-            if (
-                $.accountedSettlement != 0
-                    || $.activeCollateral + amount
-                        > Math.mulDiv(
-                            IAssetNeutralFundTotalAssets($.fund).totalAssets(),
-                            $.riskConfig.maxUtilizationBps,
-                            FundConstants.BPS
-                        )
-            ) revert InvalidRiskConfig();
-        }
         IERC20 collateral = IERC20(collateralAsset);
         IERC20 premium = IERC20($.settlement);
         AddressBook b = AddressBook($.addressBook);
-        uint256 freshSpot = _freshSpot(b.oracle(), $.underlying);
         Controller controller = Controller(b.controller());
         BatchSettler settler = BatchSettler(b.batchSettler());
         MarginPool pool = MarginPool(b.marginPool());
@@ -330,7 +276,7 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
         uint256 earned;
         if (strategyKind() == StrategyKind.Csp) {
             if (cb != pb || ca != pa) revert LedgerMismatch(0);
-            earned = _cspPremiumEarned(cb, ca, amount);
+            earned = WheelManagedOperationDispatcher.cspPremiumEarned(cb, ca, amount);
             $.accountedSettlement = $.accountedSettlement - amount + earned;
         } else {
             if (cb < ca || cb - ca != amount || pa < pb) revert LedgerMismatch(0);
@@ -359,6 +305,8 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
         pos.strikePriceUsd8 = ot.strikePrice();
         pos.openedAt = uint64(block.timestamp);
         ++$.activePositionCount;
+        $.activePositionIds.push(id);
+        $.activePositionIndexPlusOne[id] = $.activePositionIds.length;
         $.activeCollateral += amount;
         _checkpoint($, id, pos);
         emit AssetNeutralPositionOpenedV2(
@@ -452,7 +400,7 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
                     revert LedgerMismatch(id);
                 }
                 p.lifecycle = Lifecycle.SettledOtm;
-                _close($, p);
+                _close($, id, p);
                 _terminal($, id, p);
                 _checkpoint($, id, p);
                 _emitTransition($, id, p, returned, 0, 0);
@@ -463,7 +411,7 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
             s.releasePhysicalDelivery(p.protocolVaultId);
             $.balanceBeforeDelivery[id] =
                 IERC20(strategyKind() == StrategyKind.Csp ? $.underlying : $.settlement).balanceOf(address(this));
-            p.fallbackEligibleAt = uint64(block.timestamp + $.riskConfig.settlementDefaultDelay);
+            p.fallbackEligibleAt = SafeCast.toUint64(block.timestamp + $.riskConfig.settlementDefaultDelay);
             p.lifecycle = Lifecycle.AwaitingPhysicalDelivery;
             _checkpoint($, id, p);
             _emitTransition($, id, p, returned, 0, 0);
@@ -491,7 +439,7 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
                 p.calledAwaySettlementAmount = expected;
                 p.lifecycle = Lifecycle.CalledAwaySettlement;
             }
-            _close($, p);
+            _close($, id, p);
             _terminal($, id, p);
             _checkpoint($, id, p);
             if (observed > expected) {
@@ -539,7 +487,7 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
             p.marketMakerUnderlyingPayoutAmount = mm;
             p.lifecycle = Lifecycle.CashFallback;
         }
-        _close($, p);
+        _close($, id, p);
         _terminal($, id, p);
         _checkpoint($, id, p);
         _emitTransition($, id, p, 0, 0, 0);
@@ -552,23 +500,17 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
         uint256 accounted = strategyKind() == StrategyKind.Csp ? $.accountedUnderlying : $.accountedSettlement;
         if (amount > accounted) revert InvalidAmount();
         uint256 spot = _freshSpot(AddressBook($.addressBook).oracle(), $.underlying);
-        uint256 fair =
-            strategyKind() == StrategyKind.Csp ? Math.mulDiv(amount, spot, 1e10) : Math.mulDiv(amount, 1e10, spot);
-        uint256 floor = Math.mulDiv(fair, FundConstants.BPS - $.riskConfig.maxSwapSlippageBps, FundConstants.BPS);
-        if (minOut < floor) revert SlippageExceeded(floor, minOut);
-        IERC20 a = IERC20(input);
-        IERC20 z = IERC20(output);
-        uint256 ab = a.balanceOf(address(this));
-        uint256 zb = z.balanceOf(address(this));
-        a.forceApprove($.swapRouter, amount);
-        uint256 quoted = ISwapRouter($.swapRouter)
-            .exactInputSingle(
-                ISwapRouter.ExactInputSingleParams(input, output, $.swapFeeTier, address(this), amount, minOut, 0)
-            );
-        a.forceApprove($.swapRouter, 0);
-        uint256 used = ab - a.balanceOf(address(this));
-        uint256 got = z.balanceOf(address(this)) - zb;
-        if (used != amount || got != quoted || got < minOut) revert SlippageExceeded(minOut, got);
+        (uint256 used, uint256 got) = WheelManagedOperationDispatcher.normalizeAdapterAssets(
+            $.swapRouter,
+            input,
+            output,
+            $.swapFeeTier,
+            uint8(strategyKind()),
+            amount,
+            minOut,
+            spot,
+            $.riskConfig.maxSwapSlippageBps
+        );
         if (strategyKind() == StrategyKind.Csp) {
             $.accountedUnderlying -= used;
             $.accountedSettlement += got;
@@ -611,33 +553,45 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
         amounts = new uint256[](2);
         assets[0] = $.settlement;
         assets[1] = $.underlying;
-        amounts[0] = Math.mulDiv($.accountedSettlement, fraction, FundConstants.WAD);
-        amounts[1] = Math.mulDiv($.accountedUnderlying, fraction, FundConstants.WAD);
+        uint256 principalRecovered;
+        (amounts[0], amounts[1], principalRecovered) = WheelManagedOperationDispatcher.recoveryAmounts(
+            $.accountedSettlement, $.accountedUnderlying, $.releasablePrincipal, fraction
+        );
         $.accountedSettlement -= amounts[0];
         $.accountedUnderlying -= amounts[1];
+        $.releasablePrincipal -= principalRecovered;
         _global($, keccak256(abi.encode("RECOVER", fraction, escrow, amounts)));
         if (amounts[0] != 0) IERC20(assets[0]).safeTransfer(escrow, amounts[0]);
         if (amounts[1] != 0) IERC20(assets[1]).safeTransfer(escrow, amounts[1]);
         emit RawAssetsRecoveredV2(escrow, assets, amounts, emergency);
     }
 
-    function _close(Layout storage $, PositionV2 storage p) private {
+    function _close(Layout storage $, uint256 id, PositionV2 storage p) private {
         if ($.activePositionCount == 0 || $.activeCollateral < p.collateralAmount) {
             revert LedgerMismatch(p.protocolVaultId);
         }
+        uint256 indexPlusOne = $.activePositionIndexPlusOne[id];
+        if (indexPlusOne == 0) revert LedgerMismatch(p.protocolVaultId);
+        uint256 index = indexPlusOne - 1;
+        uint256 lastIndex = $.activePositionIds.length - 1;
+        uint256 lastId = $.activePositionIds[lastIndex];
+        if (index != lastIndex) {
+            $.activePositionIds[index] = lastId;
+            $.activePositionIndexPlusOne[lastId] = index + 1;
+        }
+        $.activePositionIds.pop();
+        delete $.activePositionIndexPlusOne[id];
         --$.activePositionCount;
         $.activeCollateral -= p.collateralAmount;
         $.releasablePrincipal += p.collateralAmount;
     }
 
+    function activePositionIdAt(uint256 index) external view returns (uint256) {
+        return _layout().activePositionIds[index];
+    }
+
     function _terminal(Layout storage $, uint256 id, PositionV2 storage p) private view {
-        AddressBook b = AddressBook($.addressBook);
-        BatchSettler s = BatchSettler(b.batchSettler());
-        if (
-            !Controller(b.controller()).vaultSettled(address(this), p.protocolVaultId)
-                || s.vaultOTokenBalance(address(this), p.protocolVaultId) != 0
-                || s.physicalDeliveryReservedVault(address(this), p.protocolVaultId)
-        ) revert LedgerMismatch(id);
+        WheelManagedOperationDispatcher.validateAdapterTerminal($.addressBook, address(this), p.protocolVaultId, id);
     }
 
     function _creditCollateral(Layout storage $, uint256 v) private {
@@ -655,10 +609,9 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
     }
 
     function _noDeficit(Layout storage $) private view {
-        uint256 s = IERC20($.settlement).balanceOf(address(this));
-        uint256 u = IERC20($.underlying).balanceOf(address(this));
-        if (s < $.accountedSettlement) revert AccountingDeficit($.settlement, $.accountedSettlement, s);
-        if (u < $.accountedUnderlying) revert AccountingDeficit($.underlying, $.accountedUnderlying, u);
+        WheelManagedOperationDispatcher.validateAdapterNoDeficit(
+            $.settlement, $.underlying, $.accountedSettlement, $.accountedUnderlying
+        );
     }
 
     function _checkpoint(Layout storage $, uint256 id, PositionV2 storage p) private {
@@ -693,65 +646,15 @@ abstract contract AssetNeutralOptionsFundAdapterV2 is FundUpgradeable, IOperatio
     }
 
     function _validateRisk(RiskConfigV2 memory r) private pure {
-        if (
-            r.minExpiryDelay == 0 || r.maxExpiryDelay < r.minExpiryDelay || r.settlementDefaultDelay == 0
-                || r.minPremiumBps > FundConstants.BPS || r.maxSwapSlippageBps > FundConstants.BPS
-                || r.maxOpenPositions == 0 || r.maxUtilizationBps == 0 || r.maxUtilizationBps > FundConstants.BPS
-                || r.maxStrikeUsd8 < r.minStrikeUsd8 || r.maxCollateralPerPosition == 0 || r.maxNormalizationInput == 0
-        ) revert InvalidRiskConfig();
-    }
-
-    function _cspPremiumEarned(uint256 balanceBefore, uint256 balanceAfter, uint256 collateral)
-        internal
-        pure
-        returns (uint256 earned)
-    {
-        if (balanceAfter > type(uint256).max - collateral || balanceAfter + collateral < balanceBefore) {
-            revert LedgerMismatch(0);
-        }
-        earned = balanceAfter + collateral - balanceBefore;
-    }
-
-    function _feeTier(uint24 x) private pure returns (bool) {
-        return x == 100 || x == 500 || x == 3000 || x == 10000;
-    }
-
-    function _freshSpotAvailable(address oracleAddress, address asset) private view returns (bool) {
-        (bool ok,) = address(this).staticcall(abi.encodeCall(this.validateFreshSpotV2, (oracleAddress, asset)));
-        return ok;
+        if (!WheelManagedOperationDispatcher.validAdapterRisk(r)) revert InvalidRiskConfig();
     }
 
     function validateFreshSpotV2(address oracleAddress, address asset) external view returns (uint256) {
         return _freshSpot(oracleAddress, asset);
     }
 
-    function _freshSpot(address oracleAddress, address asset) private view returns (uint256 price) {
-        Oracle oracle = Oracle(oracleAddress);
-        uint256 maxAge = oracle.maxOracleStaleness();
-        if (maxAge == 0 || maxAge > MAX_ORACLE_STALENESS) revert InvalidRiskConfig();
-        address feed = oracle.priceFeed(asset);
-        if (feed == address(0) || feed.code.length == 0 || IAssetNeutralPriceFeedV2(feed).decimals() != 8) {
-            revert InvalidRiskConfig();
-        }
-        (uint80 round, int256 answer,, uint256 updated, uint80 answered) =
-            IAssetNeutralPriceFeedV2(feed).latestRoundData();
-        if (
-            answer <= 0 || updated == 0 || updated > block.timestamp || block.timestamp - updated > maxAge
-                || answered < round
-        ) {
-            revert InvalidRiskConfig();
-        }
-        price = uint256(answer);
-    }
-
-    function _bool(address t, bytes4 sel, bytes memory args) private view returns (bool) {
-        (bool ok, bytes memory r) = t.staticcall(abi.encodePacked(sel, args));
-        return ok && r.length >= 32 && abi.decode(r, (uint256)) == 1;
-    }
-
-    function _addressEq(address t, bytes4 sel, bytes memory args, address expected) private view returns (bool) {
-        (bool ok, bytes memory r) = t.staticcall(abi.encodePacked(sel, args));
-        return ok && r.length >= 32 && abi.decode(r, (address)) == expected;
+    function _freshSpot(address oracleAddress, address asset) private view returns (uint256) {
+        return WheelManagedOperationDispatcher.freshSpot(oracleAddress, asset);
     }
 }
 
