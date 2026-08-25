@@ -110,24 +110,46 @@ require_rpc_environment() {
     fail "harness:full requires BASE_SEPOLIA_RPC_URL for explicit Base Sepolia forks"
 }
 
+require_b1n491_base_forge() {
+  local version
+  command -v base-forge >/dev/null 2>&1 ||
+    fail "B1N-491 requires Base Foundry v1.1.0 (install: base-foundryup --install v1.1.0)"
+  version="$(base-forge --version 2>&1)" ||
+    fail "B1N-491 requires Base Foundry v1.1.0 (install: base-foundryup --install v1.1.0)"
+  grep -Fxq 'forge Version: 1.6.0-v1.1.0' <<<"$version" &&
+    grep -Fxq 'Commit SHA: 6130ccf6af0b3399777aee3876486e2ba9ebb38f' <<<"$version" ||
+    fail "B1N-491 requires Base Foundry v1.1.0 commit 6130ccf6af0b3399777aee3876486e2ba9ebb38f (install: base-foundryup --install v1.1.0)"
+}
+
+run_fork_evidence() {
+  local chain="$1" path="$2" block="${3:-}" rpc_url runner="forge"
+  if [[ "$chain" == "base-mainnet" ]]; then
+    rpc_url="$BASE_RPC_URL"
+  else
+    rpc_url="$BASE_SEPOLIA_RPC_URL"
+  fi
+  if [[ "$path" == "test/fund/B1N491AerodromeRouteFork.t.sol" ]]; then
+    require_b1n491_base_forge
+    runner="base-forge"
+  fi
+
+  printf 'harness: fork chain=%s suite=%s runner=%s\n' "$chain" "$path" "$runner"
+  if [[ -n "$block" ]]; then
+    npm_config_offline=true "$runner" test --offline --match-path "$path" \
+      --fork-url "$rpc_url" --fork-block-number "$block"
+  else
+    npm_config_offline=true "$runner" test --offline --match-path "$path" \
+      --fork-url "$rpc_url"
+  fi
+}
+
 run_fork_suites() {
-  local chain path block extra rpc_url
+  local chain path block extra
+  run_fork_evidence base-mainnet test/fund/B1N491AerodromeRouteFork.t.sol 50400001
   while read -r chain path block extra; do
     [[ -z "${chain:-}" || "$chain" == \#* ]] && continue
-    if [[ "$chain" == "base-mainnet" ]]; then
-      rpc_url="$BASE_RPC_URL"
-    else
-      rpc_url="$BASE_SEPOLIA_RPC_URL"
-    fi
-
-    printf 'harness: fork chain=%s suite=%s\n' "$chain" "$path"
-    if [[ -n "${block:-}" ]]; then
-      npm_config_offline=true forge test --offline --match-path "$path" \
-        --fork-url "$rpc_url" --fork-block-number "$block"
-    else
-      npm_config_offline=true forge test --offline --match-path "$path" \
-        --fork-url "$rpc_url"
-    fi
+    [[ "$path" == "test/fund/B1N491AerodromeRouteFork.t.sol" ]] && continue
+    run_fork_evidence "$chain" "$path" "${block:-}"
   done < "$FORK_MANIFEST"
 }
 
