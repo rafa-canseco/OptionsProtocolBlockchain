@@ -7,9 +7,9 @@
 - PUT: USDC → NVDAc exact-output.
 - CALL: NVDAc → USDC exact-input.
 
-All 16 isolated swaps, observed ±1 negative bounds, B20 transfer matrix, directional depth probes, and sequential product-gate probes pass under the pinned Base Foundry runner. The effective fee is 500 pips (5 bps). Maximum observed 10,000-USDC execution impact/oracle deviation is 13/17 bps for USDC → NVDAc and 11/8 bps for NVDAc → USDC.
+All 16 isolated swaps, observed ±1 negative bounds, B20 transfer matrix, directional depth probes, and sequential product-gate probes pass under the pinned Base Foundry runner. Every scenario now fails closed above the approved 30-bps economic guard. The effective fee is 500 pips (5 bps). Maximum observed one-shot 10,000-USDC execution impact/oracle deviation is 13/17 bps for USDC → NVDAc and 11/8 bps for NVDAc → USDC.
 
-Recommended directional per-swap caps are **no higher than 1,000 USDC-equivalent**. The binding aggregate cap remains **1,000 USDC-equivalent per expiry shared across every direction, mode, AMM, adapter, route version, and executed/pending/reserved state**. Future deterministic adapter and recipient addresses must pass B20 eligibility and live transfer tests before activation. This report does not approve an upgrade, deployment, activation, or mainnet transaction.
+Recommended directional per-swap caps are **no higher than 10,000 USDC-equivalent**. The recommended binding aggregate cap is **10,000 USDC-equivalent per expiry shared across every direction, mode, AMM, adapter, route version, and executed/pending/reserved state**; B1N-491 qualifies but does not implement that downstream enforcement. Ten sequential 1,000-USDC chunks also pass the 30-bps guard in both product directions. Future deterministic adapter and recipient addresses must pass B20 eligibility and live transfer tests before activation. This report does not approve an upgrade, deployment, activation, or mainnet transaction.
 
 ## Reproducible snapshot
 
@@ -20,7 +20,7 @@ Recommended directional per-swap caps are **no higher than 1,000 USDC-equivalent
 | Block hash | `0xa5d536f76dd273ba4a4cbc5428c31315048e60f13c39ea2e7d8f5fbdec252e36` |
 | Parent hash asserted by test | `0x08c2707d24192e903e1f9700cffa1c55479e4972e6f05c993f418191ae3420ad` |
 | Timestamp | `2026-08-24T16:35:49Z` |
-| Repository commit | `a50aa08942c5f45fac5465ff692ae2ad31411f77` |
+| Base commit before qualification | `a50aa08942c5f45fac5465ff692ae2ad31411f77` |
 | Stock Foundry for ordinary harness suites | `1.5.1-stable`, commit `b0a9dd9ceda36f63e2326ce530c10e6916f4b8a2` |
 | Base Foundry for B1N-491 only | `base-forge` `1.6.0-v1.1.0`, commit `6130ccf6af0b3399777aee3876486e2ba9ebb38f` |
 | Base Foundry installer pin | `base-foundryup --install v1.1.0` |
@@ -132,7 +132,7 @@ Each scenario starts from the same pre-funding snapshot, funds from the real hol
 | NVDAc → USDC | exact-output | 5,000 | 2,377,319,303 | 5,000,000,000 | 8 | 5 | 2 | 1 |
 | NVDAc → USDC | exact-output | 10,000 | 4,755,953,761 | 10,000,000,000 | 11 | 8 | 2 | 1 |
 
-The pre-swap spot is `210.50363963` USDC/NVDAc. Execution impact is average execution price versus that spot, with fee separate. Endpoint spot movement remains separately logged. Aerodrome's raw quoter count is retained but is not used as proof of exhaustion because its inclusive bitmap count can be positive when `tickBefore == tickAfter`. The corrected metric walks spacing boundaries strictly between the before/after ticks and checks each bit through `tickBitmap(int16)`. Initial active-range exhaustion occurs in the eight 5,000/10,000-USDC scenarios, not in the eight 100/1,000-USDC scenarios. No scenario reaches terminal zero liquidity.
+The pre-swap spot is `210.50363963` USDC/NVDAc. Execution impact is average execution price versus that spot, with fee separate. Endpoint spot movement uses the same USDC/NVDAc quote convention and remains separately logged. Aerodrome's raw quoter count is retained but is not used as proof of exhaustion because its inclusive bitmap count can be positive when `tickBefore == tickAfter`. The corrected metric checks initialized spacing boundaries crossed between the before/after ticks through `tickBitmap(int16)`, including an upward terminal tick because Slipstream applies that transition before setting `state.tick = step.tickNext`. Initial active-range exhaustion occurs in the eight 5,000/10,000-USDC scenarios, not in the eight 100/1,000-USDC scenarios. No scenario reaches terminal zero liquidity.
 
 ## Directional depth
 
@@ -140,19 +140,19 @@ Deterministic exact-input search uses 10 USDC resolution. No result reaches the 
 
 | Direction | 10 bps | 25 bps | 50 bps |
 |---|---:|---:|---:|
-| USDC → NVDAc | 6,170 | 13,300 | 24,680 |
-| NVDAc → USDC | 9,210 | 22,710 | 34,740 |
+| USDC → NVDAc | 5,660 | 12,820 | 24,120 |
+| NVDAc → USDC | 8,260 | 22,260 | 34,380 |
 
 ## Sequential product gates and caps
 
 | Product gate | Executed | Safe prefix | Boundary/revert | Max oracle deviation | Max execution impact |
 |---|---:|---:|---|---:|---:|
-| PUT USDC → NVDAc exact-output | 1,000 | 1,000 | none | 9 bps | 5 bps |
-| CALL NVDAc → USDC exact-input | 1,000 | 1,000 | none | 3 bps | 5 bps |
+| PUT USDC → NVDAc exact-output | 10,000 | 10,000 | none | 26 bps | 6 bps |
+| CALL NVDAc → USDC exact-input | 10,000 | 10,000 | none | 12 bps | 5 bps |
 
-- Both product gates are **GO** at the shared 1,000-USDC-equivalent ceiling.
-- Directional per-swap recommendation: no higher than 1,000 USDC-equivalent for either product route.
-- Aggregate per-expiry recommendation: 1,000 USDC-equivalent shared across every direction, swap kind, AMM, adapter, route version, and executed/pending/reserved state.
+- Both product gates are **GO** at the shared 10,000-USDC-equivalent ceiling and fail closed unless the full safe prefix executes within 30 bps.
+- Directional per-swap recommendation: no higher than 10,000 USDC-equivalent for either product route.
+- Aggregate per-expiry recommendation: 10,000 USDC-equivalent shared across every direction, swap kind, AMM, adapter, route version, and executed/pending/reserved state.
 - Splitting an order or changing route/version does not reset aggregate capacity.
 - Runtime still requires fresh oracle/quote guards and the versioned route binding. The pinned snapshot is qualification evidence, not permanent liquidity.
 - Exact future adapter/recipient B20 eligibility is a downstream activation condition, not a reason to fabricate an address in B1N-491.
@@ -173,6 +173,8 @@ Commit SHA: 6130ccf6af0b3399777aee3876486e2ba9ebb38f
 
 The harness selects `base-forge` only for `test/fund/B1N491AerodromeRouteFork.t.sol`, validates both lines exactly, and fails closed with install guidance on mismatch. Every other build/test/fork suite continues to use stock `forge`.
 
-Final verification: static identity 1/1, narrow qualification 6/6, harness regression 5/5, deterministic fast gate 813/813, and full storage/security/Base-mainnet/Base-Sepolia gate all passed. Exact commands and results are in `harness/runs/B1N-491/verification.json`.
+The corrected qualification asserts the six exact directional depths, rejects quote failures and search ceilings, enforces the 30-bps bound with unfloored cross-product comparisons on every isolated and sequential economic observation, includes a fractional-boundary regression, and requires the complete 10,000-USDC sequential prefix in both product directions.
+
+Final verification evidence, including the Pashov v2 remediation reruns, is recorded in `harness/runs/B1N-491/verification.json`.
 
 No transaction was signed, submitted, or broadcast.

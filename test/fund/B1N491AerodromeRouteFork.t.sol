@@ -278,6 +278,7 @@ contract B1N491AerodromeRouteForkTest is Test {
         // Fail visibly on stock Foundry instead of misclassifying runner failure as zero depth.
         assertEq(NVDAC.decimals(), 8);
         uint256[3] memory guards = [uint256(10), 25, 50];
+        uint256[3][2] memory expectedDepths = [[uint256(5_660), 12_820, 24_120], [uint256(8_260), 22_260, 34_380]];
         for (uint256 direction; direction < 2; ++direction) {
             for (uint256 i; i < guards.length; ++i) {
                 (uint256 depth, bool quoteFailedAtBoundary, bool ceilingReached) =
@@ -288,6 +289,9 @@ contract B1N491AerodromeRouteForkTest is Test {
                 emit log_named_uint("depth_resolution_usdc", 10);
                 emit log_named_uint("depth_is_lower_bound_ceiling_reached", ceilingReached ? 1 : 0);
                 emit log_named_uint("quote_failed_at_boundary", quoteFailedAtBoundary ? 1 : 0);
+                assertEq(depth, expectedDepths[direction][i]);
+                assertFalse(quoteFailedAtBoundary);
+                assertFalse(ceilingReached);
             }
         }
     }
@@ -297,6 +301,11 @@ contract B1N491AerodromeRouteForkTest is Test {
         assertEq(NVDAC.decimals(), 8);
         _runSequentialProductGate(true, false); // PUT: USDC -> NVDAc exact-output
         _runSequentialProductGate(false, true); // CALL: NVDAc -> USDC exact-input
+    }
+
+    function test_deviationGuardRejectsFractionAboveLimit() public pure {
+        assertTrue(_withinDeviationBps(100_300_000, 100_000_000, 30));
+        assertFalse(_withinDeviationBps(100_300_001, 100_000_000, 30));
     }
 
     function _runScenario(bool usdcToNvda, bool exactInput, uint256 notional) private {
@@ -354,6 +363,11 @@ contract B1N491AerodromeRouteForkTest is Test {
         uint256 quoteToExecutionBps = _deviationBps(exactInput ? actualOutput : actualInput, quote);
         uint128 liquidityAfter = POOL.liquidity();
         uint32 initializedBoundariesStrictlyCrossed = _initializedBoundariesStrictlyCrossed(tickBefore, tickAfter);
+        assertTrue(_withinDeviationBps(observed, expected, 30));
+        assertTrue(_withinDeviationBps(executionPriceE8, preSwapSpotPriceE8, 30));
+        assertTrue(_withinDeviationBps(_spotPriceE8(sqrtAfter), preSwapSpotPriceE8, 30));
+        assertEq(quoteToExecutionBps, 0);
+        assertGt(liquidityAfter, 0);
 
         emit log_named_string(
             "scenario",
@@ -410,7 +424,12 @@ contract B1N491AerodromeRouteForkTest is Test {
         int24 compressedLower = lower / spacing;
         if (lower < 0 && lower % spacing != 0) --compressedLower;
 
-        for (int24 boundary = (compressedLower + 1) * spacing; boundary < upper; boundary += spacing) {
+        bool upward = tickBefore < tickAfter;
+        for (
+            int24 boundary = (compressedLower + 1) * spacing;
+            boundary < upper || (upward && boundary == upper);
+            boundary += spacing
+        ) {
             int24 compressed = boundary / spacing;
             int16 wordPosition = int16(compressed >> 8);
             uint8 bitPosition = uint8(uint24(compressed));
@@ -461,8 +480,10 @@ contract B1N491AerodromeRouteForkTest is Test {
             uint256 amountOut, uint160 sqrtAfter, uint32, uint256
         ) {
             if (amountOut == 0) return (false, type(uint256).max, true);
-            impactBps = _sqrtPriceImpactBps(sqrtBefore, sqrtAfter);
-            return (impactBps <= guardBps, impactBps, false);
+            uint256 beforeSpotPriceE8 = _spotPriceE8(sqrtBefore);
+            uint256 afterSpotPriceE8 = _spotPriceE8(sqrtAfter);
+            impactBps = _deviationBps(afterSpotPriceE8, beforeSpotPriceE8);
+            return (_withinDeviationBps(afterSpotPriceE8, beforeSpotPriceE8, guardBps), impactBps, false);
         } catch {
             return (false, type(uint256).max, true);
         }
@@ -478,17 +499,18 @@ contract B1N491AerodromeRouteForkTest is Test {
         uint256 boundaryUsdc;
         uint256 maxOracleDeviationBps;
         uint256 maxExecutionImpactBps;
+        uint256 chunkUsdc = 1_000;
         bool prefixSafe = true;
         bool quoteOrSwapFailed;
 
         for (uint256 chunk = 1; chunk <= 10; ++chunk) {
-            uint256 usdcAmount = 100e6;
+            uint256 usdcAmount = chunkUsdc * 1e6;
             uint256 nvdaAmount = _usdcToNvda(usdcAmount);
             uint256 requested = usdcToNvda ? usdcAmount : nvdaAmount;
             uint256 desired = usdcToNvda ? nvdaAmount : usdcAmount;
             (bool quoteOk, uint256 quote) = _trySequentialQuote(tokenIn, tokenOut, exactInput, requested, desired);
             if (!quoteOk) {
-                boundaryUsdc = chunk * 100;
+                boundaryUsdc = chunk * chunkUsdc;
                 quoteOrSwapFailed = true;
                 break;
             }
@@ -498,11 +520,11 @@ contract B1N491AerodromeRouteForkTest is Test {
             (bool swapOk, uint256 actual) = _trySequentialSwap(tokenIn, tokenOut, exactInput, requested, desired, quote);
             assertTrue(tokenIn.approve(address(ROUTER), 0));
             if (!swapOk) {
-                boundaryUsdc = chunk * 100;
+                boundaryUsdc = chunk * chunkUsdc;
                 quoteOrSwapFailed = true;
                 break;
             }
-            executedCapacity = chunk * 100;
+            executedCapacity = chunk * chunkUsdc;
 
             uint256 expected = exactInput
                 ? (usdcToNvda ? _usdcToNvda(requested) : _nvdaToUsdc(requested))
@@ -513,12 +535,13 @@ contract B1N491AerodromeRouteForkTest is Test {
             if (oracleDeviationBps > maxOracleDeviationBps) maxOracleDeviationBps = oracleDeviationBps;
             if (executionImpactBps > maxExecutionImpactBps) maxExecutionImpactBps = executionImpactBps;
 
-            bool chunkSafe = oracleDeviationBps <= 50 && executionImpactBps <= 50 && POOL.liquidity() > 0;
+            bool chunkSafe = _withinDeviationBps(actual, expected, 30)
+                && _withinDeviationBps(executionPriceE8, _spotPriceE8(sqrtBefore), 30) && POOL.liquidity() > 0;
             if (prefixSafe && chunkSafe) {
-                demonstratedCapacity = chunk * 100;
+                demonstratedCapacity = chunk * chunkUsdc;
             } else {
                 prefixSafe = false;
-                if (boundaryUsdc == 0) boundaryUsdc = chunk * 100;
+                if (boundaryUsdc == 0) boundaryUsdc = chunk * chunkUsdc;
             }
         }
 
@@ -529,7 +552,13 @@ contract B1N491AerodromeRouteForkTest is Test {
         emit log_named_uint("sequential_quote_or_swap_failed", quoteOrSwapFailed ? 1 : 0);
         emit log_named_uint("sequential_max_oracle_deviation_bps", maxOracleDeviationBps);
         emit log_named_uint("sequential_max_execution_impact_bps", maxExecutionImpactBps);
-        emit log_named_uint("global_expiry_ceiling_usdc_equivalent", 1_000);
+        emit log_named_uint("global_expiry_ceiling_usdc_equivalent", 10_000);
+        assertEq(executedCapacity, 10_000);
+        assertEq(demonstratedCapacity, 10_000);
+        assertEq(boundaryUsdc, 0);
+        assertFalse(quoteOrSwapFailed);
+        assertLe(maxOracleDeviationBps, 30);
+        assertLe(maxExecutionImpactBps, 30);
         assertTrue(vm.revertToStateAndDelete(snapshot));
     }
 
@@ -671,11 +700,15 @@ contract B1N491AerodromeRouteForkTest is Test {
     }
 
     function _sqrtPriceImpactBps(uint160 beforePrice, uint160 afterPrice) private pure returns (uint256) {
-        uint256 sqrtRatio = uint256(afterPrice) * 1e18 / uint256(beforePrice);
-        return _deviationBps(sqrtRatio * sqrtRatio / 1e18, 1e18);
+        return _deviationBps(_spotPriceE8(afterPrice), _spotPriceE8(beforePrice));
     }
 
     function _deviationBps(uint256 observed, uint256 expected) private pure returns (uint256) {
         return (observed > expected ? observed - expected : expected - observed) * 10_000 / expected;
+    }
+
+    function _withinDeviationBps(uint256 observed, uint256 expected, uint256 maxBps) private pure returns (bool) {
+        uint256 difference = observed > expected ? observed - expected : expected - observed;
+        return difference * 10_000 <= expected * maxBps;
     }
 }
