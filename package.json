@@ -6,6 +6,7 @@
     "deps:foundry": "./scripts/install-forge-std.sh",
     "harness:doctor": "./scripts/harness-check.sh doctor",
     "harness:fast": "./scripts/harness-check.sh fast",
+    "harness:extended": "./scripts/harness-check.sh extended",
     "harness:full": "./scripts/harness-check.sh full",
     "harness:regression": "node --test scripts/test-harness-check.mjs",
     "b1n352:inputs:template": "node scripts/prepare-b1n-352-inputs.mjs template deployments/base-sepolia/b1n-352/v1/deployment-inputs.approved.template.json",

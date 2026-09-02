@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 const cli = fileURLToPath(
   new URL("../node_modules/@openzeppelin/upgrades-core/dist/cli/cli.js", import.meta.url),
 );
+const buildInfoDirectory = process.env.STORAGE_BUILD_INFO_DIR ?? "out/build-info";
 const source = "test/fund/harness/StorageLayoutHarnesses.sol";
 const cases = [
   ["FundVaultStorageHarnessV1", "FundVaultStorageHarnessV2", true],
@@ -18,7 +19,7 @@ for (const [referenceName, contractName, shouldPass] of cases) {
     [
       cli,
       "validate",
-      "out/build-info",
+      buildInfoDirectory,
       "--contract",
       `${source}:${contractName}`,
       "--reference",

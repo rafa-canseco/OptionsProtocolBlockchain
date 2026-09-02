@@ -15,7 +15,7 @@ async function makeMockCommands(
 ) {
   const directory = await mkdtemp(path.join(tmpdir(), "blockchain-harness-"));
   const log = path.join(directory, "commands.log");
-  const command = `#!/usr/bin/env bash\nset -eu\nprintf '%s' \"$(basename \"$0\")\" >> \"$HARNESS_COMMAND_LOG\"\nfor argument in \"$@\"; do printf '\\t%s' \"$argument\" >> \"$HARNESS_COMMAND_LOG\"; done\nprintf '\\n' >> \"$HARNESS_COMMAND_LOG\"\n`;
+  const command = `#!/usr/bin/env bash\nset -eu\nprintf '%s' \"$(basename \"$0\")\" >> \"$HARNESS_COMMAND_LOG\"\nfor argument in \"$@\"; do printf '\\t%s' \"$argument\" >> \"$HARNESS_COMMAND_LOG\"; done\nprintf '\\n' >> \"$HARNESS_COMMAND_LOG\"\nif [[ \"$(basename \"$0\")\" == \"forge\" && \"\${1:-}\" == \"build\" ]]; then\n  printf 'storage-env\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"\${FOUNDRY_SRC:-}\" \"\${FOUNDRY_TEST:-}\" \"\${FOUNDRY_SCRIPT:-}\" \"\${FOUNDRY_OUT:-}\" \"\${FOUNDRY_CACHE_PATH:-}\" >> \"$HARNESS_COMMAND_LOG\"\nelif [[ \"$(basename \"$0\")\" == \"forge\" && \"\${1:-}\" == \"test\" && -n \"\${FOUNDRY_OUT:-}\" ]]; then\n  printf 'storage-test-env\\t%s\\t%s\\n' \"$FOUNDRY_OUT\" \"\${FOUNDRY_CACHE_PATH:-}\" >> \"$HARNESS_COMMAND_LOG\"\nelif [[ \"$(basename \"$0\")\" == \"node\" && \"\${1:-}\" == \"scripts/check-fund-storage.mjs\" ]]; then\n  printf 'storage-node-env\\t%s\\n' \"\${STORAGE_BUILD_INFO_DIR:-}\" >> \"$HARNESS_COMMAND_LOG\"\nfi\n`;
 
   for (const name of ["node", "npm", "forge"]) {
     const commandPath = path.join(directory, name);
@@ -61,7 +61,7 @@ test("invalid mode is rejected with usage", () => {
     encoding: "utf8",
   });
   assert.equal(result.status, 2);
-  assert.match(result.stderr, /usage: .* <doctor\|fast\|full>/);
+  assert.match(result.stderr, /usage: .* <doctor\|fast\|extended\|full>/);
 });
 
 test("fast is offline and excludes fork, fuzz, and invariant work", async (context) => {
@@ -72,13 +72,32 @@ test("fast is offline and excludes fork, fuzz, and invariant work", async (conte
   assert.equal(result.status, 0, result.stderr);
   const lines = await commandLines(mocks.log);
   const forgeTests = lines.filter((line) => line.startsWith("forge\ttest\t"));
-  assert.equal(forgeTests.length, 1);
-  assert.match(forgeTests[0], /\t--offline(?:\t|$)/);
-  assert.match(forgeTests[0], /\t--no-match-path\t\{\*Fork\*\.t\.sol,\*Storage\*\.t\.sol\}/);
-  assert.match(forgeTests[0], /\t--no-match-contract\t\.\*\(Fuzz\|Invariant\)\.\*/);
-  assert.match(forgeTests[0], /\t--no-match-test\t\^testFuzz/);
-  assert.doesNotMatch(forgeTests[0], /--fork-url/);
+  assert.equal(forgeTests.length, 3);
+  const ordinary = forgeTests.find((line) => line.includes("\t--no-match-path\t{*Fork*.t.sol,*Storage*.t.sol}"));
+  assert.ok(ordinary);
+  assert.match(ordinary, /\t--offline(?:\t|$)/);
+  assert.match(ordinary, /\t--no-match-contract\t\.\*\(Fuzz\|Invariant\)\.\*/);
+  assert.match(ordinary, /\t--no-match-test\t\^\(testFuzz\|test_fuzz\|invariant_\)/);
+  assert.ok(forgeTests.includes("forge\ttest\t--offline\t--no-match-path\t{*Fork*.t.sol,*Storage*.t.sol}\t--match-contract\t.*(Fuzz|Invariant).*\t--no-match-test\t^(testFuzz|test_fuzz|invariant_)"));
+  assert.ok(forgeTests.includes("forge\ttest\t--offline\t--match-path\t*Storage*.t.sol\t--no-match-path\t*Fork*.t.sol\t--no-match-test\t^(testFuzz|test_fuzz|invariant_)"));
+  assert.equal(forgeTests.some((line) => line.includes("--fork-url")), false);
   assert.ok(lines.includes("node\tscripts/check-contract-deps.mjs"));
+  assert.ok(lines.includes("forge\tbuild\t--offline\t--force"));
+  assert.ok(
+    lines.includes(
+      [
+        "storage-env",
+        "test/fund/harness",
+        "test/fund/harness",
+        "test/fund/harness",
+        "out/harness-storage",
+        "cache/harness-storage",
+      ].join("\t"),
+    ),
+  );
+  assert.ok(lines.includes("node\tscripts/check-fund-storage.mjs"));
+  assert.ok(lines.includes("storage-node-env\tout/harness-storage/build-info"));
+  assert.ok(lines.includes("storage-test-env\tout/harness-storage-tests\tcache/harness-storage-tests"));
   assert.ok(lines.includes("node\t--test\tscripts/test-harness-check.mjs"));
 });
 
@@ -101,25 +120,25 @@ test("full fails closed before tests when either required RPC variable is absent
   }
 });
 
-test("full runs storage, the security profile, and every explicit Base fork suite", async (context) => {
+test("extended runs only security properties and every explicit Base fork suite", async (context) => {
   const mocks = await makeMockCommands();
   context.after(() => rm(mocks.directory, { recursive: true, force: true }));
 
-  const result = runHarness("full", mocks, {
+  const result = runHarness("extended", mocks, {
     BASE_RPC_URL: "mock://base-mainnet",
     BASE_SEPOLIA_RPC_URL: "mock://base-sepolia",
   });
   assert.equal(result.status, 0, result.stderr);
 
   const lines = await commandLines(mocks.log);
-  assert.ok(lines.includes("forge\tbuild\t--offline\t--force"));
-  assert.ok(lines.includes("node\tscripts/check-fund-storage.mjs"));
-  assert.ok(
-    lines.some(
-      (line) =>
-        line.startsWith("forge\ttest\t--offline\t--no-match-path\t*Fork*.t.sol") &&
-        !line.includes("--fork-url"),
-    ),
+  assert.equal(lines.some((line) => line.startsWith("node\t")), false);
+  assert.equal(lines.some((line) => line.startsWith("forge\tbuild\t")), false);
+  assert.ok(lines.includes("forge\ttest\t--offline\t--no-match-path\t*Fork*.t.sol\t--match-test\t^(testFuzz|test_fuzz|invariant_)"));
+  assert.equal(
+    lines.filter(
+      (line) => line.startsWith("forge\ttest\t") && !line.includes("\t--fork-url\t"),
+    ).length,
+    1,
   );
 
   const manifest = await readFile(forkManifest, "utf8");
@@ -150,6 +169,24 @@ test("full runs storage, the security profile, and every explicit Base fork suit
       assert.ok(invocation.startsWith("forge\ttest\t"));
     }
   }
+});
+
+test("full composes fast and extended", async (context) => {
+  const mocks = await makeMockCommands();
+  context.after(() => rm(mocks.directory, { recursive: true, force: true }));
+
+  const result = runHarness("full", mocks, {
+    BASE_RPC_URL: "mock://base-mainnet",
+    BASE_SEPOLIA_RPC_URL: "mock://base-sepolia",
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  const lines = await commandLines(mocks.log);
+  assert.ok(lines.includes("node\tscripts/check-contract-deps.mjs"));
+  assert.ok(lines.includes("forge\tbuild\t--offline\t--force"));
+  assert.equal(lines.filter((line) => line === "node\tscripts/check-fund-storage.mjs").length, 1);
+  assert.ok(lines.includes("forge\ttest\t--offline\t--no-match-path\t*Fork*.t.sol\t--match-test\t^(testFuzz|test_fuzz|invariant_)"));
+  assert.ok(lines.some((line) => line.includes("\t--fork-url\t")));
 });
 
 test("Aerodrome native-token forks fail closed on an unpinned Base Foundry build", async (context) => {

@@ -7,7 +7,7 @@ FORK_MANIFEST="$SCRIPT_DIR/harness-fork-paths.txt"
 MODE="${1:-}"
 
 usage() {
-  printf 'usage: %s <doctor|fast|full>\n' "$0" >&2
+  printf 'usage: %s <doctor|fast|extended|full>\n' "$0" >&2
 }
 
 fail() {
@@ -98,16 +98,22 @@ run_fast() {
       --offline \
       --no-match-path '{*Fork*.t.sol,*Storage*.t.sol}' \
       --no-match-contract '.*(Fuzz|Invariant).*' \
-      --no-match-test '^testFuzz'
+      --no-match-test '^(testFuzz|test_fuzz|invariant_)'
+    npm_config_offline=true forge test \
+      --offline \
+      --no-match-path '{*Fork*.t.sol,*Storage*.t.sol}' \
+      --match-contract '.*(Fuzz|Invariant).*' \
+      --no-match-test '^(testFuzz|test_fuzz|invariant_)'
+    run_storage_checks
   )
   printf 'harness: fast passed (deterministic offline unit/specification suites)\n'
 }
 
 require_rpc_environment() {
   [[ -n "${BASE_RPC_URL:-}" ]] ||
-    fail "harness:full requires BASE_RPC_URL for explicit Base mainnet forks"
+    fail "harness:extended requires BASE_RPC_URL for explicit Base mainnet forks"
   [[ -n "${BASE_SEPOLIA_RPC_URL:-}" ]] ||
-    fail "harness:full requires BASE_SEPOLIA_RPC_URL for explicit Base Sepolia forks"
+    fail "harness:extended requires BASE_SEPOLIA_RPC_URL for explicit Base Sepolia forks"
 }
 
 require_base_forge() {
@@ -153,25 +159,53 @@ run_fork_suites() {
   done < "$FORK_MANIFEST"
 }
 
-run_full() {
-  run_doctor
+run_extended() {
   require_rpc_environment
-  run_fast
   (
     cd "$REPOSITORY_ROOT"
-    npm_config_offline=true forge build --offline --force
-    node scripts/check-fund-storage.mjs
     FOUNDRY_PROFILE=security npm_config_offline=true forge test \
       --offline \
-      --no-match-path '*Fork*.t.sol'
+      --no-match-path '*Fork*.t.sol' \
+      --match-test '^(testFuzz|test_fuzz|invariant_)'
     run_fork_suites
   )
-  printf 'harness: full passed (storage, security fuzz/invariant, Base mainnet and Base Sepolia forks)\n'
+  printf 'harness: extended passed (security fuzz/invariant, Base mainnet and Base Sepolia forks)\n'
+}
+
+run_storage_checks() {
+  local storage_out="out/harness-storage"
+  local storage_cache="cache/harness-storage"
+  local storage_test_out="out/harness-storage-tests"
+  local storage_test_cache="cache/harness-storage-tests"
+  (
+    cd "$REPOSITORY_ROOT"
+    FOUNDRY_SRC=test/fund/harness \
+      FOUNDRY_TEST=test/fund/harness \
+      FOUNDRY_SCRIPT=test/fund/harness \
+      FOUNDRY_OUT="$storage_out" \
+      FOUNDRY_CACHE_PATH="$storage_cache" \
+      npm_config_offline=true forge build --offline --force
+    STORAGE_BUILD_INFO_DIR="$storage_out/build-info" node scripts/check-fund-storage.mjs
+    FOUNDRY_OUT="$storage_test_out" \
+      FOUNDRY_CACHE_PATH="$storage_test_cache" \
+      npm_config_offline=true forge test --offline \
+      --match-path '*Storage*.t.sol' \
+      --no-match-path '*Fork*.t.sol' \
+      --no-match-test '^(testFuzz|test_fuzz|invariant_)'
+  )
+}
+
+run_full() {
+  require_rpc_environment
+  run_fast
+  run_extended
+  printf 'harness: full passed (fast, storage, and extended evidence)\n'
 }
 
 case "$MODE" in
   doctor) run_doctor ;;
   fast) run_fast ;;
+  extended) run_extended ;;
   full) run_full ;;
   *) usage; exit 2 ;;
 esac

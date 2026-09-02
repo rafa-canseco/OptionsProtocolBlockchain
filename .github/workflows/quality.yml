@@ -1,0 +1,72 @@
+name: Contracts quality
+
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contracts-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast:
+    name: Deterministic offline checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - name: Install JavaScript dependencies
+        run: npm ci --ignore-scripts
+      - name: Install pinned Foundry test library
+        run: npm run deps:foundry
+      - name: Prefetch the pinned Solidity compiler
+        run: forge build test/fund/harness/StorageLayoutHarnesses.sol
+      - name: Run offline quality gate
+        run: npm run harness:fast
+
+  extended:
+    name: Extended defensive verification
+    needs: fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - name: Install JavaScript dependencies
+        run: npm ci --ignore-scripts
+      - name: Install pinned Foundry test library
+        run: npm run deps:foundry
+      - name: Prefetch the pinned Solidity compiler
+        run: forge build test/fund/harness/StorageLayoutHarnesses.sol
+      - name: Install pinned Base Foundry
+        run: |
+          mkdir -p "$HOME/.foundry/bin"
+          curl -fsSL https://raw.githubusercontent.com/base/base-anvil/98e7839c65f64aee9627b69a9b98b79afaeb1fae/foundryup/foundryup \
+            -o "$HOME/.foundry/bin/base-foundryup"
+          chmod +x "$HOME/.foundry/bin/base-foundryup"
+          "$HOME/.foundry/bin/base-foundryup" --install v1.1.0
+          echo "$HOME/.foundry/bin" >> "$GITHUB_PATH"
+      - name: Run extended quality gate
+        run: npm run harness:extended
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
