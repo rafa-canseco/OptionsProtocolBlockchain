@@ -141,7 +141,10 @@ test("full runs storage, the security profile, and every explicit Base fork suit
     assert.ok(invocation, `missing fork invocation for ${suite}`);
     assert.ok(invocation.includes(`\t--fork-url\t${rpc}`));
     if (block) assert.ok(invocation.includes(`\t--fork-block-number\t${block}`));
-    if (suite === "test/fund/B1N491AerodromeRouteFork.t.sol") {
+    if (
+      suite === "test/fund/B1N491AerodromeRouteFork.t.sol" ||
+      suite === "test/AerodromeSlipstreamAdapterFork.t.sol"
+    ) {
       assert.ok(invocation.startsWith("base-forge\ttest\t"));
     } else {
       assert.ok(invocation.startsWith("forge\ttest\t"));
@@ -149,7 +152,7 @@ test("full runs storage, the security profile, and every explicit Base fork suit
   }
 });
 
-test("B1N-491 fails closed on an unpinned Base Foundry build", async (context) => {
+test("Aerodrome native-token forks fail closed on an unpinned Base Foundry build", async (context) => {
   const mocks = await makeMockCommands("forge Version: 1.6.0-v1.1.0\nCommit SHA: wrong");
   context.after(() => rm(mocks.directory, { recursive: true, force: true }));
 
