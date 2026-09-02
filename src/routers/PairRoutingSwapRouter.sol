@@ -172,22 +172,28 @@ contract PairRoutingSwapRouter is ISwapRouter, Ownable2Step, ReentrancyGuard {
         uint256 adapterOutBefore = tokenOut.balanceOf(adapter);
         uint256 recipientOutBefore = tokenOut.balanceOf(params.recipient);
 
-        tokenIn.safeTransferFrom(msg.sender, address(this), params.amountInMaximum);
-        if (tokenIn.balanceOf(address(this)) != facadeInBefore + params.amountInMaximum) {
-            revert InvalidBalanceDelta();
-        }
+        uint256 fundedMaximum = params.amountInMaximum;
+        uint256 callerAllowance = tokenIn.allowance(msg.sender, address(this));
+        if (callerAllowance < fundedMaximum) fundedMaximum = callerAllowance;
+        if (callerInBefore < fundedMaximum) fundedMaximum = callerInBefore;
+        if (fundedMaximum == 0) revert InvalidBalanceDelta();
 
-        tokenIn.forceApprove(adapter, params.amountInMaximum);
-        ISwapRouter(adapter).exactOutputSingle(params);
+        tokenIn.safeTransferFrom(msg.sender, address(this), fundedMaximum);
+        if (tokenIn.balanceOf(address(this)) != facadeInBefore + fundedMaximum) revert InvalidBalanceDelta();
+
+        ExactOutputSingleParams memory fundedParams = params;
+        fundedParams.amountInMaximum = fundedMaximum;
+        tokenIn.forceApprove(adapter, fundedMaximum);
+        ISwapRouter(adapter).exactOutputSingle(fundedParams);
         tokenIn.forceApprove(adapter, 0);
 
         uint256 facadeInAfterSwap = tokenIn.balanceOf(address(this));
-        if (facadeInAfterSwap < facadeInBefore || facadeInAfterSwap > facadeInBefore + params.amountInMaximum) {
+        if (facadeInAfterSwap < facadeInBefore || facadeInAfterSwap > facadeInBefore + fundedMaximum) {
             revert InvalidBalanceDelta();
         }
 
         uint256 refund = facadeInAfterSwap - facadeInBefore;
-        amountIn = params.amountInMaximum - refund;
+        amountIn = fundedMaximum - refund;
         if (amountIn == 0) revert InvalidBalanceDelta();
         if (refund != 0) tokenIn.safeTransfer(msg.sender, refund);
 

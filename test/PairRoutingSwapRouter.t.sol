@@ -262,6 +262,21 @@ contract PairRoutingSwapRouterTest is Test {
         _assertClean(address(adapter));
     }
 
+    function test_exactOutputCapsPrefundingToAvailableAllowance() public {
+        _activate(PairRoutingSwapRouter.SwapKind.ExactOutput, address(adapter));
+        adapter.configure(70e18, 50e6, 999e18, false, false);
+        adapter.setPullOnlySpentExactOutput(true);
+        tokenA.approve(address(router), 80e18);
+
+        uint256 callerBefore = tokenA.balanceOf(address(this));
+        uint256 amountIn = router.exactOutputSingle(_exactOutputParams(50e6, 100e18));
+
+        assertEq(amountIn, 70e18);
+        assertEq(callerBefore - tokenA.balanceOf(address(this)), 70e18);
+        assertEq(tokenA.allowance(address(this), address(router)), 0);
+        _assertClean(address(adapter));
+    }
+
     function test_swapsPreservePreexistingFacadeAndAdapterBalances() public {
         _activate(PairRoutingSwapRouter.SwapKind.ExactInput, address(adapter));
         _activate(PairRoutingSwapRouter.SwapKind.ExactOutput, address(adapter));
