@@ -110,15 +110,15 @@ require_rpc_environment() {
     fail "harness:full requires BASE_SEPOLIA_RPC_URL for explicit Base Sepolia forks"
 }
 
-require_b1n491_base_forge() {
+require_base_forge() {
   local version
   command -v base-forge >/dev/null 2>&1 ||
-    fail "B1N-491 requires Base Foundry v1.1.0 (install: base-foundryup --install v1.1.0)"
+    fail "Aerodrome native-token forks require Base Foundry v1.1.0 (install: base-foundryup --install v1.1.0)"
   version="$(base-forge --version 2>&1)" ||
-    fail "B1N-491 requires Base Foundry v1.1.0 (install: base-foundryup --install v1.1.0)"
+    fail "Aerodrome native-token forks require Base Foundry v1.1.0 (install: base-foundryup --install v1.1.0)"
   grep -Fxq 'forge Version: 1.6.0-v1.1.0' <<<"$version" &&
     grep -Fxq 'Commit SHA: 6130ccf6af0b3399777aee3876486e2ba9ebb38f' <<<"$version" ||
-    fail "B1N-491 requires Base Foundry v1.1.0 commit 6130ccf6af0b3399777aee3876486e2ba9ebb38f (install: base-foundryup --install v1.1.0)"
+    fail "Aerodrome native-token forks require Base Foundry v1.1.0 commit 6130ccf6af0b3399777aee3876486e2ba9ebb38f (install: base-foundryup --install v1.1.0)"
 }
 
 run_fork_evidence() {
@@ -128,8 +128,8 @@ run_fork_evidence() {
   else
     rpc_url="$BASE_SEPOLIA_RPC_URL"
   fi
-  if [[ "$path" == "test/fund/B1N491AerodromeRouteFork.t.sol" ]]; then
-    require_b1n491_base_forge
+  if [[ "$path" == "test/fund/B1N491AerodromeRouteFork.t.sol" || "$path" == "test/AerodromeSlipstreamAdapterFork.t.sol" ]]; then
+    require_base_forge
     runner="base-forge"
   fi
 
