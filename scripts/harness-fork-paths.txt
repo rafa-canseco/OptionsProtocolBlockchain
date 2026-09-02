@@ -9,6 +9,7 @@ base-mainnet      test/ForkUpgradeV3.t.sol                              50104319
 base-mainnet      test/ForkUpgradeV4V5.t.sol                            50104319
 base-mainnet      test/LazyCreate2MainnetFork.t.sol                     50104319
 base-mainnet      test/MainnetForkSettlement.t.sol                      50104319
+base-mainnet      test/UniswapV3SettlementAdapterFork.t.sol             50400001
 base-mainnet      test/fund/B1N444AssetNeutralMetaWheelMainnetFork.t.sol 50104319
 base-mainnet      test/fund/B1N491AerodromeRouteFork.t.sol              50400001
 base-mainnet      test/fund/CspFundAdapterFork.t.sol                    50104319
