@@ -143,6 +143,7 @@ test("full runs storage, the security profile, and every explicit Base fork suit
     if (block) assert.ok(invocation.includes(`\t--fork-block-number\t${block}`));
     if (
       suite === "test/fund/B1N491AerodromeRouteFork.t.sol" ||
+      suite === "test/fund/B1N495SettlementRouteQualificationFork.t.sol" ||
       suite === "test/AerodromeSlipstreamAdapterFork.t.sol"
     ) {
       assert.ok(invocation.startsWith("base-forge\ttest\t"));
