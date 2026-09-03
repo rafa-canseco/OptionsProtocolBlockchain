@@ -128,7 +128,7 @@ run_fork_evidence() {
   else
     rpc_url="$BASE_SEPOLIA_RPC_URL"
   fi
-  if [[ "$path" == "test/fund/B1N491AerodromeRouteFork.t.sol" || "$path" == "test/AerodromeSlipstreamAdapterFork.t.sol" ]]; then
+  if [[ "$path" == "test/fund/B1N491AerodromeRouteFork.t.sol" || "$path" == "test/fund/B1N495SettlementRouteQualificationFork.t.sol" || "$path" == "test/AerodromeSlipstreamAdapterFork.t.sol" ]]; then
     require_base_forge
     runner="base-forge"
   fi

@@ -13,6 +13,7 @@ base-mainnet      test/AerodromeSlipstreamAdapterFork.t.sol             50780000
 base-mainnet      test/UniswapV3SettlementAdapterFork.t.sol             50400001
 base-mainnet      test/fund/B1N444AssetNeutralMetaWheelMainnetFork.t.sol 50104319
 base-mainnet      test/fund/B1N491AerodromeRouteFork.t.sol              50400001
+base-mainnet      test/fund/B1N495SettlementRouteQualificationFork.t.sol 50780000
 base-mainnet      test/fund/CspFundAdapterFork.t.sol                    50104319
 base-sepolia      test/LazyCreate2BaseSepoliaFork.t.sol                 44454953
 base-sepolia      test/fund/B1N352IsolatedOnboardingFork.t.sol          44454953
