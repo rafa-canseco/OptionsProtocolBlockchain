@@ -36,8 +36,20 @@ contract Oracle is Initializable, UUPSUpgradeable {
     /// @notice Address authorized to set expiry prices (bot/operator)
     address public operator;
 
+    uint256 public constant MAX_CLOSED_PRICE_AGE = 96 hours;
+    uint256 public constant CLOSE_CAPTURE_WINDOW = 1 hours;
+
     event PriceFeedSet(address indexed asset, address indexed feed);
+    event MarketHoursAssetUpdated(address indexed asset, bool enabled);
     event ExpiryPriceSet(address indexed asset, uint256 indexed expiry, uint256 price);
+    event ExpiryPriceSetFromClose(
+        address indexed asset,
+        uint256 indexed expiry,
+        uint256 price,
+        uint256 closeAt,
+        uint256 nextSessionOpenAt,
+        uint256 feedUpdatedAt
+    );
     event PriceDeviationThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
     event MaxOracleStalenessUpdated(uint256 oldStaleness, uint256 newStaleness);
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
@@ -50,6 +62,8 @@ contract Oracle is Initializable, UUPSUpgradeable {
     error PriceDeviationTooHigh(uint256 submitted, uint256 chainlink, uint256 deviationBps);
     error StaleOraclePrice(uint256 updatedAt, uint256 maxAge);
     error ExpiryNotReached();
+    error MarketHoursAssetNotEnabled();
+    error InvalidCloseWindow();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert OnlyOwner();
@@ -79,6 +93,14 @@ contract Oracle is Initializable, UUPSUpgradeable {
         operator = _operator;
     }
 
+    /// @notice Enables the explicit last-official-close settlement path for an asset.
+    /// @dev This does not relax live `getPrice` freshness or change other assets.
+    function setMarketHoursAsset(address _asset, bool _enabled) external onlyOwner {
+        if (_asset == address(0)) revert InvalidAddress();
+        marketHoursAsset[_asset] = _enabled;
+        emit MarketHoursAssetUpdated(_asset, _enabled);
+    }
+
     function setExpiryPrice(address _asset, uint256 _expiry, uint256 _price) external {
         if (msg.sender != owner && msg.sender != operator) {
             revert OnlyOwnerOrOperator();
@@ -94,6 +116,46 @@ contract Oracle is Initializable, UUPSUpgradeable {
         expiryPriceSet[_asset][_expiry] = true;
 
         emit ExpiryPriceSet(_asset, _expiry, _price);
+    }
+
+    /// @notice Locks a market-hours asset to its last finalized official close.
+    /// @param _closeAt Scheduled close of the latest completed regular session.
+    /// @param _nextSessionOpenAt Next scheduled regular-session open.
+    /// @dev The feed answer must have been published within one hour of the close.
+    ///      The caller supplies the exchange-calendar timestamps; the bounded window
+    ///      and stale-age checks prevent using a close after the next session opens.
+    ///      Requires closeAt < expiry < nextSessionOpenAt; exact-close expiries
+    ///      intentionally fail closed and are outside the supported 08:00 UTC policy.
+    function setExpiryPriceFromClose(
+        address _asset,
+        uint256 _expiry,
+        uint256 _price,
+        uint256 _closeAt,
+        uint256 _nextSessionOpenAt
+    ) external {
+        if (msg.sender != owner && msg.sender != operator) {
+            revert OnlyOwnerOrOperator();
+        }
+        if (_asset == address(0)) revert InvalidAddress();
+        if (!marketHoursAsset[_asset]) revert MarketHoursAssetNotEnabled();
+        if (_price == 0) revert InvalidPrice();
+        if (block.timestamp < _expiry) revert ExpiryNotReached();
+        if (expiryPriceSet[_asset][_expiry]) revert PriceAlreadySet();
+        if (_closeAt >= _expiry || _nextSessionOpenAt <= _expiry || block.timestamp >= _nextSessionOpenAt) {
+            revert InvalidCloseWindow();
+        }
+        if (block.timestamp < _closeAt || block.timestamp - _closeAt > MAX_CLOSED_PRICE_AGE) {
+            revert InvalidCloseWindow();
+        }
+        if (_nextSessionOpenAt > _closeAt + MAX_CLOSED_PRICE_AGE) revert InvalidCloseWindow();
+
+        uint256 feedUpdatedAt = _validateFinalizedClose(_asset, _price, _closeAt);
+
+        expiryPrice[_asset][_expiry] = _price;
+        expiryPriceSet[_asset][_expiry] = true;
+
+        emit ExpiryPriceSet(_asset, _expiry, _price);
+        emit ExpiryPriceSetFromClose(_asset, _expiry, _price, _closeAt, _nextSessionOpenAt, feedUpdatedAt);
     }
 
     function setPriceDeviationThreshold(uint256 _thresholdBps) external onlyOwner {
@@ -129,6 +191,9 @@ contract Oracle is Initializable, UUPSUpgradeable {
 
     address public pendingOwner;
 
+    /// @notice Assets whose expiry prices may use a finalized market-session close.
+    mapping(address => bool) public marketHoursAsset;
+
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
@@ -145,6 +210,47 @@ contract Oracle is Initializable, UUPSUpgradeable {
         emit OwnershipTransferred(owner, msg.sender);
         owner = msg.sender;
         pendingOwner = address(0);
+    }
+
+    /// @dev Validates the latest feed answer is the finalized close captured near
+    ///      the scheduled session close, without applying live freshness.
+    function _validateFinalizedClose(address _asset, uint256 _price, uint256 _closeAt)
+        internal
+        view
+        returns (uint256 feedUpdatedAt)
+    {
+        address feed = priceFeed[_asset];
+        if (feed == address(0)) revert FeedNotSet();
+
+        (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        ) = IChainlinkAggregator(feed).latestRoundData();
+        if (answer <= 0) revert InvalidPrice();
+        if (
+            roundId == 0
+                || answeredInRound < roundId
+                || startedAt == 0
+                || updatedAt == 0
+                || startedAt > updatedAt
+                || updatedAt > block.timestamp
+        ) {
+            revert InvalidCloseWindow();
+        }
+        if (updatedAt > _closeAt + CLOSE_CAPTURE_WINDOW || updatedAt + CLOSE_CAPTURE_WINDOW < _closeAt) {
+            revert InvalidCloseWindow();
+        }
+
+        uint256 chainlinkPrice = uint256(answer);
+        if (_price != chainlinkPrice) {
+            uint256 diff = _price > chainlinkPrice ? _price - chainlinkPrice : chainlinkPrice - _price;
+            uint256 deviationBps = (diff * 10_000) / chainlinkPrice;
+            revert PriceDeviationTooHigh(_price, chainlinkPrice, deviationBps);
+        }
+        return updatedAt;
     }
 
     /// @dev Reverts if a Chainlink feed exists, threshold is set,
@@ -175,7 +281,7 @@ contract Oracle is Initializable, UUPSUpgradeable {
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[41] private __gap;
+    uint256[40] private __gap;
 }
 
 interface IChainlinkAggregator {
