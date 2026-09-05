@@ -128,6 +128,7 @@ contract CspFundValuatorV2Test is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
+        oracle.setLegacyPostExpiryAsset(address(weth), true);
         factory.setOperator(address(this));
         controller.setCustodiedRedemptionOnly(true);
         settler.setWhitelistedMM(mm, true);
