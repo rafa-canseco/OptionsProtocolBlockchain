@@ -107,6 +107,7 @@ contract ControllerFuzzTest is Test {
         factory.setOperator(address(this));
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
+        oracle.setLegacyPostExpiryAsset(address(weth), true);
 
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
@@ -292,6 +293,7 @@ contract OracleFuzzTest is Test {
                 )
             )
         );
+        oracle.setLegacyPostExpiryAsset(address(0x1111), true);
     }
 
     /// @notice Any non-zero price can be set for expiry
@@ -813,6 +815,7 @@ contract PhysicalRedeemFuzzTest is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
+        oracle.setLegacyPostExpiryAsset(address(weth), true);
 
         settler.setWhitelistedMM(mm, true);
         settler.setAavePool(address(mockAave));

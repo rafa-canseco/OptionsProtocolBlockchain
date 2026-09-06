@@ -61,6 +61,8 @@ contract OracleTest is Test {
         ethFeed = new MockChainlinkFeed(2087e8); // $2087 in 8 decimals
 
         oracle.setPriceFeed(weth, address(ethFeed));
+        // Existing tests exercise the explicitly retained legacy settlement route.
+        oracle.setLegacyPostExpiryAsset(weth, true);
 
         uint256 today8am = (block.timestamp / 1 days) * 1 days + 8 hours;
         expiry = today8am > block.timestamp ? today8am : today8am + 1 days;
@@ -88,6 +90,18 @@ contract OracleTest is Test {
         (uint256 price, bool isSet) = oracle.getExpiryPrice(weth, expiry);
         assertEq(price, 2100e8);
         assertTrue(isSet);
+    }
+
+    function test_strictExpiryPriceRejectsPostExpiryFeedUpdate() public {
+        address strictAsset = address(0x2222);
+        MockChainlinkFeed strictFeed = new MockChainlinkFeed(2087e8);
+        oracle.setPriceFeed(strictAsset, address(strictFeed));
+
+        vm.warp(expiry + 1);
+        strictFeed.setPrice(2100e8);
+
+        vm.expectRevert(Oracle.InvalidCloseWindow.selector);
+        oracle.setExpiryPrice(strictAsset, expiry, 2100e8);
     }
 
     function test_expiryPriceNotSetByDefault() public view {
@@ -146,6 +160,12 @@ contract OracleTest is Test {
         oracle.setOperator(address(0x0BE));
     }
 
+    function test_legacyPostExpiryAssetIsOwnerOnly() public {
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(Oracle.OnlyOwner.selector);
+        oracle.setLegacyPostExpiryAsset(weth, false);
+    }
+
     function test_cannotSetZeroOperator() public {
         vm.expectRevert(Oracle.InvalidAddress.selector);
         oracle.setOperator(address(0));
@@ -188,10 +208,17 @@ contract OracleTest is Test {
         vm.warp(expiry);
         oracle.setPriceDeviationThreshold(1000); // 10%
         address noFeedAsset = address(0xAAAA);
-        // No feed set for this asset → skip check
+        oracle.setLegacyPostExpiryAsset(noFeedAsset, true);
+        // Explicit legacy configuration preserves the no-feed behavior.
         oracle.setExpiryPrice(noFeedAsset, expiry, 9999e8);
         (uint256 price,) = oracle.getExpiryPrice(noFeedAsset, expiry);
         assertEq(price, 9999e8);
+    }
+
+    function test_strictExpiryPriceRejectsMissingFeed() public {
+        vm.warp(expiry);
+        vm.expectRevert(Oracle.FeedNotSet.selector);
+        oracle.setExpiryPrice(address(0xAAAA), expiry, 9999e8);
     }
 
     function test_expiryPriceWithinThresholdAccepted() public {
@@ -219,7 +246,7 @@ contract OracleTest is Test {
         // Feed = 2087e8, threshold = 10% (1000 bps)
         // diff = 313e8, deviation = 313e8 * 10000 / 2087e8 = 1499 bps
         oracle.setPriceDeviationThreshold(1000);
-        vm.expectRevert(abi.encodeWithSelector(Oracle.PriceDeviationTooHigh.selector, 2400e8, 2087e8, 1499));
+        vm.expectRevert(abi.encodeWithSelector(Oracle.PriceDeviationTooHigh.selector, 2400e8, 2087e8, 1500));
         oracle.setExpiryPrice(weth, expiry, 2400e8);
     }
 
@@ -228,7 +255,7 @@ contract OracleTest is Test {
         // Feed = 2087e8, threshold = 10% (1000 bps)
         // diff = 587e8, deviation = 587e8 * 10000 / 2087e8 = 2812 bps
         oracle.setPriceDeviationThreshold(1000);
-        vm.expectRevert(abi.encodeWithSelector(Oracle.PriceDeviationTooHigh.selector, 1500e8, 2087e8, 2812));
+        vm.expectRevert(abi.encodeWithSelector(Oracle.PriceDeviationTooHigh.selector, 1500e8, 2087e8, 2813));
         oracle.setExpiryPrice(weth, expiry, 1500e8);
     }
 
@@ -237,7 +264,7 @@ contract OracleTest is Test {
         // Feed = 2087e8, threshold = 20%
         // diff = 1879e8, deviation = 1879e8 * 10000 / 2087e8 = 9003 bps
         oracle.setPriceDeviationThreshold(2000);
-        vm.expectRevert(abi.encodeWithSelector(Oracle.PriceDeviationTooHigh.selector, 208e8, 2087e8, 9003));
+        vm.expectRevert(abi.encodeWithSelector(Oracle.PriceDeviationTooHigh.selector, 208e8, 2087e8, 9004));
         oracle.setExpiryPrice(weth, expiry, 208e8);
     }
 
