@@ -122,6 +122,7 @@ contract EthCspVaultTest is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
+        oracle.setLegacyPostExpiryAsset(address(weth), true);
 
         factory.setOperator(address(this));
         settler.setWhitelistedMM(mm, true);

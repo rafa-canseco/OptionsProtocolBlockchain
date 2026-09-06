@@ -127,6 +127,7 @@ contract EmergencyTest is Test {
         factory.setOperator(admin);
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
+        oracle.setLegacyPostExpiryAsset(address(weth), true);
 
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));

@@ -111,6 +111,7 @@ abstract contract BatchSettlerTestBase is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
         addressBook.setBatchSettler(address(settler));
+        oracle.setLegacyPostExpiryAsset(address(weth), true);
     }
 
     function _computeExpiry() internal {

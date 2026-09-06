@@ -106,6 +106,8 @@ contract ControllerTest is Test {
         addressBook.setOracle(address(oracle));
         addressBook.setWhitelist(address(whitelist));
 
+        oracle.setLegacyPostExpiryAsset(address(weth), true);
+        oracle.setLegacyPostExpiryAsset(address(wbtc), true);
         factory.setOperator(address(this));
 
         // Whitelist assets and products

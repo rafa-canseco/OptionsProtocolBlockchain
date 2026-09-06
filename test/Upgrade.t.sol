@@ -334,12 +334,23 @@ contract UpgradeTest is Test {
 
     function test_upgradeOracle_preservesState() public {
         oracle.setPriceFeed(address(weth), address(feed));
+        oracle.setLegacyPostExpiryAsset(address(weth), true);
+        oracle.setMarketHoursAsset(address(weth), true);
+        uint256 expiry = block.timestamp + 1 days;
+        uint256 closeAt = block.timestamp + 1 hours;
+        uint256 nextOpen = block.timestamp + 2 days;
+        oracle.setCloseWindow(address(weth), expiry, closeAt, nextOpen);
         assertEq(oracle.priceFeed(address(weth)), address(feed));
 
         OracleV2 v2Impl = new OracleV2();
         oracle.upgradeToAndCall(address(v2Impl), "");
 
         assertEq(oracle.priceFeed(address(weth)), address(feed));
+        assertTrue(oracle.legacyPostExpiryAsset(address(weth)));
+        assertTrue(oracle.marketHoursAsset(address(weth)));
+        (uint256 storedCloseAt, uint256 storedNextOpen) = oracle.closeWindow(address(weth), expiry);
+        assertEq(storedCloseAt, closeAt);
+        assertEq(storedNextOpen, nextOpen);
         assertEq(oracle.owner(), owner);
         assertEq(OracleV2(address(oracle)).version(), 2);
     }
