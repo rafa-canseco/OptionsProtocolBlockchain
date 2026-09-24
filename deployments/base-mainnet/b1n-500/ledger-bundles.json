@@ -1,0 +1,302 @@
+{
+  "status": "PREPARED_NOT_SIGNED_NOT_BROADCAST",
+  "chainId": 8453,
+  "owner": "0xC217A5B774cd17388a7C2782f0Cc3F4aaf8a29a7",
+  "sourceBaseCommit": "0765535c66b4f2df65cbfd75f0836c22a5ab98cd",
+  "observedFinalizedBlock": {
+    "number": 51712872,
+    "hash": "0x315f9ee1367c2436937d96527aab135973307c4650978b05850447c61bef1a23",
+    "parentHash": "0x8dbbd85f89bf8088a21654454fcaf820a3a03fda2922bc5277b9bbedfb2937eb",
+    "timestamp": 1790215091
+  },
+  "latestObservedPreflight": {
+    "status": "BLOCKED_BY_NVDAC_MARKET_HOURS_FRESHNESS",
+    "nvdac": {
+      "eligible": false,
+      "deviationBps": 1
+    },
+    "cbzec": {
+      "eligible": true,
+      "deviationBps": 5
+    },
+    "cbhype": {
+      "eligible": true,
+      "deviationBps": 12
+    },
+    "vvv": {
+      "eligible": true,
+      "deviationBps": 3
+    },
+    "note": "Informational only; rerun immediately before every Ledger bundle"
+  },
+  "contracts": {
+    "whitelistProxy": {
+      "address": "0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A",
+      "codehash": "0x8fe6e1498a3a26da266dcc51fdd7731c0fb33355713bd01574ed5c6574a98637"
+    },
+    "whitelistImplementation": {
+      "address": "0x5F3b652b2b258e36bc88C3Bdf3c4e1EcF04BCF00",
+      "codehash": "0x346c0ac9e338e6a8080629689a5ba300c66f5de2ecc19591f0a910fb2e99e649"
+    },
+    "settlerProxy": {
+      "address": "0xd281ADdB8b5574360Fd6BFC245B811ad5C582a3B",
+      "codehash": "0x8fe6e1498a3a26da266dcc51fdd7731c0fb33355713bd01574ed5c6574a98637"
+    },
+    "settlerImplementation": {
+      "address": "0x645a8A66B812A13D5042939b88C144467B825648",
+      "codehash": "0x961901664cba1e17fe5dfaeef550b91ecdbe08834ef16065dfb6e462a095209a"
+    },
+    "facade": {
+      "address": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+      "codehash": "0x8520cccdac2846a4817c26368f2b3ab04f1e0d3cc872ce11418ade10d496f678"
+    },
+    "nvdacAdapter": {
+      "address": "0xE2562017C63C5B7EcD6F91F4C1510367bcF6284D",
+      "codehash": "0xa4b70749fc39ee3ab532fef6ff604710b2cdbc0de0f071e6d434f8ac76d36a2a"
+    },
+    "cbzecAdapter": {
+      "address": "0xF8c97C9CaefB9799eC55a0a3095c40E1c580Caf1",
+      "codehash": "0x59e49007bee0ff9dddf105c8c6cd7f7830bc283025f610e3e4e6f68c35035a4b"
+    },
+    "cbhypeAdapter": {
+      "address": "0xc76287aB15C8ced24f4164CF88B4094B6DC1c039",
+      "codehash": "0x11e20e91e531b78036f02fd5e7fd683402ec14692fd24faffbc6ba3b1388b1de"
+    },
+    "uniswapAdapter": {
+      "address": "0x9baED665316cCA02BeA40f059F8b84874787210B",
+      "codehash": "0x458568b4f0efd1dbf5ee64adc7228eb6fd27073c6d29eb1ce047a4d7dc0586ee"
+    }
+  },
+  "bundle1": {
+    "status": "PREPARED_FOR_LEDGER_AFTER_REVIEW",
+    "preconditions": [
+      "cbZEC, cbHYPE, and VVV pass the latest-finalized preflight in the signing session",
+      "NVDAc deviation is <=100 bps; market-hours freshness may be false because Bundle 1 only proposes its inert delayed route",
+      "Owner, codehashes, controller pause state, router, route pending state, and whitelist baseline match",
+      "scripts/b1n500-runtime-gate.py passes in the signing session",
+      "BatchSettler remains on the direct Uniswap router and backend workers/publishing remain disabled",
+      "No transaction is sent if any precondition drifts"
+    ],
+    "transactions": [
+      {
+        "index": 1,
+        "to": "0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A",
+        "value": "0",
+        "data": "0x07619a39000000000000000000000000b20000000000000000000078ee7ce2fe4908108c",
+        "selector": "0x07619a39",
+        "description": "Whitelist NVDAc underlying"
+      },
+      {
+        "index": 2,
+        "to": "0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A",
+        "value": "0",
+        "data": "0xa34626c4000000000000000000000000b20000000000000000000078ee7ce2fe4908108c",
+        "selector": "0xa34626c4",
+        "description": "Whitelist NVDAc collateral"
+      },
+      {
+        "index": 3,
+        "to": "0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A",
+        "value": "0",
+        "data": "0x82d90ebf000000000000000000000000b20000000000000000000078ee7ce2fe4908108c000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000000001",
+        "selector": "0x82d90ebf",
+        "description": "Whitelist NVDAc/USDC cash-secured PUT product"
+      },
+      {
+        "index": 4,
+        "to": "0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A",
+        "value": "0",
+        "data": "0x82d90ebf000000000000000000000000b20000000000000000000078ee7ce2fe4908108c000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000b20000000000000000000078ee7ce2fe4908108c0000000000000000000000000000000000000000000000000000000000000000",
+        "selector": "0x82d90ebf",
+        "description": "Whitelist NVDAc/USDC covered CALL product"
+      },
+      {
+        "index": 5,
+        "to": "0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A",
+        "value": "0",
+        "data": "0x07619a39000000000000000000000000b200000000000000000000451d033a5000cb479e",
+        "selector": "0x07619a39",
+        "description": "Whitelist cbHYPE underlying"
+      },
+      {
+        "index": 6,
+        "to": "0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A",
+        "value": "0",
+        "data": "0xa34626c4000000000000000000000000b200000000000000000000451d033a5000cb479e",
+        "selector": "0xa34626c4",
+        "description": "Whitelist cbHYPE collateral"
+      },
+      {
+        "index": 7,
+        "to": "0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A",
+        "value": "0",
+        "data": "0x82d90ebf000000000000000000000000b200000000000000000000451d033a5000cb479e000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000000001",
+        "selector": "0x82d90ebf",
+        "description": "Whitelist cbHYPE/USDC cash-secured PUT product"
+      },
+      {
+        "index": 8,
+        "to": "0xC0E6b9F214151cEDbeD3735dF77E9d8EE70ebA8A",
+        "value": "0",
+        "data": "0x82d90ebf000000000000000000000000b200000000000000000000451d033a5000cb479e000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000b200000000000000000000451d033a5000cb479e0000000000000000000000000000000000000000000000000000000000000000",
+        "selector": "0x82d90ebf",
+        "description": "Whitelist cbHYPE/USDC covered CALL product"
+      },
+      {
+        "index": 9,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c63350000000000000000000000004200000000000000000000000000000000000006000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000000000",
+        "selector": "0x607c6335",
+        "description": "Activate WETH CALL exact-input route"
+      },
+      {
+        "index": 10,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c6335000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda0291300000000000000000000000042000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000001",
+        "selector": "0x607c6335",
+        "description": "Activate WETH PUT exact-output route"
+      },
+      {
+        "index": 11,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c6335000000000000000000000000cbb7c0000ab88b473b1f5afd9ef808440eed33bf000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000000000",
+        "selector": "0x607c6335",
+        "description": "Activate cbBTC CALL exact-input route"
+      },
+      {
+        "index": 12,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c6335000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000cbb7c0000ab88b473b1f5afd9ef808440eed33bf0000000000000000000000000000000000000000000000000000000000000001",
+        "selector": "0x607c6335",
+        "description": "Activate cbBTC PUT exact-output route"
+      },
+      {
+        "index": 13,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c6335000000000000000000000000b2000000000000000000008501b13360000cb2ec000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000000000",
+        "selector": "0x607c6335",
+        "description": "Activate cbZEC CALL exact-input route"
+      },
+      {
+        "index": 14,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c6335000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000b2000000000000000000008501b13360000cb2ec0000000000000000000000000000000000000000000000000000000000000001",
+        "selector": "0x607c6335",
+        "description": "Activate cbZEC PUT exact-output route"
+      },
+      {
+        "index": 15,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c6335000000000000000000000000acfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000000000",
+        "selector": "0x607c6335",
+        "description": "Activate VVV CALL exact-input route"
+      },
+      {
+        "index": 16,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c6335000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000acfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf0000000000000000000000000000000000000000000000000000000000000001",
+        "selector": "0x607c6335",
+        "description": "Activate VVV PUT exact-output route"
+      },
+      {
+        "index": 17,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x91bd9af5000000000000000000000000b20000000000000000000078ee7ce2fe4908108c000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e2562017c63c5b7ecd6f91f4c1510367bcf6284d",
+        "selector": "0x91bd9af5",
+        "description": "Propose NVDAc CALL exact-input route"
+      },
+      {
+        "index": 18,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x91bd9af5000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000b20000000000000000000078ee7ce2fe4908108c0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000e2562017c63c5b7ecd6f91f4c1510367bcf6284d",
+        "selector": "0x91bd9af5",
+        "description": "Propose NVDAc PUT exact-output route"
+      },
+      {
+        "index": 19,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x91bd9af5000000000000000000000000b200000000000000000000451d033a5000cb479e000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c76287ab15c8ced24f4164cf88b4094b6dc1c039",
+        "selector": "0x91bd9af5",
+        "description": "Propose cbHYPE CALL exact-input route"
+      },
+      {
+        "index": 20,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x91bd9af5000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000b200000000000000000000451d033a5000cb479e0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000c76287ab15c8ced24f4164cf88b4094b6dc1c039",
+        "selector": "0x91bd9af5",
+        "description": "Propose cbHYPE PUT exact-output route"
+      }
+    ]
+  },
+  "bundle2": {
+    "status": "BLOCKED_UNTIL_BUNDLE1_RECONCILED_AND_24H_DELAY_ELAPSED",
+    "preconditions": [
+      "Bundle 1 receipts and actual activateAfter values are reconciled on Base",
+      "Both NVDAc and cbHYPE route delays have elapsed",
+      "B1N500LedgerBundle2Gate.run succeeds against fresh finalized Base/Arbitrum/HyperEVM state in the signing session",
+      "All six asset route pairs and proxy state match the fork rehearsal before cutover"
+    ],
+    "transactions": [
+      {
+        "index": 1,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c6335000000000000000000000000b20000000000000000000078ee7ce2fe4908108c000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000000000",
+        "selector": "0x607c6335",
+        "description": "Activate NVDAc CALL exact-input route"
+      },
+      {
+        "index": 2,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c6335000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000b20000000000000000000078ee7ce2fe4908108c0000000000000000000000000000000000000000000000000000000000000001",
+        "selector": "0x607c6335",
+        "description": "Activate NVDAc PUT exact-output route"
+      },
+      {
+        "index": 3,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c6335000000000000000000000000b200000000000000000000451d033a5000cb479e000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000000000",
+        "selector": "0x607c6335",
+        "description": "Activate cbHYPE CALL exact-input route"
+      },
+      {
+        "index": 4,
+        "to": "0xFcecd17d0f5e15ed881974a2602c1833C418e28e",
+        "value": "0",
+        "data": "0x607c6335000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000b200000000000000000000451d033a5000cb479e0000000000000000000000000000000000000000000000000000000000000001",
+        "selector": "0x607c6335",
+        "description": "Activate cbHYPE PUT exact-output route"
+      },
+      {
+        "index": 5,
+        "to": "0xd281ADdB8b5574360Fd6BFC245B811ad5C582a3B",
+        "value": "0",
+        "data": "0x41273657000000000000000000000000fcecd17d0f5e15ed881974a2602c1833c418e28e",
+        "selector": "0x41273657",
+        "description": "Cut BatchSettler over to PairRoutingSwapRouter"
+      }
+    ]
+  },
+  "rollback": {
+    "index": 1,
+    "to": "0xd281ADdB8b5574360Fd6BFC245B811ad5C582a3B",
+    "value": "0",
+    "data": "0x412736570000000000000000000000002626664c2603336e57b271c5c0b26f421741e481",
+    "selector": "0x41273657",
+    "description": "Rollback BatchSettler to direct Uniswap V3 router"
+  }
+}
