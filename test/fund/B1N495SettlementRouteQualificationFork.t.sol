@@ -418,6 +418,38 @@ contract B1N495SettlementRouteQualificationForkTest is Test {
         preflight.check(deployment, evidence);
     }
 
+    function test_preflightUsesMultiplierAdjustedNvdaFeedExactlyOnce() public {
+        B1N495RouteToolsHarness tools = new B1N495RouteToolsHarness();
+        B1N495RouteToolsBase.Addresses memory deployed = tools.deploy(address(tools));
+        B1N495RoutePreflight preflight = new B1N495RoutePreflight();
+        B1N495RoutePreflight.Deployment memory deployment = B1N495RoutePreflight.Deployment({
+            routeOwner: address(tools),
+            settlementRecipient: address(this),
+            facade: deployed.facade,
+            nvdacAdapter: deployed.nvdacAdapter,
+            cbzecAdapter: deployed.cbzecAdapter,
+            cbhypeAdapter: deployed.cbhypeAdapter,
+            uniswapAdapter: deployed.uniswapAdapter
+        });
+        B1N495RoutePreflight.OracleEvidence memory evidence = B1N495RoutePreflight.OracleEvidence({
+            observedAt: block.timestamp,
+            cbzecPrice8: _spotPrice8(CBZEC_POOL, 8),
+            cbzecUpdatedAt: block.timestamp,
+            cbhypePrice8: _spotPrice8(CBHYPE_POOL, 18),
+            cbhypeUpdatedAt: block.timestamp
+        });
+        uint256 baselineDeviation = preflight.check(deployment, evidence).nvdacDeviationBps;
+        uint256 changedMultiplier = 1.1e18;
+        vm.mockCall(NVDAC, abi.encodeCall(IB1N495B20.multiplier, ()), abi.encode(changedMultiplier));
+        vm.mockCall(
+            ORACLE_REGISTRY,
+            abi.encodeCall(IB1N495OracleRegistry.getOracleParams, (NVDAC)),
+            abi.encode(changedMultiplier, false)
+        );
+
+        assertEq(preflight.check(deployment, evidence).nvdacDeviationBps, baselineDeviation);
+    }
+
     function test_preflightDeviationRoundsUpAtPolicyBoundary() public {
         B1N495RoutePreflightHarness preflight = new B1N495RoutePreflightHarness();
         uint256 expected = 100_000_000;

@@ -120,7 +120,7 @@ contract B1N495RoutePreflight {
     function check(Deployment calldata d, OracleEvidence calldata evidence) external view returns (Result memory r) {
         if (block.chainid != 8453) revert PreflightFailed("CHAIN");
         _deployment(d);
-        uint256 nvdacMultiplier = _b20(NVDAC, 8, 5, d, d.nvdacAdapter, NVDAC_POOL);
+        _b20(NVDAC, 8, 5, d, d.nvdacAdapter, NVDAC_POOL);
         uint256 cbzecMultiplier = _b20(CBZEC, 8, 118, d, d.cbzecAdapter, CBZEC_POOL);
         uint256 cbhypeMultiplier = _b20(CBHYPE, 18, 119, d, d.cbhypeAdapter, CBHYPE_POOL);
         _aeroPool(NVDAC, NVDAC_POOL, 10, 500);
@@ -132,7 +132,7 @@ contract B1N495RoutePreflight {
 
         (uint256 nvdaPrice8, bool nvdaFresh) = _baseFeed(NVDAC_FEED, 8);
         (uint256 vvvPrice18, bool vvvFresh) = _baseFeed(VVV_FEED, 18);
-        uint256 nvdacOracle8 = nvdaPrice8 * nvdacMultiplier / WAD;
+        uint256 nvdacOracle8 = nvdaPrice8;
         uint256 cbzecOracle8 = evidence.cbzecPrice8 * cbzecMultiplier / WAD;
         uint256 cbhypeOracle8 = evidence.cbhypePrice8 * cbhypeMultiplier / WAD;
         uint256 vvvOracle8 = vvvPrice18 / 1e10;
