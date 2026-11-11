@@ -13,6 +13,7 @@ base-mainnet      test/AerodromeSlipstreamAdapterFork.t.sol             50780000
 base-mainnet      test/UniswapV3SettlementAdapterFork.t.sol             50400001
 base-mainnet      test/fund/B1N444AssetNeutralMetaWheelMainnetFork.t.sol 50104319
 base-mainnet      test/fund/B1N491AerodromeRouteFork.t.sol              50400001
+base-mainnet      test/fund/B1N542NvdacWeekendTwapFork.t.sol              54889141
 base-mainnet      test/fund/B1N495SettlementRouteQualificationFork.t.sol 50780000
 base-mainnet      test/fund/B1N500MainnetCutoverFork.t.sol         50780000
 base-mainnet      test/fund/CspFundAdapterFork.t.sol                    50104319

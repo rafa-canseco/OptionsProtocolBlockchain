@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "./AddressBook.sol";
+import "../libraries/TickMath.sol";
 
 /**
  * @title Oracle
@@ -40,6 +41,16 @@ contract Oracle is Initializable, UUPSUpgradeable {
     uint256 public constant MAX_CLOSED_PRICE_AGE = 96 hours;
     uint256 public constant CLOSE_CAPTURE_WINDOW = 1 hours;
 
+    // One-time B1N-538 exception: the exact NVDAc $215 put expiry whose
+    // regular recovery window elapsed before its missing precommitment was found.
+    address internal constant B1N538_NVDAC = 0xb20000000000000000000078ee7ce2fE4908108C;
+    address internal constant B1N538_CHAINLINK_FEED = 0x04689a41629776563E6822F76f2e57D148d28513;
+    uint256 internal constant B1N538_EXPIRY = 1_792_656_000;
+    uint256 internal constant B1N538_CLOSE_AT = 1_792_612_800;
+    uint256 internal constant B1N538_NEXT_SESSION_OPEN_AT = 1_792_675_800;
+    uint256 internal constant B1N538_CHAINLINK_PRICE_8 = 22_224_448_982;
+    uint80 internal constant B1N538_CHAINLINK_ROUND_ID = 36_893_488_147_419_103_863;
+
     event PriceFeedSet(address indexed asset, address indexed feed);
     event MarketHoursAssetUpdated(address indexed asset, bool enabled);
     event LegacyPostExpiryAssetUpdated(address indexed asset, bool enabled);
@@ -53,6 +64,7 @@ contract Oracle is Initializable, UUPSUpgradeable {
         uint256 nextSessionOpenAt,
         uint256 feedUpdatedAt
     );
+    event B1N538NvdacExpiryRecoveredAfterAgeCap(uint80 indexed roundId, uint256 price, uint256 feedUpdatedAt);
     event PriceDeviationThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
     event MaxOracleStalenessUpdated(uint256 oldStaleness, uint256 newStaleness);
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
@@ -155,14 +167,24 @@ contract Oracle is Initializable, UUPSUpgradeable {
         external
         onlyOwner
     {
+        _setCloseWindow(_asset, _expiry, _closeAt, _nextSessionOpenAt);
+    }
+
+    /// @notice Allows the configured operator to pre-commit a market session before close.
+    function setCloseWindowByOperator(address _asset, uint256 _expiry, uint256 _closeAt, uint256 _nextSessionOpenAt)
+        external
+    {
+        if (msg.sender != operator) revert OnlyOwnerOrOperator();
+        _setCloseWindow(_asset, _expiry, _closeAt, _nextSessionOpenAt);
+    }
+
+    function _setCloseWindow(address _asset, uint256 _expiry, uint256 _closeAt, uint256 _nextSessionOpenAt) internal {
         if (_asset == address(0)) revert InvalidAddress();
         if (!marketHoursAsset[_asset]) revert MarketHoursAssetNotEnabled();
-        if (block.timestamp >= _expiry) revert InvalidCloseWindow();
-        if (block.timestamp >= _closeAt) revert InvalidCloseWindow();
+        if (block.timestamp >= _expiry || block.timestamp >= _closeAt) revert InvalidCloseWindow();
         CloseWindow memory configured = closeWindow[_asset][_expiry];
         if (configured.closeAt != 0 || configured.nextSessionOpenAt != 0) revert InvalidCloseWindow();
         _validateSessionTimestamps(_expiry, _closeAt, _nextSessionOpenAt);
-
         closeWindow[_asset][_expiry] = CloseWindow(_closeAt, _nextSessionOpenAt);
         emit CloseWindowSet(_asset, _expiry, _closeAt, _nextSessionOpenAt);
     }
@@ -225,6 +247,131 @@ contract Oracle is Initializable, UUPSUpgradeable {
         _setExpiryPriceFromClose(_asset, _expiry, _price, _closeAt, _nextSessionOpenAt, true, _roundId);
     }
 
+    /// @notice Owner-only recovery when the original close window was missed entirely.
+    /// @dev Does not configure or overwrite a close window. The price remains bound to
+    ///      the first post-close round, or the last complete pre-close round proven by its successor.
+    function recoverExpiryPriceFromMissedCloseAtRound(
+        address _asset,
+        uint256 _expiry,
+        uint256 _price,
+        uint256 _closeAt,
+        uint256 _nextSessionOpenAt,
+        uint80 _roundId
+    ) external onlyOwner {
+        if (_asset == address(0)) revert InvalidAddress();
+        if (!marketHoursAsset[_asset]) revert MarketHoursAssetNotEnabled();
+        if (_hasCloseWindow(_asset, _expiry)) revert InvalidCloseWindow();
+        if (_price == 0) revert InvalidPrice();
+        if (block.timestamp < _expiry || expiryPriceSet[_asset][_expiry]) revert InvalidCloseWindow();
+        _validateSessionTimestamps(_expiry, _closeAt, _nextSessionOpenAt);
+        if (block.timestamp < _closeAt || block.timestamp - _closeAt > MAX_CLOSED_PRICE_AGE) {
+            revert InvalidCloseWindow();
+        }
+        uint256 feedUpdatedAt = _validateCanonicalCloseAtRound(_asset, _price, _expiry, _closeAt, _roundId);
+        _storeExpiryPrice(_asset, _expiry, _price);
+        emit ExpiryPriceSetFromClose(_asset, _expiry, _price, _closeAt, _nextSessionOpenAt, feedUpdatedAt);
+    }
+
+    /// @notice One-time, owner-only exception for the exact B1N-538 NVDAc expiry after the
+    ///         ordinary 96-hour recovery cap elapsed. Does not widen the general cap.
+    /// @dev Fixed asset/feed/expiry/window/price/round make this unusable for other positions.
+    function recoverB1N538NvdacExpiryPriceAfterAgeCap() external onlyOwner {
+        if (
+            block.chainid != 8453 || block.timestamp <= B1N538_CLOSE_AT + MAX_CLOSED_PRICE_AGE
+                || priceFeed[B1N538_NVDAC] != B1N538_CHAINLINK_FEED || !marketHoursAsset[B1N538_NVDAC]
+                || legacyPostExpiryAsset[B1N538_NVDAC] || _hasCloseWindow(B1N538_NVDAC, B1N538_EXPIRY)
+                || expiryPriceSet[B1N538_NVDAC][B1N538_EXPIRY] || block.timestamp < B1N538_EXPIRY
+        ) revert InvalidCloseWindow();
+
+        _validateSessionTimestamps(B1N538_EXPIRY, B1N538_CLOSE_AT, B1N538_NEXT_SESSION_OPEN_AT);
+        uint256 feedUpdatedAt = _validateCanonicalCloseAtRound(
+            B1N538_NVDAC, B1N538_CHAINLINK_PRICE_8, B1N538_EXPIRY, B1N538_CLOSE_AT, B1N538_CHAINLINK_ROUND_ID
+        );
+        _storeExpiryPrice(B1N538_NVDAC, B1N538_EXPIRY, B1N538_CHAINLINK_PRICE_8);
+        emit ExpiryPriceSetFromClose(
+            B1N538_NVDAC,
+            B1N538_EXPIRY,
+            B1N538_CHAINLINK_PRICE_8,
+            B1N538_CLOSE_AT,
+            B1N538_NEXT_SESSION_OPEN_AT,
+            feedUpdatedAt
+        );
+        emit B1N538NvdacExpiryRecoveredAfterAgeCap(B1N538_CHAINLINK_ROUND_ID, B1N538_CHAINLINK_PRICE_8, feedUpdatedAt);
+    }
+
+    /// @dev Recovery accepts the first post-close update, or the last complete pre-close
+    ///      update only when its immediate successor proves no update landed by the close.
+    function _validateCanonicalCloseAtRound(
+        address _asset,
+        uint256 _price,
+        uint256 _expiry,
+        uint256 _closeAt,
+        uint80 _roundId
+    ) internal view returns (uint256 updatedAt) {
+        address feed = priceFeed[_asset];
+        if (feed == address(0)) revert FeedNotSet();
+        if (_roundId == 0) revert InvalidCloseWindow();
+        (uint80 returnedRoundId, int256 answer, uint256 startedAt, uint256 roundUpdatedAt, uint80 answeredInRound) =
+            IChainlinkAggregator(feed).getRoundData(_roundId);
+        if (returnedRoundId != _roundId) revert InvalidCloseWindow();
+
+        if (roundUpdatedAt >= _closeAt) {
+            return _validateFinalizedCloseRound(
+                feed, _price, _expiry, _closeAt, returnedRoundId, answer, startedAt, roundUpdatedAt, answeredInRound
+            );
+        }
+
+        if (
+            roundUpdatedAt == 0 || _closeAt - roundUpdatedAt > CLOSE_CAPTURE_WINDOW || roundUpdatedAt > block.timestamp
+                || roundUpdatedAt > _expiry || answer <= 0 || answeredInRound < returnedRoundId || startedAt == 0
+                || startedAt > roundUpdatedAt
+        ) revert InvalidCloseWindow();
+        _validateConfiguredPhase(feed, returnedRoundId, roundUpdatedAt);
+        _validateExactPrice(_price, uint256(answer));
+        _validateLastPreCloseRound(feed, returnedRoundId, _closeAt);
+        return roundUpdatedAt;
+    }
+
+    function _validateLastPreCloseRound(address _feed, uint80 _roundId, uint256 _closeAt) internal view {
+        uint80 nextRoundId = _nextChainlinkRoundId(_feed, _roundId);
+        try IChainlinkAggregator(_feed).getRoundData(nextRoundId) returns (
+            uint80 returnedRoundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound
+        ) {
+            if (
+                returnedRoundId != nextRoundId || answer <= 0 || answeredInRound < returnedRoundId || startedAt == 0
+                    || updatedAt == 0 || startedAt > updatedAt || updatedAt <= _closeAt || updatedAt > block.timestamp
+            ) revert InvalidCloseWindow();
+            _validateConfiguredPhase(_feed, returnedRoundId, updatedAt);
+        } catch {
+            revert InvalidCloseWindow();
+        }
+    }
+
+    function _nextChainlinkRoundId(address _feed, uint80 _roundId) internal view returns (uint80) {
+        uint16 phaseId = uint16(uint256(_roundId) >> 64);
+        uint64 localRoundId = uint64(_roundId);
+        if (phaseId == 0) {
+            if (localRoundId == type(uint64).max) revert InvalidCloseWindow();
+            return _roundId + 1;
+        }
+        ChainlinkPhase memory configured = chainlinkPhase[_feed][phaseId];
+        if (
+            configured.firstRoundId == 0 || localRoundId < configured.firstRoundId
+                || (configured.lastRoundId != 0 && localRoundId > configured.lastRoundId)
+        ) revert InvalidCloseWindow();
+        if (configured.lastRoundId == 0) {
+            if (localRoundId == type(uint64).max) revert InvalidCloseWindow();
+            return uint80((uint256(phaseId) << 64) | (localRoundId + 1));
+        }
+        if (localRoundId < configured.lastRoundId) {
+            return uint80((uint256(phaseId) << 64) | (localRoundId + 1));
+        }
+        if (phaseId == type(uint16).max) revert InvalidCloseWindow();
+        ChainlinkPhase memory next = chainlinkPhase[_feed][phaseId + 1];
+        if (next.firstRoundId == 0) revert InvalidCloseWindow();
+        return uint80((uint256(phaseId + 1) << 64) | next.firstRoundId);
+    }
+
     function _setExpiryPriceFromClose(
         address _asset,
         uint256 _expiry,
@@ -242,7 +389,7 @@ contract Oracle is Initializable, UUPSUpgradeable {
         _validateConfiguredCloseWindow(_asset, _expiry, _closeAt, _nextSessionOpenAt);
 
         uint256 feedUpdatedAt = _useRound
-            ? _validateFinalizedCloseAtRound(_asset, _price, _expiry, _closeAt, _roundId)
+            ? _validateCanonicalCloseAtRound(_asset, _price, _expiry, _closeAt, _roundId)
             : _validateFinalizedClose(_asset, _price, _expiry, _closeAt);
         _storeExpiryPrice(_asset, _expiry, _price);
 
@@ -406,25 +553,6 @@ contract Oracle is Initializable, UUPSUpgradeable {
 
         (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) =
             IChainlinkAggregator(feed).latestRoundData();
-        return _validateFinalizedCloseRound(
-            feed, _price, _expiry, _closeAt, roundId, answer, startedAt, updatedAt, answeredInRound
-        );
-    }
-
-    function _validateFinalizedCloseAtRound(
-        address _asset,
-        uint256 _price,
-        uint256 _expiry,
-        uint256 _closeAt,
-        uint80 _roundId
-    ) internal view returns (uint256 feedUpdatedAt) {
-        address feed = priceFeed[_asset];
-        if (feed == address(0)) revert FeedNotSet();
-        if (_roundId == 0) revert InvalidCloseWindow();
-
-        (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) =
-            IChainlinkAggregator(feed).getRoundData(_roundId);
-        if (roundId != _roundId) revert InvalidCloseWindow();
         return _validateFinalizedCloseRound(
             feed, _price, _expiry, _closeAt, roundId, answer, startedAt, updatedAt, answeredInRound
         );
@@ -642,7 +770,248 @@ contract Oracle is Initializable, UUPSUpgradeable {
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[37] private __gap;
+    struct NvdacTwapConfig {
+        address asset;
+        address pool;
+        address poolFactory;
+        address usdc;
+        int24 tickSpacing;
+        uint32 maxSettlementDelay;
+        uint128 minHarmonicLiquidity;
+        uint32 usdcFeedMaxAge;
+        uint32 referenceMaxAge;
+        uint16 referenceDeviationBps;
+        bool enabled;
+    }
+
+    NvdacTwapConfig public nvdacTwapConfig;
+
+    uint256[32] private __gap;
+
+    address private constant NVDAC = 0xb20000000000000000000078ee7ce2fE4908108C;
+    address private constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+    address private constant NVDAC_TWAP_POOL = 0xF668e21993f0ACd7ab00BB1cFbAeD0df28A3C8EC;
+    address private constant NVDAC_TWAP_FACTORY = 0x9CB220581b91b0C83223012FE69688b92aD07a76;
+    address private constant NVDAC_USDC_USD_FEED = 0x7e860098F58bBFC8648a4311b374B1D669a2bc6B;
+    address private constant NVDAC_REFERENCE_FEED = 0x04689a41629776563E6822F76f2e57D148d28513;
+    uint32 public constant NVDAC_TWAP_WINDOW = 3600;
+    uint32 public constant NVDAC_MAX_SETTLEMENT_DELAY = 1 days;
+
+    event NvdacTwapConfigured(
+        address indexed pool,
+        address indexed factory,
+        uint32 maxDelay,
+        uint128 minLiquidity,
+        uint32 usdcFeedMaxAge,
+        uint32 referenceMaxAge,
+        uint16 referenceDeviationBps,
+        bool enabled
+    );
+    event NvdacTwapEnabled(bool enabled);
+    event NvdacExpiryPriceSetFromTwap(
+        address indexed asset,
+        uint256 indexed expiry,
+        uint256 price,
+        address pool,
+        uint256 windowStart,
+        uint256 windowEnd,
+        int24 meanTick,
+        uint80 feedRound,
+        int256 feedAnswer,
+        uint256 feedUpdatedAt
+    );
+
+    error InvalidNvdacTwapConfig();
+    error InvalidTwapObservation();
+
+    function _validateNvdacPool(NvdacTwapConfig memory config) private view {
+        INvdacTwapPool pool = INvdacTwapPool(config.pool);
+        if (
+            config.pool.code.length == 0 || config.poolFactory.code.length == 0 || pool.factory() != config.poolFactory
+                || pool.token0() != config.usdc || pool.token1() != NVDAC || pool.tickSpacing() != config.tickSpacing
+                || INvdacFactory(config.poolFactory).getPool(config.usdc, NVDAC, config.tickSpacing) != config.pool
+        ) revert InvalidNvdacTwapConfig();
+    }
+
+    /// @notice One-time configuration for the dedicated NVDAc expiry TWAP route.
+    function configureNvdacTwap(
+        address _pool,
+        address _factory,
+        address _usdc,
+        uint32 _maxSettlementDelay,
+        uint128 _minHarmonicLiquidity,
+        uint32 _usdcFeedMaxAge,
+        uint32 _referenceMaxAge,
+        uint16 _referenceDeviationBps,
+        bool _enabled
+    ) external onlyOwner {
+        if (nvdacTwapConfig.pool != address(0)) revert InvalidNvdacTwapConfig();
+        if (
+            _pool != NVDAC_TWAP_POOL || _factory != NVDAC_TWAP_FACTORY || _usdc != USDC || _maxSettlementDelay == 0
+                || _maxSettlementDelay > NVDAC_MAX_SETTLEMENT_DELAY || _minHarmonicLiquidity == 0
+                || _usdcFeedMaxAge == 0 || _referenceMaxAge == 0 || _referenceDeviationBps == 0
+                || _referenceDeviationBps > 10_000 || _pool.code.length == 0 || _factory.code.length == 0
+                || NVDAC_USDC_USD_FEED.code.length == 0 || NVDAC_REFERENCE_FEED.code.length == 0
+        ) revert InvalidNvdacTwapConfig();
+        if (
+            INvdacToken(_usdc).decimals() != 6 || INvdacFeed(NVDAC_USDC_USD_FEED).decimals() != 8
+                || INvdacFeed(NVDAC_REFERENCE_FEED).decimals() != 8
+        ) revert InvalidNvdacTwapConfig();
+        NvdacTwapConfig memory config = NvdacTwapConfig(
+            NVDAC,
+            _pool,
+            _factory,
+            _usdc,
+            10,
+            _maxSettlementDelay,
+            _minHarmonicLiquidity,
+            _usdcFeedMaxAge,
+            _referenceMaxAge,
+            _referenceDeviationBps,
+            _enabled
+        );
+        _validateNvdacPool(config);
+        nvdacTwapConfig = config;
+        emit NvdacTwapConfigured(
+            _pool,
+            _factory,
+            _maxSettlementDelay,
+            _minHarmonicLiquidity,
+            _usdcFeedMaxAge,
+            _referenceMaxAge,
+            _referenceDeviationBps,
+            _enabled
+        );
+    }
+
+    /// @notice Emergency switch for the configured NVDAc TWAP settlement route.
+    function setNvdacTwapEnabled(bool _enabled) external onlyOwner {
+        if (nvdacTwapConfig.pool == address(0)) revert InvalidNvdacTwapConfig();
+        nvdacTwapConfig.enabled = _enabled;
+        emit NvdacTwapEnabled(_enabled);
+    }
+
+    /// @notice Set NVDAc expiry price from the fixed one-hour pool TWAP ending at expiry.
+    function setExpiryPriceFromNvdacTwap(address _asset, uint256 _expiry) external {
+        _requireOwnerOrOperator();
+        NvdacTwapConfig memory config = nvdacTwapConfig;
+        if (_asset != NVDAC || config.asset != NVDAC || !config.enabled) revert InvalidNvdacTwapConfig();
+        if (block.timestamp < _expiry) revert ExpiryNotReached();
+        if (_expiry < NVDAC_TWAP_WINDOW) revert InvalidNvdacTwapConfig();
+        if (expiryPriceSet[_asset][_expiry]) revert PriceAlreadySet();
+        uint256 delay = block.timestamp - _expiry;
+        if (delay > config.maxSettlementDelay) revert InvalidNvdacTwapConfig();
+
+        if (delay > type(uint32).max - NVDAC_TWAP_WINDOW) revert InvalidNvdacTwapConfig();
+        uint32 endAgo = uint32(delay);
+        uint32 startAgo = endAgo + NVDAC_TWAP_WINDOW;
+        _validateNvdacPool(config);
+        (,, uint16 observationIndex, uint16 observationCardinality,,) = INvdacTwapPool(config.pool).slot0();
+        if (observationCardinality < 2 || observationIndex >= observationCardinality) revert InvalidTwapObservation();
+        (uint32 observationTime,,, bool initialized) = INvdacTwapPool(config.pool).observations(observationIndex);
+        if (!initialized || observationTime > block.timestamp) revert InvalidTwapObservation();
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = startAgo;
+        secondsAgos[1] = endAgo;
+        (int56[] memory ticks, uint160[] memory secondsPerLiquidity) = INvdacTwapPool(config.pool).observe(secondsAgos);
+        if (ticks.length != 2 || secondsPerLiquidity.length != 2) revert InvalidTwapObservation();
+        int56 delta = ticks[1] - ticks[0];
+        int56 window = int56(uint56(NVDAC_TWAP_WINDOW));
+        int56 mean = delta / window;
+        if (delta < 0 && delta % window != 0) mean--;
+        if (mean < TickMath.MIN_TICK || mean > TickMath.MAX_TICK) revert InvalidTwapObservation();
+        uint160 liquidityDelta;
+        unchecked {
+            liquidityDelta = secondsPerLiquidity[1] - secondsPerLiquidity[0];
+        }
+        if (liquidityDelta == 0) revert InvalidTwapObservation();
+        uint256 harmonicLiquidity = (uint256(NVDAC_TWAP_WINDOW) << 128) / liquidityDelta;
+        if (harmonicLiquidity < config.minHarmonicLiquidity || INvdacTwapPool(config.pool).liquidity() == 0) {
+            revert InvalidTwapObservation();
+        }
+
+        (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) =
+            INvdacFeed(NVDAC_USDC_USD_FEED).latestRoundData();
+        if (
+            answer <= 0 || uint256(answer) > type(uint128).max || roundId == 0 || answeredInRound < roundId
+                || startedAt == 0 || startedAt > updatedAt || updatedAt > _expiry
+                || _expiry - updatedAt > config.usdcFeedMaxAge
+        ) revert InvalidPrice();
+        uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(int24(mean));
+        uint256 ratioX128 = Math.mulDiv(sqrtPriceX96, sqrtPriceX96, uint256(1) << 64);
+        uint256 price = Math.mulDiv(uint256(answer), uint256(100) << 128, ratioX128);
+        // Both approved feeds and the stored expiry price use 8 decimals.
+        if (price == 0) revert InvalidPrice();
+        _validateNvdacReference(price, _expiry, config.referenceMaxAge, config.referenceDeviationBps);
+        _storeExpiryPrice(_asset, _expiry, price);
+        emit NvdacExpiryPriceSetFromTwap(
+            _asset,
+            _expiry,
+            price,
+            config.pool,
+            _expiry - NVDAC_TWAP_WINDOW,
+            _expiry,
+            int24(mean),
+            roundId,
+            answer,
+            updatedAt
+        );
+    }
+
+    function _validateNvdacReference(uint256 _price, uint256 _expiry, uint32 _maxAge, uint16 _deviationBps)
+        private
+        view
+    {
+        try INvdacFeed(NVDAC_REFERENCE_FEED).latestRoundData() returns (
+            uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound
+        ) {
+            if (answer <= 0) revert InvalidPrice();
+            if (
+                roundId == 0 || answeredInRound < roundId || startedAt == 0 || startedAt > updatedAt
+                    || updatedAt > block.timestamp || updatedAt > _expiry
+            ) revert InvalidPrice();
+            if (_expiry - updatedAt > _maxAge) {
+                if (!_isWeekend(_expiry)) revert InvalidPrice();
+                return;
+            }
+            uint256 referencePrice = uint256(answer);
+            uint256 diff = _price > referencePrice ? _price - referencePrice : referencePrice - _price;
+            uint256 deviationBps = Math.mulDiv(diff, 10_000, referencePrice, Math.Rounding.Ceil);
+            if (deviationBps > _deviationBps) revert PriceDeviationTooHigh(_price, referencePrice, deviationBps);
+        } catch {
+            if (!_isWeekend(_expiry)) revert InvalidPrice();
+        }
+    }
+
+    function _isWeekend(uint256 _timestamp) private pure returns (bool) {
+        uint256 day = (_timestamp / 1 days + 4) % 7;
+        return day == 0 || day == 6;
+    }
+}
+
+interface INvdacTwapPool {
+    function factory() external view returns (address);
+    function token0() external view returns (address);
+    function token1() external view returns (address);
+    function tickSpacing() external view returns (int24);
+    function fee() external view returns (uint24);
+    function liquidity() external view returns (uint128);
+    function slot0() external view returns (uint160, int24, uint16, uint16, uint16, bool);
+    function observations(uint256 index) external view returns (uint32, int56, uint160, bool);
+    function observe(uint32[] calldata secondsAgos) external view returns (int56[] memory, uint160[] memory);
+}
+
+interface INvdacFactory {
+    function getPool(address, address, int24) external view returns (address);
+}
+
+interface INvdacToken {
+    function decimals() external view returns (uint8);
+}
+
+interface INvdacFeed {
+    function decimals() external view returns (uint8);
+    function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80);
 }
 
 interface IChainlinkProxy {

@@ -134,6 +134,7 @@ contract ForkE2E is Test {
         whitelist.whitelistProduct(WETH, USDC, WETH, false);
 
         oracle.setPriceFeed(WETH, CHAINLINK_ETH_USD);
+        oracle.setLegacyPostExpiryAsset(WETH, true);
         oracle.setPriceDeviationThreshold(1000);
         oracle.setMaxOracleStaleness(3600);
 

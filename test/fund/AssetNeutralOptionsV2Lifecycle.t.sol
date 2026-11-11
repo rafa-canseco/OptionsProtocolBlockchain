@@ -123,6 +123,7 @@ contract AssetNeutralOptionsV2LifecycleTest is Test {
         settler.setSwapRouter(address(router));
         settler.setSwapFeeTier(500);
         oracle.setPriceFeed(address(lbtc), address(feed));
+        oracle.setLegacyPostExpiryAsset(address(lbtc), true);
         oracle.setMaxOracleStaleness(1_200);
         whitelist.whitelistUnderlying(address(lbtc));
         whitelist.whitelistCollateral(address(usdc));

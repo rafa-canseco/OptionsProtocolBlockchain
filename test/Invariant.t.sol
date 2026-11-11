@@ -391,6 +391,7 @@ contract BatchRedeemInvariantTest is Test {
         addressBook.setBatchSettler(address(settler));
 
         settler.setWhitelistedMM(mm, true);
+        oracle.setLegacyPostExpiryAsset(address(weth), true);
 
         whitelist.whitelistUnderlying(address(weth));
         whitelist.whitelistCollateral(address(usdc));
