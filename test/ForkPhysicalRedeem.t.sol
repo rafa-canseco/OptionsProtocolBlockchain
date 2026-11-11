@@ -150,6 +150,7 @@ contract ForkPhysicalRedeemTest is Test {
         settler.setSwapFeeTier(3000);
 
         oracle.setPriceFeed(WETH, CHAINLINK_ETH_USD);
+        oracle.setLegacyPostExpiryAsset(WETH, true);
 
         whitelist.whitelistUnderlying(WETH);
         whitelist.whitelistCollateral(USDC);
